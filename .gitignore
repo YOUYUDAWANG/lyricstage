@@ -1,0 +1,11 @@
+# Xcode / 构建产物(工程由 xcodegen 从 project.yml 生成,不入库)
+BiliMusic.xcodeproj/
+DerivedData/
+*.xcuserstate
+xcuserdata/
+
+# macOS
+.DS_Store
+
+# 测试下载的音频
+scripts/*.m4a
