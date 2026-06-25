@@ -10,3 +10,9 @@ xcuserdata/
 
 # 测试下载的音频
 scripts/*.m4a
+
+# 本地签名配置(各自的 Team ID,不入库;模板见 Local.xcconfig.example)
+Local.xcconfig
+
+# Claude Code 本地代码索引缓存(机器相关,可再生)
+.claude/index.json
