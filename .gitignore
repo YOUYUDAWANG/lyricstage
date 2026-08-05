@@ -23,3 +23,6 @@ Local.xcconfig
 .ccg/
 .codegraph/
 .planning/research/.cache/
+
+# Project Cairn 外部原始输入（可能含敏感材料）
+cairn/Reference/
