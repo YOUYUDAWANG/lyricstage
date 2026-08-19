@@ -26,3 +26,16 @@ Local.xcconfig
 
 # Project Cairn 外部原始输入（可能含敏感材料）
 cairn/Reference/
+
+# 本地工具与运行缓存
+.superpowers/
+.wrangler/
+**/.wrangler/
+**/__pycache__/
+**/node_modules/
+*.pyc
+.pytest_cache/
+.env
+.env.*
+.dev.vars
+**/.dev.vars
