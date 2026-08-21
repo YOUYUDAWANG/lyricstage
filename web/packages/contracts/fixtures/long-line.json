@@ -1,0 +1,29 @@
+{
+  "version": "lyric-document-v0",
+  "recordingID": "fixture:long-line",
+  "durationMs": 22000,
+  "language": "zh-Hans",
+  "lines": [
+    {
+      "lineIndex": 0,
+      "fromMs": 0,
+      "toMs": 7800,
+      "text": "如果这座城市把所有微弱的回声都藏进夜色，我们就沿着尚未熄灭的窗灯继续向前",
+      "voiceRole": "lead"
+    },
+    {
+      "lineIndex": 1,
+      "fromMs": 7800,
+      "toMs": 15000,
+      "text": "Every unfinished sentence becomes a constellation when nobody forces it into a smaller box.",
+      "voiceRole": "lead"
+    },
+    {
+      "lineIndex": 2,
+      "fromMs": 15000,
+      "toMs": 22000,
+      "text": "長い言葉も切り捨てずに、呼吸できる場所を画面の中につくっていく",
+      "voiceRole": "lead"
+    }
+  ]
+}

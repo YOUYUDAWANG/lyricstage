@@ -1,0 +1,40 @@
+{
+  "name": "lyricstage-web",
+  "version": "0.2.1",
+  "private": true,
+  "license": "AGPL-3.0-only",
+  "type": "module",
+  "engines": {
+    "node": ">=22.13.0"
+  },
+  "scripts": {
+    "dev": "vite --host 127.0.0.1",
+    "dev:performance": "vite --config performance.vite.config.ts --host 127.0.0.1",
+    "generate:contracts": "node scripts/generate-contract-validators.mjs",
+    "build": "npm run generate:contracts && tsc -p tsconfig.json && vite build",
+    "build:performance": "tsc -p tsconfig.json && vite build --config performance.vite.config.ts",
+    "build:extension": "npm run generate:contracts && tsc -p tsconfig.json && vite build --config extension.vite.config.ts && vite build --config extension-content.vite.config.ts && npm run verify:extension-csp",
+    "build:all": "npm run build && npm run build:extension",
+    "verify:extension-csp": "node scripts/verify-extension-csp.mjs",
+    "test": "vitest run",
+    "typecheck": "tsc -p tsconfig.json"
+  },
+  "dependencies": {
+    "ajv": "8.17.1",
+    "pixi.js": "8.20.0",
+    "react": "19.2.6",
+    "react-dom": "19.2.6"
+  },
+  "devDependencies": {
+    "@openai/sites-vite-plugin": "0.1.0",
+    "@theatre/core": "0.7.2",
+    "@theatre/studio": "0.7.2",
+    "@types/node": "22.19.19",
+    "@types/react": "19.2.14",
+    "@types/react-dom": "19.2.3",
+    "@vitejs/plugin-react": "6.0.2",
+    "typescript": "5.9.3",
+    "vite": "8.0.13",
+    "vitest": "4.1.0"
+  }
+}

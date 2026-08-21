@@ -1,0 +1,11 @@
+{
+  "name": "lyricstage-fullscreen-director",
+  "version": "1.3.4",
+  "private": true,
+  "license": "AGPL-3.0-only",
+  "type": "module",
+  "scripts": {
+    "start": "node src/server.js",
+    "test": "node --test"
+  }
+}

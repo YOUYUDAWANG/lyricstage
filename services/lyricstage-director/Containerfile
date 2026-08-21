@@ -1,0 +1,14 @@
+FROM docker.io/library/node:22.14-alpine
+
+WORKDIR /app
+COPY package.json ./
+COPY src ./src
+COPY skills ./skills
+
+ENV HOST=0.0.0.0 \
+    PORT=8787 \
+    CACHE_DIR=/var/lib/lyricstage-director/cache
+
+USER node
+EXPOSE 8787
+CMD ["node", "src/server.js"]

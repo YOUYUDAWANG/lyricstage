@@ -1,0 +1,16 @@
+{
+  "version": "lyric-document-v0",
+  "recordingID": "fixture:repeated-hook",
+  "durationMs": 36000,
+  "language": "zh-Hans",
+  "lines": [
+    { "lineIndex": 0, "fromMs": 0, "toMs": 5200, "text": "把光交给下一站", "voiceRole": "lead" },
+    { "lineIndex": 1, "fromMs": 5200, "toMs": 9800, "text": "让轨道穿过整个夜晚", "voiceRole": "lead" },
+    { "lineIndex": 2, "fromMs": 9800, "toMs": 14200, "text": "我们仍在这里", "voiceRole": "choir" },
+    { "lineIndex": 3, "fromMs": 14200, "toMs": 19000, "text": "我们仍在这里", "voiceRole": "choir" },
+    { "lineIndex": 4, "fromMs": 19000, "toMs": 23800, "text": "把回声留在不同的方向", "voiceRole": "lead" },
+    { "lineIndex": 5, "fromMs": 23800, "toMs": 28600, "text": "我们仍在这里", "voiceRole": "choir" },
+    { "lineIndex": 6, "fromMs": 28600, "toMs": 33000, "text": "我们仍在这里", "voiceRole": "choir" },
+    { "lineIndex": 7, "fromMs": 33000, "toMs": 36000, "text": "直到画面安静下来", "voiceRole": "lead" }
+  ]
+}

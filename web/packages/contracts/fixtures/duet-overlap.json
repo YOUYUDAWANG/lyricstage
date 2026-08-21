@@ -1,0 +1,13 @@
+{
+  "version": "lyric-document-v0",
+  "recordingID": "fixture:duet-overlap",
+  "durationMs": 25000,
+  "language": "mul",
+  "lines": [
+    { "lineIndex": 0, "fromMs": 0, "toMs": 6200, "text": "左の窓から夜を見る", "voiceRole": "duetA", "layerID": "A" },
+    { "lineIndex": 1, "fromMs": 6200, "toMs": 12600, "text": "I answer from the other side", "voiceRole": "duetB", "layerID": "B" },
+    { "lineIndex": 2, "fromMs": 12600, "toMs": 19000, "text": "同じ瞬間を違う言葉で", "voiceRole": "duetA", "layerID": "A", "overlapGroup": "bridge" },
+    { "lineIndex": 3, "fromMs": 12600, "toMs": 19000, "text": "Two voices share one horizon", "voiceRole": "duetB", "layerID": "B", "overlapGroup": "bridge" },
+    { "lineIndex": 4, "fromMs": 19000, "toMs": 25000, "text": "そして中央で重なる", "voiceRole": "choir" }
+  ]
+}

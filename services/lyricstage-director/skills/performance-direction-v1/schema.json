@@ -1,0 +1,102 @@
+{
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["concept", "motif", "intensityArc", "world", "sections", "directives", "effects"],
+  "properties": {
+    "concept": { "type": "string" },
+    "motif": { "type": "string" },
+    "intensityArc": { "type": "string" },
+    "world": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["spatialMode", "motionLaw", "artworkRole", "texture", "depth", "fluidity", "elasticity", "atmosphere", "rationale"],
+      "properties": {
+        "spatialMode": { "type": "string", "enum": ["anchored", "panoramic", "cinematic", "orbital", "splitStage", "chorusWall"] },
+        "motionLaw": { "type": "string", "enum": ["drift", "flow", "pulse", "fall", "orbit", "converge", "suspend", "fracture"] },
+        "artworkRole": { "type": "string", "enum": ["anchor", "portal", "memory", "counterpoint", "atmosphere"] },
+        "texture": { "type": "string", "enum": ["silk", "ink", "mist", "glass", "paper", "light"] },
+        "depth": { "type": "number", "minimum": 0, "maximum": 1 },
+        "fluidity": { "type": "number", "minimum": 0, "maximum": 1 },
+        "elasticity": { "type": "number", "minimum": 0, "maximum": 1 },
+        "atmosphere": { "type": "number", "minimum": 0, "maximum": 1 },
+        "rationale": { "type": "string" }
+      }
+    },
+    "sections": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["fromLineIndex", "toLineIndex", "artDirection", "layout", "typography", "paletteIndex", "intensity"],
+        "properties": {
+          "fromLineIndex": { "type": "integer" },
+          "toLineIndex": { "type": "integer" },
+          "artDirection": { "type": "string", "enum": ["editorialKinetic", "neonRail", "paperCut", "liquidMemory", "monoImpact", "celestialGrid"] },
+          "layout": { "type": "string", "enum": ["monument", "editorialSplit", "railLeading", "railTrailing", "duetDivide"] },
+          "typography": { "type": "string", "enum": ["jpGothic", "jpMincho", "cjkGrotesk", "latinDisplay", "monoEditorial"] },
+          "paletteIndex": { "type": "integer", "minimum": 0, "maximum": 11 },
+          "intensity": { "type": "number", "minimum": 0, "maximum": 1 }
+        }
+      }
+    },
+    "directives": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["lineIndex", "behavior", "alignment", "direction", "intensity", "fontScale", "glyphStagger", "paletteRole"],
+        "properties": {
+          "lineIndex": { "type": "integer" },
+          "behavior": { "type": "string", "enum": ["settle", "assemble", "gravityDrop", "ripple", "stretch", "echo", "drift", "focus", "converge"] },
+          "alignment": { "type": "string", "enum": ["leading", "center", "trailing"] },
+          "direction": { "type": "integer", "enum": [-1, 1] },
+          "intensity": { "type": "number", "minimum": 0.35, "maximum": 1.25 },
+          "fontScale": { "type": "number", "minimum": 0.78, "maximum": 1.22 },
+          "glyphStagger": { "type": "number", "minimum": 0, "maximum": 0.14 },
+          "paletteRole": { "type": "string", "enum": ["primary", "accent", "warm", "secondary"] }
+        }
+      }
+    },
+    "effects": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["sectionIndex", "cardID", "presentation", "primary", "support", "evidence"],
+        "properties": {
+          "sectionIndex": { "type": "integer" },
+          "cardID": { "type": "string", "enum": ["custom", "distance-convergence", "chorus-memory", "contrast-cut", "silence-aperture", "duet-mirror", "chorus-expansion", "question-suspension", "gravity-resolution", "density-lift", "field-release", "motif-recall", "final-dissolution", "motion-ribbon", "contrast-prism", "distance-orbit", "chorus-trail", "final-bloom"] },
+          "presentation": { "type": "string", "enum": ["reading", "section", "hero", "duet", "aperture"] },
+          "primary": { "$ref": "#/$defs/primitiveUse" },
+          "support": { "type": "array", "maxItems": 2, "items": { "$ref": "#/$defs/primitiveUse" } },
+          "evidence": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["songMotif", "sectionTriggers", "lineIndices", "rationale", "confidence"],
+            "properties": {
+              "songMotif": { "type": "string" },
+              "sectionTriggers": { "type": "array", "minItems": 1, "uniqueItems": true, "items": { "type": "string", "enum": ["repeated_hook", "section_boundary", "silence_gap", "duet_overlap", "voice_handoff", "density_lift", "density_release", "semantic_distance", "semantic_motion", "semantic_contrast", "question_suspension", "collective_chorus", "final_resolution"] } },
+              "lineIndices": { "type": "array", "minItems": 1, "uniqueItems": true, "items": { "type": "integer" } },
+              "rationale": { "type": "string" },
+              "confidence": { "type": "number", "minimum": 0, "maximum": 1 }
+            }
+          }
+        }
+      }
+    }
+  },
+  "$defs": {
+    "primitiveUse": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["primitive", "intensity"],
+      "properties": {
+        "primitive": { "type": "string", "enum": ["field.drift", "field.aperture", "field.ribbon", "field.prism", "field.rain", "geometry.converge", "geometry.expand", "geometry.mirror", "geometry.cut", "geometry.suspend", "geometry.orbit", "memory.echo", "memory.trail", "density.lift", "density.release", "motif.recall", "cover.island", "cover.portal", "transition.bloom", "transition.dissolve"] },
+        "intensity": { "type": "number", "minimum": 0, "maximum": 1 },
+        "direction": { "type": "integer", "enum": [-1, 1] },
+        "scale": { "type": "number", "minimum": 0.4, "maximum": 1.2 }
+      }
+    }
+  }
+}

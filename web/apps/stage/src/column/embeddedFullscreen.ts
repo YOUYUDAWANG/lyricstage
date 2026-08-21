@@ -1,0 +1,25 @@
+/** Pure helpers for embedded fullscreen gating (gesture path lives in App). */
+
+export const canEnterEmbeddedFullscreen = (hasMatchingLyrics: boolean): boolean =>
+  hasMatchingLyrics;
+
+export type EmbeddedFullscreenSurface = "hidden" | "stage" | "transition";
+
+export const embeddedFullscreenSurface = (
+  presentation: "column" | "fullscreen",
+  hasMatchingLyrics: boolean,
+): EmbeddedFullscreenSurface => {
+  if (presentation !== "fullscreen") return "hidden";
+  return hasMatchingLyrics ? "stage" : "transition";
+};
+
+export const activeScrollKey = (activeIndices: Iterable<number>): string =>
+  Array.from(activeIndices)
+    .sort((left, right) => left - right)
+    .join(",");
+
+export const shouldScrollForActiveChange = (
+  previousKey: string,
+  nextKey: string,
+  frozen: boolean,
+): boolean => !frozen && nextKey !== "" && nextKey !== previousKey;

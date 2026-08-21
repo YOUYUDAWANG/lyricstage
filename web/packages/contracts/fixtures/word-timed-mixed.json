@@ -1,0 +1,47 @@
+{
+  "version": "lyric-document-v0",
+  "recordingID": "fixture:word-timed-mixed",
+  "durationMs": 24000,
+  "language": "mul",
+  "lines": [
+    {
+      "lineIndex": 0,
+      "fromMs": 1000,
+      "toMs": 6200,
+      "text": "光へ / trace the morning ✦",
+      "voiceRole": "lead",
+      "words": [
+        { "wordIndex": 0, "fromMs": 1000, "toMs": 2200, "text": "光へ" },
+        { "wordIndex": 1, "fromMs": 2500, "toMs": 3300, "text": "trace" },
+        { "wordIndex": 2, "fromMs": 3400, "toMs": 4100, "text": "the" },
+        { "wordIndex": 3, "fromMs": 4200, "toMs": 5400, "text": "morning" },
+        { "wordIndex": 4, "fromMs": 5500, "toMs": 6100, "text": "✦" }
+      ]
+    },
+    {
+      "lineIndex": 1,
+      "fromMs": 6200,
+      "toMs": 11800,
+      "text": "把未完成的颜色留在风里",
+      "voiceRole": "lead",
+      "words": [
+        { "wordIndex": 0, "fromMs": 6200, "toMs": 7400, "text": "把未完成的" },
+        { "wordIndex": 1, "fromMs": 7600, "toMs": 9000, "text": "颜色" },
+        { "wordIndex": 2, "fromMs": 9300, "toMs": 11200, "text": "留在风里" }
+      ]
+    },
+    {
+      "lineIndex": 2,
+      "fromMs": 11800,
+      "toMs": 17800,
+      "text": "まだ知らない場所へ行こう",
+      "voiceRole": "lead",
+      "words": [
+        { "wordIndex": 0, "fromMs": 11800, "toMs": 13300, "text": "まだ知らない" },
+        { "wordIndex": 1, "fromMs": 13700, "toMs": 15100, "text": "場所へ" },
+        { "wordIndex": 2, "fromMs": 15500, "toMs": 17300, "text": "行こう" }
+      ]
+    },
+    { "lineIndex": 3, "fromMs": 17800, "toMs": 24000, "text": "No map, just a pulse and an open sky.", "voiceRole": "lead" }
+  ]
+}

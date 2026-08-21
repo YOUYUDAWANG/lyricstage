@@ -1,0 +1,17 @@
+{
+  "sectionID": "section:2:8-11",
+  "cardID": "chorus-memory",
+  "presentation": "hero",
+  "primary": { "primitive": "memory.echo", "intensity": 0.86, "direction": 1 },
+  "support": [
+    { "primitive": "cover.island", "intensity": 0.72 },
+    { "primitive": "motif.recall", "intensity": 0.48 }
+  ],
+  "evidence": {
+    "songMotif": "paired margins remember and reunite",
+    "sectionTriggers": ["repeated_hook", "section_boundary"],
+    "lineIndices": [8, 9, 10, 11],
+    "rationale": "The second verified hook develops the established memory motif without changing visual worlds.",
+    "confidence": 0.9
+  }
+}

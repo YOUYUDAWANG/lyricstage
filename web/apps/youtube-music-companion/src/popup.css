@@ -1,0 +1,28 @@
+:root {
+  color: #f8f4ee;
+  background: #09090b;
+  font-family: "Avenir Next", "Hiragino Sans", "PingFang SC", system-ui, sans-serif;
+}
+
+* { box-sizing: border-box; }
+body { width: 320px; margin: 0; background: #09090b; }
+main { display: grid; gap: 12px; padding: 18px; }
+header { display: flex; align-items: center; justify-content: space-between; }
+.mark { color: #09090b; background: #f8f4ee; padding: 6px 8px; font-size: 12px; font-weight: 900; }
+header div { display: flex; align-items: center; gap: 7px; color: rgba(248,244,238,.55); font-size: 10px; }
+header b { width: 7px; height: 7px; border-radius: 50%; background: #777; }
+header b[data-connected] { background: #5de4a8; box-shadow: 0 0 14px rgba(93,228,168,.6); }
+section { min-height: 82px; border-block: 1px solid rgba(248,244,238,.15); padding: 17px 0; }
+section p { overflow: hidden; margin: 0 0 5px; font-size: 20px; font-weight: 750; text-overflow: ellipsis; white-space: nowrap; }
+section span { color: rgba(248,244,238,.5); font-size: 11px; }
+button { min-height: 42px; border: 1px solid rgba(248,244,238,.45); color: #f8f4ee; background: transparent; font: inherit; font-size: 12px; cursor: pointer; }
+button.primary { border-color: #ff4d7d; color: #09090b; background: #ff4d7d; font-weight: 800; }
+.lyrics-settings { border-top: 1px solid rgba(248,244,238,.12); padding-top: 10px; }
+.lyrics-settings summary { color: rgba(248,244,238,.62); font-size: 10px; cursor: pointer; }
+.lyrics-settings[open] { display: grid; gap: 9px; }
+.lyrics-settings label { display: grid; gap: 5px; color: rgba(248,244,238,.55); font-size: 9px; }
+.lyrics-settings input { width: 100%; min-height: 34px; border: 1px solid rgba(248,244,238,.22); border-radius: 0; padding: 0 9px; color: #f8f4ee; background: rgba(255,255,255,.04); font: inherit; font-size: 10px; }
+.settings-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 7px; }
+.settings-actions button { min-height: 34px; font-size: 10px; }
+.lyrics-settings small { color: rgba(248,244,238,.38); font-size: 9px; line-height: 1.45; }
+footer { margin-top: 2px; color: rgba(248,244,238,.34); font-size: 9px; line-height: 1.5; text-align: center; }

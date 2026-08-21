@@ -1,0 +1,875 @@
+(() => {
+  const protocolVersion = "youtube-music-companion-v0";
+  const LYRICS_PAGE_TYPE = "MUSIC_PAGE_TYPE_TRACK_LYRICS";
+  const CONFIRMED_TAB_ATTR = "data-lyricstage-confirmed-lyrics-tab";
+  const CONTENT_SCRIPT_STOP_EVENT = "lyricstage-content-script-stop-v2";
+  const STAGE_HOST_ID = "lyricstage-enhanced-lyrics-v2";
+  const LEGACY_STAGE_HOST_ID = "lyricstage-enhanced-lyrics";
+  document.documentElement.dispatchEvent(new Event(CONTENT_SCRIPT_STOP_EVENT));
+  const mediaEvents = [
+    "play",
+    "pause",
+    "playing",
+    "waiting",
+    "seeking",
+    "seeked",
+    "durationchange",
+    "ratechange",
+    "ended",
+  ];
+  let sequence = 0;
+  let observedMedia = null;
+  let playbackClockAnchor = null;
+  let queued = false;
+  let stopped = false;
+  let pendingSend = null;
+  let heartbeat = null;
+  let observer = null;
+  let inPageStageHost = null;
+  let stageUIDispose = null;
+  let stageReadyTimeout = null;
+  let lastInteractedTab = null;
+  let activeNativeRenderer = null;
+  let stageMountGeneration = 0;
+  let stageMountState = "idle";
+  let stageMountFailure = "";
+  let sourceWasAvailable = false;
+  let sponsorBlockControlHost = null;
+  let sponsorBlockTitleCompat = null;
+  let lastKnownVideoID = "";
+  const savedNativeRenderers = new Map();
+
+  const clean = (value) => (typeof value === "string" ? value.trim() : "");
+
+  const highResolutionArtworkURL = (value) => {
+    const source = clean(value);
+    if (!source) return "";
+    try {
+      const url = new URL(source);
+      if (url.protocol !== "https:") return "";
+      if (url.hostname === "yt3.googleusercontent.com") {
+        url.pathname = url.pathname.replace(/=w\d+-h\d+(?=-|$)/u, "=w1200-h1200");
+      } else if (url.hostname === "i.ytimg.com") {
+        const match = url.pathname.match(/^\/vi(?:_webp)?\/([^/]+)\//u);
+        if (match) {
+          url.pathname = `/vi/${match[1]}/maxresdefault.jpg`;
+          url.search = "";
+        }
+      }
+      return url.href;
+    } catch {
+      return source;
+    }
+  };
+
+  const firstText = (root, selectors) => {
+    for (const selector of selectors) {
+      const text = clean(root?.querySelector?.(selector)?.textContent);
+      if (text) return text;
+    }
+    return "";
+  };
+
+  const mediaSessionMetadata = () => {
+    try {
+      const metadata = globalThis.navigator?.mediaSession?.metadata;
+      return metadata && typeof metadata === "object" ? metadata : null;
+    } catch {
+      return null;
+    }
+  };
+
+  const documentTitleTrack = () => {
+    const value = clean(document.title).replace(/\s*[|·-]\s*YouTube Music\s*$/iu, "");
+    return value && value.toLowerCase() !== "youtube music" ? value : "";
+  };
+
+  const metadataArtworkURL = (metadata) => {
+    const artwork = Array.isArray(metadata?.artwork) ? metadata.artwork : [];
+    const preferred = [...artwork].reverse().find((candidate) => clean(candidate?.src));
+    return highResolutionArtworkURL(preferred?.src);
+  };
+
+  const currentVideoID = (playerBar) => {
+    const fromLocation = new URL(location.href).searchParams.get("v");
+    if (fromLocation) {
+      lastKnownVideoID = fromLocation;
+      return fromLocation;
+    }
+    const href = playerBar?.querySelector?.('a[href*="watch?v="]')?.getAttribute?.("href");
+    if (href) {
+      try {
+        const fromBar = new URL(href, location.origin).searchParams.get("v") ?? "";
+        if (fromBar) lastKnownVideoID = fromBar;
+      } catch {
+        // Keep the last recording identity across YouTube Music SPA routes.
+      }
+    }
+    return lastKnownVideoID;
+  };
+
+  const rememberClickedVideo = (event) => {
+    const href = event?.target?.closest?.('a[href*="watch?v="]')?.getAttribute?.("href");
+    if (!href) return;
+    try {
+      const videoID = new URL(href, location.origin).searchParams.get("v");
+      if (videoID) lastKnownVideoID = videoID;
+    } catch {
+      // Ignore malformed third-party anchors.
+    }
+  };
+
+  const playbackState = (media) => {
+    if (media.ended) return "ended";
+    if (!media.paused && media.readyState < HTMLMediaElement.HAVE_FUTURE_DATA) return "buffering";
+    return media.paused ? "paused" : "playing";
+  };
+
+  const parsePlaybackSeconds = (value) => {
+    const parts = clean(value).split(":").map(Number);
+    if (
+      (parts.length !== 2 && parts.length !== 3) ||
+      parts.some((part) => !Number.isFinite(part) || part < 0)
+    ) return undefined;
+    if (parts.length === 2) return parts[0] * 60 + parts[1];
+    return parts[0] * 3600 + parts[1] * 60 + parts[2];
+  };
+
+  const playerBarClock = (playerBar) => {
+    const text = clean(playerBar?.querySelector?.(".time-info, #time-info")?.textContent);
+    const timestamps = text.match(/(?:\d+:)?\d{1,2}:\d{2}/g) ?? [];
+    if (timestamps.length < 2) return undefined;
+    const currentSeconds = parsePlaybackSeconds(timestamps[0]);
+    const durationSeconds = parsePlaybackSeconds(timestamps[timestamps.length - 1]);
+    if (currentSeconds === undefined || durationSeconds === undefined || durationSeconds <= 0) {
+      return undefined;
+    }
+    return {
+      currentTimeMs: currentSeconds * 1000,
+      durationMs: durationSeconds * 1000,
+    };
+  };
+
+  const mediaCandidates = () => {
+    const queried = Array.from(document.querySelectorAll?.("video, audio") ?? []);
+    if (queried.length > 0) return queried.filter((media) => media instanceof HTMLMediaElement);
+    const fallback = document.querySelector("video, audio");
+    return fallback instanceof HTMLMediaElement ? [fallback] : [];
+  };
+
+  const selectPlaybackMedia = (playerBar) => {
+    const candidates = mediaCandidates().filter((media) =>
+      Number.isFinite(media.currentTime) &&
+      media.currentTime >= 0 &&
+      Number.isFinite(media.duration) &&
+      media.duration > 0
+    );
+    if (candidates.length === 0) return null;
+
+    const barClock = playerBarClock(playerBar);
+    if (barClock) {
+      const durationToleranceMs = Math.max(2500, barClock.durationMs * 0.01);
+      const currentTimeToleranceMs = 4000;
+      const matching = candidates.filter((media) =>
+        Math.abs(media.duration * 1000 - barClock.durationMs) <= durationToleranceMs &&
+        Math.abs(media.currentTime * 1000 - barClock.currentTimeMs) <= currentTimeToleranceMs
+      );
+      if (matching.length > 0) {
+        return matching.sort((left, right) => {
+          const leftDistance = Math.abs(left.duration * 1000 - barClock.durationMs)
+            + Math.abs(left.currentTime * 1000 - barClock.currentTimeMs);
+          const rightDistance = Math.abs(right.duration * 1000 - barClock.durationMs)
+            + Math.abs(right.currentTime * 1000 - barClock.currentTimeMs);
+          return leftDistance - rightDistance;
+        })[0];
+      }
+    }
+
+    if (candidates.length === 1) return candidates[0];
+    const active = candidates.filter((media) => !media.paused && !media.ended);
+    if (active.length === 1) return active[0];
+    if (observedMedia && candidates.includes(observedMedia)) return observedMedia;
+    return null;
+  };
+
+  const synchronizedCurrentTimeMs = (media, barClock) => {
+    const mediaTimeMs = Math.max(0, media.currentTime * 1000);
+    if (!barClock) {
+      playbackClockAnchor = null;
+      return mediaTimeMs;
+    }
+
+    const anchor = playbackClockAnchor;
+    const projectedTimeMs = anchor?.media === media
+      ? anchor.barTimeMs + (mediaTimeMs - anchor.mediaTimeMs)
+      : Number.NaN;
+    const projectionFitsDisplayedSecond = Number.isFinite(projectedTimeMs)
+      && projectedTimeMs >= barClock.currentTimeMs - 250
+      && projectedTimeMs < barClock.currentTimeMs + 1250;
+    if (!projectionFitsDisplayedSecond) {
+      playbackClockAnchor = {
+        media,
+        mediaTimeMs,
+        barTimeMs: barClock.currentTimeMs,
+      };
+      return barClock.currentTimeMs;
+    }
+    return Math.min(
+      barClock.durationMs,
+      Math.max(barClock.currentTimeMs, projectedTimeMs),
+    );
+  };
+
+  const transportButton = (playerBar, action) => {
+    const selector = action === "playPause"
+      ? "#play-pause-button button, #play-pause-button"
+      : action === "previous"
+        ? ".previous-button button, .previous-button"
+        : ".next-button button, .next-button";
+    return playerBar?.querySelector?.(selector) ?? null;
+  };
+
+  const enabledControl = (control) => Boolean(
+    control &&
+    control.disabled !== true &&
+    control.getAttribute?.("aria-disabled") !== "true" &&
+    !control.hasAttribute?.("disabled")
+  );
+
+  const buildSnapshot = () => {
+    const playerBar = document.querySelector("ytmusic-player-bar");
+    const media = selectPlaybackMedia(playerBar);
+    if (!(media instanceof HTMLMediaElement)) return null;
+    const barClock = playerBarClock(playerBar);
+    const trackID = currentVideoID(playerBar);
+    const metadata = mediaSessionMetadata();
+    const title = firstText(playerBar, [".title", "yt-formatted-string.title"])
+      || clean(metadata?.title)
+      || firstText(document, [
+        "ytmusic-player-page .title",
+        "ytmusic-player-page yt-formatted-string.title",
+        "ytmusic-responsive-list-item-renderer[is-active] .title",
+      ])
+      || documentTitleTrack();
+    if (!trackID || !title) return null;
+    const bylineLinks = Array.from(playerBar?.querySelectorAll?.(".byline a, .subtitle a") ?? []);
+    const artist = clean(bylineLinks[0]?.textContent)
+      || firstText(playerBar, [".byline", ".subtitle"])
+      || clean(metadata?.artist);
+    const album = clean(bylineLinks[1]?.textContent);
+    const artwork = playerBar?.querySelector?.("img.image, img");
+    const artworkURL = highResolutionArtworkURL(artwork?.currentSrc || artwork?.src)
+      || metadataArtworkURL(metadata);
+    const durationMs = barClock?.durationMs
+      ?? (Number.isFinite(media.duration) ? Math.max(0, media.duration * 1000) : 0);
+    return {
+      type: "youtube-music-snapshot",
+      version: protocolVersion,
+      sequence: sequence++,
+      sentAtUnixMs: Date.now(),
+      track: {
+        provider: "youtubeMusic",
+        trackID,
+        title,
+        artist,
+        ...(album ? { album } : {}),
+        ...(artworkURL
+          ? { artworkURL }
+          : {}),
+        pageURL: `https://music.youtube.com/watch?v=${encodeURIComponent(trackID)}`,
+      },
+      playback: {
+        currentTimeMs: synchronizedCurrentTimeMs(media, barClock),
+        durationMs,
+        playbackRate: Number.isFinite(media.playbackRate) ? Math.max(0, media.playbackRate) : 1,
+        state: playbackState(media),
+      },
+      controls: {
+        seek: true,
+        playPause: enabledControl(transportButton(playerBar ?? document, "playPause")),
+        previous: enabledControl(transportButton(playerBar ?? document, "previous")),
+        next: enabledControl(transportButton(playerBar ?? document, "next")),
+      },
+    };
+  };
+
+  const updateSponsorBlockCompatibility = () => {
+    const playerBar = document.querySelector("ytmusic-player-bar");
+    if (!playerBar) return;
+
+    const controls = playerBar.querySelector?.(
+      "#right-controls-buttons, .right-controls-buttons",
+    );
+    if (controls && (!sponsorBlockControlHost?.isConnected || sponsorBlockControlHost.parentElement !== controls)) {
+      sponsorBlockControlHost?.remove();
+      const compat = document.createElement("div");
+      compat.className = "ytp-right-controls";
+      compat.setAttribute("data-lyricstage-sponsorblock-controls", "true");
+      compat.style.display = "contents";
+      controls.append?.(compat);
+      sponsorBlockControlHost = compat;
+    }
+
+    if (!sponsorBlockTitleCompat?.isConnected) {
+      const compat = document.createElement("div");
+      compat.className = "ypcs-video-info";
+      compat.setAttribute("data-lyricstage-sponsorblock-title", "true");
+      compat.setAttribute("aria-hidden", "true");
+      compat.style.display = "none";
+      const text = document.createElement("span");
+      text.className = "watch-title-text-container";
+      compat.append(text);
+      playerBar.append?.(compat);
+      sponsorBlockTitleCompat = compat;
+    }
+    const title = firstText(playerBar, [".title", "yt-formatted-string.title"]);
+    const titleText = sponsorBlockTitleCompat?.querySelector?.(".watch-title-text-container");
+    if (titleText && titleText.textContent !== title) titleText.textContent = title;
+  };
+
+  const isStronglyTabSelected = (tab) => {
+    if (!tab) return false;
+    return (
+      tab.getAttribute("aria-selected") === "true" ||
+      (typeof tab.classList?.contains === "function" && tab.classList.contains("iron-selected"))
+    );
+  };
+
+  const getSelectedTab = (tabList, preferredTab = lastInteractedTab) => {
+    if (!tabList) return null;
+    const tabs = Array.from(tabList.querySelectorAll?.('[role="tab"], tp-yt-paper-tab') ?? []);
+    const strong = tabs.filter(isStronglyTabSelected);
+    if (strong.length === 1) return strong[0];
+    if (strong.length > 1) return preferredTab && strong.includes(preferredTab) ? preferredTab : null;
+    const weak = tabs.filter((tab) => tab.hasAttribute?.("selected"));
+    if (weak.length === 1) return weak[0];
+    return preferredTab && weak.includes(preferredTab) ? preferredTab : null;
+  };
+
+  const observedTabs = new WeakSet();
+  const observeTabInteractions = (tabList) => {
+    const tabs = Array.from(tabList?.querySelectorAll?.('[role="tab"], tp-yt-paper-tab') ?? []);
+    for (const tab of tabs) {
+      if (observedTabs.has(tab)) continue;
+      observedTabs.add(tab);
+      tab.addEventListener?.(
+        "click",
+        () => {
+          lastInteractedTab = tab;
+          const confirmedLyricsTab = getConfirmedLyricsTab(tabList);
+          if (confirmedLyricsTab && tab !== confirmedLyricsTab && inPageStageHost?.isConnected) {
+            releaseStageMount();
+          }
+        },
+        { capture: true },
+      );
+    }
+  };
+
+  const getActiveRenderer = (sidePanel) => {
+    if (!sidePanel) return null;
+    const renderers = Array.from(
+      sidePanel.querySelectorAll?.("ytmusic-tab-renderer#tab-renderer, ytmusic-tab-renderer") ?? [],
+    );
+    for (const renderer of renderers) {
+      if (!renderer.hidden && renderer.style?.display !== "none") {
+        return renderer;
+      }
+    }
+    return renderers[0] ?? null;
+  };
+
+  const isLyricsRenderer = (renderer) => {
+    if (!renderer || !renderer.isConnected) return false;
+    return renderer.getAttribute?.("page-type") === LYRICS_PAGE_TYPE;
+  };
+
+  const clearStageReadyProbe = () => {
+    if (stageReadyTimeout !== null) {
+      clearTimeout(stageReadyTimeout);
+      stageReadyTimeout = null;
+    }
+    if (stageUIDispose) {
+      try {
+        stageUIDispose();
+      } catch {
+        // The host is removed below even if React cleanup fails.
+      }
+      stageUIDispose = null;
+    }
+  };
+
+  const invalidateStageAttempt = () => {
+    stageMountGeneration += 1;
+    clearStageReadyProbe();
+  };
+
+  const restoreNativeRenderers = () => {
+    savedNativeRenderers.forEach((saved, renderer) => {
+      if (!renderer.isConnected) return;
+      if (renderer.style?.visibility === "hidden") {
+        renderer.style.visibility = saved.visibility;
+      }
+      if (saved.positionChanged && renderer.style?.position === "relative") {
+        renderer.style.position = saved.position;
+      }
+    });
+    savedNativeRenderers.clear();
+  };
+
+  const releaseStageMount = () => {
+    if (stageMountState !== "idle" || inPageStageHost) invalidateStageAttempt();
+    restoreNativeRenderers();
+    if (inPageStageHost) {
+      inPageStageHost.remove();
+      inPageStageHost = null;
+    }
+    activeNativeRenderer = null;
+    stageMountState = "idle";
+    stageMountFailure = "";
+  };
+
+  const coverNativeRenderer = (renderer) => {
+    if (!renderer) return;
+    if (!savedNativeRenderers.has(renderer)) {
+      const computedPosition =
+        typeof getComputedStyle === "function"
+          ? getComputedStyle(renderer).position
+          : renderer.style?.position || "static";
+      const positionChanged = computedPosition === "static";
+      savedNativeRenderers.set(renderer, {
+        visibility: renderer.style?.visibility ?? "",
+        position: renderer.style?.position ?? "",
+        positionChanged,
+      });
+      if (positionChanged && renderer.style) renderer.style.position = "relative";
+    }
+    if (renderer.style) renderer.style.visibility = "hidden";
+  };
+
+  const runtimeAvailable = () => {
+    try {
+      return typeof chrome?.runtime?.id === "string";
+    } catch {
+      return false;
+    }
+  };
+
+  const stop = () => {
+    if (stopped) return;
+    stopped = true;
+    queued = false;
+    if (pendingSend !== null) clearTimeout(pendingSend);
+    if (heartbeat !== null) clearInterval(heartbeat);
+    observer?.disconnect();
+    document.documentElement.removeEventListener(CONTENT_SCRIPT_STOP_EVENT, stop);
+    document.removeEventListener?.("click", rememberClickedVideo, true);
+    sponsorBlockControlHost?.remove();
+    sponsorBlockTitleCompat?.remove();
+    sponsorBlockControlHost = null;
+    sponsorBlockTitleCompat = null;
+    if (observedMedia instanceof HTMLMediaElement) {
+      mediaEvents.forEach((event) => observedMedia.removeEventListener(event, queueSend));
+    }
+    window.removeEventListener("yt-navigate-finish", updateStageMount);
+    try {
+      chrome.runtime.onMessage.removeListener(onRuntimeMessage);
+    } catch {
+      // Extension context invalidated
+    }
+    releaseStageMount();
+    lastInteractedTab = null;
+    stageMountState = "idle";
+    stageMountFailure = "";
+    observedMedia = null;
+    playbackClockAnchor = null;
+  };
+
+  const updateStageMount = () => {
+    if (stopped || !runtimeAvailable()) return false;
+    updateSponsorBlockCompatibility();
+    const sidePanel = document.querySelector("ytmusic-player-page#player-page #side-panel");
+    const tabList =
+      sidePanel?.querySelector?.('tp-yt-paper-tabs [role="tablist"], tp-yt-paper-tabs #tabsContent, tp-yt-paper-tabs') ||
+      document.querySelector("tp-yt-paper-tabs");
+    const activeRenderer = getActiveRenderer(sidePanel);
+    observeTabInteractions(tabList);
+    const selectedTab = getSelectedTab(tabList);
+
+    const lyricsActive =
+      activeRenderer &&
+      activeRenderer.isConnected &&
+      isLyricsRenderer(activeRenderer) &&
+      !activeRenderer.hidden &&
+      activeRenderer.style?.display !== "none";
+
+    if (!lyricsActive) {
+      releaseStageMount();
+      return false;
+    }
+
+    // Learn and mark confirmed Lyrics tab
+    if (selectedTab) {
+      selectedTab.setAttribute(CONFIRMED_TAB_ATTR, "true");
+      const allTabs = Array.from(tabList?.querySelectorAll?.(`[${CONFIRMED_TAB_ATTR}]`) ?? []);
+      for (const tab of allTabs) {
+        if (tab !== selectedTab) tab.removeAttribute(CONFIRMED_TAB_ATTR);
+      }
+    }
+
+    // Clean up on renderer replacement
+    if (activeNativeRenderer && activeNativeRenderer !== activeRenderer) {
+      releaseStageMount();
+    }
+    activeNativeRenderer = activeRenderer;
+
+    // Clean up any stale host in sidePanel
+    if (sidePanel) {
+      const staleHosts = Array.from(
+        sidePanel.querySelectorAll?.(`#${STAGE_HOST_ID}, #${LEGACY_STAGE_HOST_ID}`) ?? [],
+      );
+      for (const stale of staleHosts) {
+        if (stale !== inPageStageHost) {
+          stale.remove();
+        }
+      }
+    }
+
+    if (!inPageStageHost?.isConnected || inPageStageHost.parentElement !== activeRenderer) {
+      if (inPageStageHost?.isConnected) {
+        inPageStageHost.remove();
+        inPageStageHost = null;
+      }
+      invalidateStageAttempt();
+      stageMountState = "checking";
+      stageMountFailure = "";
+      const attemptGeneration = stageMountGeneration;
+
+      const host = document.createElement("div");
+      host.id = STAGE_HOST_ID;
+      host.className = "style-scope ytmusic-tab-renderer";
+      host.style.display = "none";
+      host.style.flexDirection = "column";
+      host.style.width = "100%";
+      host.style.height = "100%";
+      host.style.minHeight = "0";
+      host.style.flex = "1 1 auto";
+      host.style.overflow = "hidden";
+      host.style.background = "transparent";
+      host.style.position = "absolute";
+      host.style.inset = "0";
+      host.style.zIndex = "1";
+      host.style.visibility = "visible";
+
+      const shadow = host.attachShadow({ mode: "open" });
+      const style = document.createElement("style");
+      style.textContent = `
+        :host {
+          display: flex;
+          flex-direction: column;
+          width: 100%;
+          height: 100%;
+          min-height: 0;
+          background: transparent;
+          color: inherit;
+        }
+        *, *::before, *::after { box-sizing: border-box; }
+        .column-mount {
+          display: flex;
+          flex: 1 1 auto;
+          flex-direction: column;
+          width: 100%;
+          height: 100%;
+          min-height: 0;
+          background: transparent;
+        }
+      `;
+      const mountNode = document.createElement("div");
+      mountNode.className = "column-mount";
+      shadow.append(style, mountNode);
+      const eventSuffix = String(attemptGeneration);
+      const readyEvent = `lyricstage-column-ready-${eventSuffix}`;
+      const errorEvent = `lyricstage-column-error-${eventSuffix}`;
+      const disposeEvent = `lyricstage-column-dispose-${eventSuffix}`;
+      host.setAttribute("data-lyricstage-ready-event", readyEvent);
+      host.setAttribute("data-lyricstage-error-event", errorEvent);
+      host.setAttribute("data-lyricstage-dispose-event", disposeEvent);
+
+      const attemptIsCurrent = () =>
+        !stopped &&
+        runtimeAvailable() &&
+        attemptGeneration === stageMountGeneration &&
+        activeNativeRenderer === activeRenderer &&
+        activeRenderer.isConnected &&
+        isLyricsRenderer(activeRenderer) &&
+        inPageStageHost === host;
+
+      const failAttempt = (reason) => {
+        if (!attemptIsCurrent()) return;
+        restoreNativeRenderers();
+        host.hidden = true;
+        host.style.display = "none";
+        stageMountState = "failed";
+        stageMountFailure = reason;
+        console.warn(`[LyricStage] Embedded Stage unavailable: ${reason}`);
+        clearStageReadyProbe();
+      };
+
+      const markReady = () => {
+        if (!attemptIsCurrent()) return;
+        if (stageReadyTimeout !== null) clearTimeout(stageReadyTimeout);
+        stageReadyTimeout = null;
+        coverNativeRenderer(activeRenderer);
+        host.hidden = false;
+        host.style.display = "flex";
+        stageMountState = "ready";
+        stageMountFailure = "";
+      };
+
+      const markError = () => {
+        const reason = host.getAttribute("data-lyricstage-error-reason") || "render-error";
+        failAttempt(`embedded-column-${reason}`);
+      };
+
+      host.addEventListener(readyEvent, markReady);
+      host.addEventListener(errorEvent, markError);
+      stageUIDispose = () => {
+        host.removeEventListener(readyEvent, markReady);
+        host.removeEventListener(errorEvent, markError);
+        host.dispatchEvent(new Event(disposeEvent));
+      };
+
+      activeRenderer.append(host);
+      inPageStageHost = host;
+
+      if (
+        document.documentElement.getAttribute("data-lyricstage-content-ui") !==
+        "direct-shadow-v2"
+      ) {
+        failAttempt("embedded-column-runtime-missing");
+      } else {
+        stageMountState = "loading";
+        stageReadyTimeout = window.setTimeout(() => {
+          stageReadyTimeout = null;
+          failAttempt("embedded-column-ready-timeout");
+        }, 4000);
+      }
+    }
+
+    if (stageMountState === "ready") {
+      coverNativeRenderer(activeRenderer);
+      inPageStageHost.hidden = false;
+      inPageStageHost.style.display = "flex";
+      return true;
+    }
+    return false;
+  };
+
+  const getConfirmedLyricsTab = (tabList) => {
+    if (!tabList) return null;
+    const direct = tabList.querySelector?.(`[${CONFIRMED_TAB_ATTR}="true"]`);
+    if (direct) return direct;
+    const tabs = Array.from(
+      tabList.querySelectorAll?.('[role="tab"], tp-yt-paper-tab') ?? tabList.children ?? [],
+    );
+    for (const tab of tabs) {
+      if (tab.getAttribute?.(CONFIRMED_TAB_ATTR) === "true" || tab.hasAttribute?.(CONFIRMED_TAB_ATTR)) {
+        return tab;
+      }
+    }
+    return null;
+  };
+
+  const onRuntimeMessage = (message, _sender, sendResponse) => {
+    if (message?.type === "youtube-music-seek-to") {
+      const requestedTimeMs = message.timeMs;
+      const media = document.querySelector("video, audio");
+      if (
+        typeof requestedTimeMs !== "number" ||
+        !Number.isFinite(requestedTimeMs) ||
+        requestedTimeMs < 0 ||
+        !(media instanceof HTMLMediaElement)
+      ) {
+        sendResponse({ ok: false, reason: "invalid-seek" });
+        return;
+      }
+      const requestedSeconds = requestedTimeMs / 1000;
+      const boundedSeconds = Number.isFinite(media.duration)
+        ? Math.min(requestedSeconds, Math.max(0, media.duration))
+        : requestedSeconds;
+      media.currentTime = boundedSeconds;
+      queueSend();
+      sendResponse({ ok: true, timeMs: Math.round(boundedSeconds * 1000) });
+      return;
+    }
+
+    if (message?.type === "youtube-music-transport-command") {
+      const action = message.action;
+      const media = document.querySelector("video, audio");
+      const playerBar = document.querySelector("ytmusic-player-bar");
+      if (
+        !(media instanceof HTMLMediaElement) ||
+        !["play", "pause", "previous", "next"].includes(action)
+      ) {
+        sendResponse({ ok: false, reason: "invalid-transport" });
+        return;
+      }
+      const control = transportButton(
+        playerBar ?? document,
+        action === "play" || action === "pause" ? "playPause" : action,
+      );
+      if (!enabledControl(control) || typeof control.click !== "function") {
+        sendResponse({ ok: false, reason: "transport-unavailable" });
+        return;
+      }
+      if (
+        (action === "play" && !media.paused) ||
+        (action === "pause" && media.paused)
+      ) {
+        sendResponse({ ok: true, state: playbackState(media), unchanged: true });
+        return;
+      }
+      control.click();
+      queueSend();
+      sendResponse({ ok: true, state: action });
+      return;
+    }
+
+    if (
+      message?.type === "youtube-music-open-stage" ||
+      message?.type === "youtube-music-activate-lyrics" ||
+      message?.type === "youtube-music-show-stage"
+    ) {
+      const sidePanel = document.querySelector("ytmusic-player-page#player-page #side-panel");
+      const tabList =
+        sidePanel?.querySelector?.('tp-yt-paper-tabs [role="tablist"], tp-yt-paper-tabs #tabsContent, tp-yt-paper-tabs') ||
+        document.querySelector("tp-yt-paper-tabs");
+
+      // Find learned/confirmed Lyrics tab
+      const confirmedLyricsTab = getConfirmedLyricsTab(tabList);
+      if (!confirmedLyricsTab) {
+        // Do not guess tabs if not yet learned in this page session
+        sendResponse({ ok: false, reason: "unlearned" });
+        return;
+      }
+
+      const currentRenderer = getActiveRenderer(sidePanel);
+      if (!isLyricsRenderer(currentRenderer)) {
+        if (typeof confirmedLyricsTab.click === "function") {
+          confirmedLyricsTab.click();
+        } else {
+          confirmedLyricsTab.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true }));
+        }
+      }
+
+      const startTime = Date.now();
+      const timeoutMs = 5200;
+      const checkAndRespond = () => {
+        if (stopped || !runtimeAvailable()) {
+          sendResponse({ ok: false });
+          return;
+        }
+        if (updateStageMount()) {
+          sendResponse({ ok: true });
+          return;
+        }
+        if (Date.now() - startTime >= timeoutMs) {
+          sendResponse({ ok: false, reason: stageMountFailure || "stage-not-ready" });
+          return;
+        }
+        setTimeout(checkAndRespond, 30);
+      };
+
+      checkAndRespond();
+      return true; // Keep message channel open for async response
+    }
+  };
+
+  const send = () => {
+    queued = false;
+    pendingSend = null;
+    if (stopped || !runtimeAvailable()) {
+      stop();
+      return;
+    }
+    const snapshot = buildSnapshot();
+    if (!snapshot) {
+      if (!sourceWasAvailable) return;
+      sourceWasAvailable = false;
+      try {
+        chrome.runtime.sendMessage({ type: "youtube-music-source-disconnect" }, () => {
+          try {
+            void chrome.runtime.lastError;
+          } catch {
+            stop();
+          }
+        });
+      } catch {
+        stop();
+      }
+      return;
+    }
+    sourceWasAvailable = true;
+    try {
+      chrome.runtime.sendMessage(
+        { type: "youtube-music-source-snapshot", snapshot },
+        () => {
+          try {
+            void chrome.runtime.lastError;
+          } catch {
+            stop();
+          }
+        },
+      );
+    } catch {
+      stop();
+    }
+  };
+
+  const queueSend = () => {
+    if (stopped || queued) return;
+    queued = true;
+    pendingSend = setTimeout(send, 40);
+  };
+
+  const observeMedia = () => {
+    const next = selectPlaybackMedia(document.querySelector("ytmusic-player-bar"));
+    if (next === observedMedia) return;
+    if (observedMedia instanceof HTMLMediaElement) {
+      mediaEvents.forEach((event) => observedMedia.removeEventListener(event, queueSend));
+    }
+    observedMedia = next;
+    playbackClockAnchor = null;
+    if (observedMedia instanceof HTMLMediaElement) {
+      mediaEvents.forEach((event) => observedMedia.addEventListener(event, queueSend, { passive: true }));
+    }
+    queueSend();
+  };
+
+  observer = new MutationObserver(() => {
+    updateStageMount();
+    observeMedia();
+    queueSend();
+  });
+  observer.observe(document.documentElement, {
+    childList: true,
+    subtree: true,
+    attributes: true,
+    attributeFilter: ["href", "src", "selected", "aria-selected", "page-type"],
+  });
+
+  window.addEventListener("yt-navigate-finish", updateStageMount);
+  document.documentElement.addEventListener(CONTENT_SCRIPT_STOP_EVENT, stop);
+  document.addEventListener?.("click", rememberClickedVideo, true);
+  chrome.runtime.onMessage.addListener(onRuntimeMessage);
+  updateStageMount();
+  observeMedia();
+  updateSponsorBlockCompatibility();
+  heartbeat = setInterval(() => {
+    updateStageMount();
+    observeMedia();
+    updateSponsorBlockCompatibility();
+    send();
+  }, 500);
+  window.addEventListener("pagehide", stop, { once: true });
+})();

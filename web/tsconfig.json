@@ -1,0 +1,36 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "useDefineForClassFields": true,
+    "lib": ["ES2022", "DOM", "DOM.Iterable"],
+    "allowJs": false,
+    "skipLibCheck": true,
+    "esModuleInterop": true,
+    "allowSyntheticDefaultImports": true,
+    "strict": true,
+    "forceConsistentCasingInFileNames": true,
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "baseUrl": ".",
+    "paths": {
+      "@lyricstage/contracts": ["packages/contracts/src/index.ts"],
+      "@lyricstage/companion": ["packages/companion/src/index.ts"],
+      "@lyricstage/core": ["packages/core/src/index.ts"],
+      "@lyricstage/lyrics": ["packages/lyrics/src/index.ts"],
+      "@lyricstage/performance": ["packages/performance/src/index.ts"],
+      "@lyricstage/renderer": ["packages/renderer/src/index.ts"]
+    },
+    "resolveJsonModule": true,
+    "isolatedModules": true,
+    "noEmit": true,
+    "jsx": "react-jsx",
+    "types": ["vite/client", "node"]
+  },
+  "include": [
+    "apps/**/*.ts",
+    "apps/**/*.tsx",
+    "packages/**/*.ts",
+    "vite.config.ts",
+    "vitest.config.ts"
+  ]
+}

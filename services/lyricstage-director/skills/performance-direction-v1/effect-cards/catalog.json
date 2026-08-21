@@ -1,0 +1,22 @@
+{
+  "version": "effect-card-catalog-v1",
+  "cards": [
+    { "id": "distance-convergence", "presentation": "hero", "requiredAny": ["semantic_distance", "section_boundary"], "primary": "geometry.converge", "support": ["cover.island"], "contraindications": ["long line", "low semantic confidence"] },
+    { "id": "chorus-memory", "presentation": "hero", "requiredAny": ["repeated_hook"], "primary": "memory.echo", "support": ["cover.island", "motif.recall"], "contraindications": ["first occurrence"] },
+    { "id": "contrast-cut", "presentation": "section", "requiredAny": ["semantic_contrast", "section_boundary"], "primary": "geometry.cut", "support": ["field.drift"], "contraindications": ["adjacent hard transition"] },
+    { "id": "silence-aperture", "presentation": "aperture", "requiredAny": ["silence_gap"], "primary": "field.aperture", "support": [], "contraindications": ["active overlapping vocal"] },
+    { "id": "duet-mirror", "presentation": "duet", "requiredAny": ["duet_overlap", "voice_handoff"], "primary": "geometry.mirror", "support": ["field.drift"], "contraindications": ["unmarked voice inference"] },
+    { "id": "chorus-expansion", "presentation": "hero", "requiredAny": ["collective_chorus", "repeated_hook"], "primary": "geometry.expand", "support": ["cover.island"], "contraindications": ["low repetition confidence"] },
+    { "id": "question-suspension", "presentation": "hero", "requiredAny": ["question_suspension", "section_boundary"], "primary": "geometry.suspend", "support": ["cover.island"], "contraindications": ["long line", "weak punctuation-only question"] },
+    { "id": "gravity-resolution", "presentation": "hero", "requiredAny": ["final_resolution"], "primary": "geometry.converge", "support": ["density.release", "cover.island"], "contraindications": ["non-final section"] },
+    { "id": "density-lift", "presentation": "section", "requiredAny": ["density_lift"], "primary": "density.lift", "support": ["field.drift"], "contraindications": ["already dense background"] },
+    { "id": "field-release", "presentation": "section", "requiredAny": ["density_release"], "primary": "density.release", "support": [], "contraindications": ["rising section"] },
+    { "id": "motif-recall", "presentation": "reading", "requiredAny": ["repeated_hook"], "primary": "motif.recall", "support": [], "contraindications": ["first occurrence"] },
+    { "id": "final-dissolution", "presentation": "aperture", "requiredAny": ["final_resolution", "density_release"], "primary": "transition.dissolve", "support": ["motif.recall"], "contraindications": ["non-final section"] },
+    { "id": "motion-ribbon", "presentation": "section", "requiredAny": ["semantic_motion", "section_boundary"], "primary": "field.ribbon", "support": ["memory.trail"], "contraindications": ["already dense background"] },
+    { "id": "contrast-prism", "presentation": "section", "requiredAny": ["semantic_contrast", "section_boundary"], "primary": "field.prism", "support": ["field.drift"], "contraindications": ["soft continuous passage"] },
+    { "id": "distance-orbit", "presentation": "hero", "requiredAny": ["semantic_distance", "section_boundary"], "primary": "geometry.orbit", "support": ["cover.portal"], "contraindications": ["long line", "low semantic confidence"] },
+    { "id": "chorus-trail", "presentation": "hero", "requiredAny": ["repeated_hook"], "primary": "memory.trail", "support": ["cover.portal", "motif.recall"], "contraindications": ["first occurrence"] },
+    { "id": "final-bloom", "presentation": "aperture", "requiredAny": ["final_resolution", "density_release"], "primary": "transition.bloom", "support": ["motif.recall"], "contraindications": ["non-final section"] }
+  ]
+}

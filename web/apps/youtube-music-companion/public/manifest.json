@@ -1,0 +1,33 @@
+{
+  "manifest_version": 3,
+  "name": "LyricStage for YouTube Music",
+  "version": "0.2.1",
+  "description": "让 LyricStage 歌词舞台在 YouTube Music 内跟随歌曲和播放时间。",
+  "minimum_chrome_version": "116",
+  "permissions": ["storage", "activeTab", "tabCapture", "offscreen"],
+  "host_permissions": [
+    "https://music.youtube.com/*",
+    "https://lrclib.net/*",
+    "https://sponsor.ajay.app/*",
+    "https://director.hachi-mi.uk/*",
+    "http://mobilecdn.kugou.com/*",
+    "http://krcs.kugou.com/*",
+    "http://lyrics.kugou.com/*"
+  ],
+  "optional_host_permissions": ["http://100.108.23.60:8788/*"],
+  "background": {
+    "service_worker": "assets/background.js",
+    "type": "module"
+  },
+  "action": {
+    "default_title": "LyricStage",
+    "default_popup": "popup.html"
+  },
+  "content_scripts": [
+    {
+      "matches": ["https://music.youtube.com/*"],
+      "js": ["content-ui.js", "content.js"],
+      "run_at": "document_idle"
+    }
+  ]
+}

@@ -1,0 +1,13 @@
+{
+  "version": "lyric-document-v0",
+  "recordingID": "fixture:line-only-ja",
+  "durationMs": 28000,
+  "language": "ja",
+  "lines": [
+    { "lineIndex": 0, "fromMs": 0, "toMs": 5200, "text": "静かな窓に朝が触れる", "voiceRole": "lead" },
+    { "lineIndex": 1, "fromMs": 5200, "toMs": 10800, "text": "名前のない光を追いかける", "voiceRole": "lead" },
+    { "lineIndex": 2, "fromMs": 10800, "toMs": 16800, "text": "遠い街の輪郭がほどけて", "voiceRole": "lead" },
+    { "lineIndex": 3, "fromMs": 16800, "toMs": 22400, "text": "今日という景色に変わってゆく", "voiceRole": "lead" },
+    { "lineIndex": 4, "fromMs": 22400, "toMs": 28000, "text": "ここからまた歩き出そう", "voiceRole": "lead" }
+  ]
+}

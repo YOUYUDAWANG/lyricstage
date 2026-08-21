@@ -1,0 +1,21 @@
+[Unit]
+Description=LyricStage Fullscreen AI Director on OCI
+After=network-online.target
+Wants=network-online.target
+
+[Container]
+Image=localhost/lyricstage-director:1.3.4
+ContainerName=lyricstage-director
+PublishPort=127.0.0.1:8092:8787
+EnvironmentFile=/etc/lyricstage-director/env
+Volume=/var/lib/lyricstage-director:/var/lib/lyricstage-director:Z
+NoNewPrivileges=true
+DropCapability=all
+
+[Service]
+Restart=always
+TimeoutStartSec=120
+TimeoutStopSec=20
+
+[Install]
+WantedBy=multi-user.target

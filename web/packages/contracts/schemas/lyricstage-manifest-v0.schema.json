@@ -1,0 +1,19 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://lyricstage.local/schemas/lyricstage-manifest-v0.schema.json",
+  "title": "LyricStageManifestV0",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["version", "recordingID", "lyricsPath", "requiredFonts"],
+  "properties": {
+    "version": { "const": "lyricstage-manifest-v0" },
+    "recordingID": { "type": "string", "minLength": 1 },
+    "lyricsPath": { "type": "string", "minLength": 1 },
+    "audioFactsPath": { "type": "string" },
+    "recipePath": { "type": "string" },
+    "requiredFonts": {
+      "type": "array",
+      "items": { "type": "string", "minLength": 1 }
+    }
+  }
+}

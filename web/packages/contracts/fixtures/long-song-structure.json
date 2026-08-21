@@ -1,0 +1,20 @@
+{
+  "version": "lyric-document-v0",
+  "recordingID": "fixture:long-song-structure",
+  "durationMs": 330000,
+  "language": "zh-Hans",
+  "lines": [
+    { "lineIndex": 0, "fromMs": 12000, "toMs": 34000, "text": "前奏之后第一束光落下", "voiceRole": "lead" },
+    { "lineIndex": 1, "fromMs": 34000, "toMs": 58000, "text": "城市慢慢显出它的轮廓", "voiceRole": "lead" },
+    { "lineIndex": 2, "fromMs": 58000, "toMs": 82000, "text": "我们仍在这里", "voiceRole": "choir" },
+    { "lineIndex": 3, "fromMs": 82000, "toMs": 108000, "text": "让第一段回声停在远处", "voiceRole": "lead" },
+    { "lineIndex": 4, "fromMs": 126000, "toMs": 152000, "text": "空白把下一幕轻轻打开", "voiceRole": "lead" },
+    { "lineIndex": 5, "fromMs": 152000, "toMs": 178000, "text": "我们仍在这里", "voiceRole": "choir" },
+    { "lineIndex": 6, "fromMs": 178000, "toMs": 204000, "text": "第二次出现时空间已经改变", "voiceRole": "lead" },
+    { "lineIndex": 7, "fromMs": 222000, "toMs": 248000, "text": "两条声音从画面两侧靠近", "voiceRole": "duetA", "overlapGroup": "final-duet" },
+    { "lineIndex": 8, "fromMs": 222000, "toMs": 248000, "text": "Two paths arrive at the same line", "voiceRole": "duetB", "overlapGroup": "final-duet" },
+    { "lineIndex": 9, "fromMs": 248000, "toMs": 276000, "text": "我们仍在这里", "voiceRole": "choir" },
+    { "lineIndex": 10, "fromMs": 276000, "toMs": 302000, "text": "最后一次不需要更大的声音", "voiceRole": "lead" },
+    { "lineIndex": 11, "fromMs": 302000, "toMs": 330000, "text": "只让整片画面安静地落稳", "voiceRole": "lead" }
+  ]
+}

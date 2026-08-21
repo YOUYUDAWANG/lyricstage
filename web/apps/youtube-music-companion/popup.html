@@ -1,0 +1,53 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>LyricStage</title>
+    <link rel="stylesheet" href="/src/popup.css" />
+  </head>
+  <body>
+    <main>
+      <header>
+        <span class="mark">LS</span>
+        <div><b data-dot></b><span data-status>正在检查</span></div>
+      </header>
+      <section>
+        <p data-title>先播放一首歌曲</p>
+        <span data-artist>再打开 YouTube Music 歌词</span>
+      </section>
+      <button class="primary" type="button" data-open-stage>打开 YouTube Music 歌词</button>
+      <button type="button" data-open-source>打开 YouTube Music</button>
+      <details class="lyrics-settings">
+        <summary>私有多源歌词</summary>
+        <label>
+          <span>后端地址</span>
+          <input data-lyrics-endpoint type="url" placeholder="http://100.x.x.x:8788/" autocomplete="off" />
+        </label>
+        <label>
+          <span>Bearer 令牌</span>
+          <input data-lyrics-token type="password" placeholder="已配置时可留空" autocomplete="new-password" />
+        </label>
+        <div class="settings-actions">
+          <button type="button" data-save-lyrics-config>保存</button>
+          <button type="button" data-clear-lyrics-config>停用</button>
+        </div>
+        <small data-lyrics-config-status>未配置时仍会搜索 LRCLIB 与酷狗</small>
+      </details>
+      <details class="lyrics-settings">
+        <summary>AI 导演与联网原唱识别</summary>
+        <label>
+          <span>Bearer 令牌</span>
+          <input data-director-token type="password" placeholder="只保存在本机扩展存储" autocomplete="new-password" />
+        </label>
+        <div class="settings-actions">
+          <button type="button" data-save-director-config>启用</button>
+          <button type="button" data-clear-director-config>停用</button>
+        </div>
+        <small data-director-config-status>未配置时保留本地演出与确定性歌词搜索</small>
+      </details>
+      <footer>音频始终留在 YouTube Music · 原唱识别只发送曲目元数据并要求联网来源</footer>
+    </main>
+    <script type="module" src="/src/popup.ts"></script>
+  </body>
+</html>

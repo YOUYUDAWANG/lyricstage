@@ -1,0 +1,30 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://lyricstage.local/schemas/recording-identity-v0.schema.json",
+  "title": "RecordingIdentityV0",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["version", "recordingID", "assetHash", "durationMs", "providerRefs"],
+  "properties": {
+    "version": { "const": "recording-identity-v0" },
+    "recordingID": { "type": "string", "minLength": 1, "maxLength": 160 },
+    "assetHash": { "type": "string", "minLength": 1, "maxLength": 160 },
+    "durationMs": { "type": "integer", "minimum": 1 },
+    "title": { "type": "string" },
+    "artist": { "type": "string" },
+    "versionHint": { "type": "string" },
+    "providerRefs": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["provider", "trackID"],
+        "properties": {
+          "provider": { "type": "string", "minLength": 1, "maxLength": 40 },
+          "trackID": { "type": "string", "minLength": 1, "maxLength": 200 },
+          "partID": { "type": "string", "maxLength": 200 }
+        }
+      }
+    }
+  }
+}

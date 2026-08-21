@@ -1,0 +1,4 @@
+{
+  "whyRejected": "A single word meaning broken does not establish song and section evidence, and arbitrary shader code is outside the grammar.",
+  "inputIdea": { "keyword": "broken", "effect": "glitch", "shader": "arbitrary GLSL" }
+}

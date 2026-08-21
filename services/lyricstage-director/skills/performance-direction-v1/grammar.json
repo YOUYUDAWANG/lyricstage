@@ -1,0 +1,28 @@
+{
+  "version": "performance-direction-grammar-v1",
+  "triggers": ["repeated_hook", "section_boundary", "silence_gap", "duet_overlap", "voice_handoff", "density_lift", "density_release", "semantic_distance", "semantic_motion", "semantic_contrast", "question_suspension", "collective_chorus", "final_resolution"],
+  "presentations": ["reading", "section", "hero", "duet", "aperture"],
+  "budget": { "primary": 1, "maximumSupport": 2, "maximumCost": 6, "heroSongShareTarget": [0.15, 0.25] },
+  "primitives": {
+    "field.drift": { "layer": "environment", "cost": 1, "conflictsWith": [] },
+    "field.aperture": { "layer": "environment", "cost": 1, "conflictsWith": ["density.lift"] },
+    "field.ribbon": { "layer": "environment", "cost": 2, "conflictsWith": ["geometry.cut"] },
+    "field.prism": { "layer": "environment", "cost": 2, "conflictsWith": ["field.aperture"] },
+    "field.rain": { "layer": "environment", "cost": 2, "conflictsWith": ["density.lift"] },
+    "geometry.converge": { "layer": "structure", "cost": 2, "conflictsWith": ["geometry.expand", "geometry.cut"] },
+    "geometry.expand": { "layer": "structure", "cost": 2, "conflictsWith": ["geometry.converge", "geometry.cut"] },
+    "geometry.mirror": { "layer": "structure", "cost": 2, "conflictsWith": ["geometry.cut"] },
+    "geometry.cut": { "layer": "transition", "cost": 2, "conflictsWith": ["geometry.converge", "geometry.expand", "geometry.mirror"] },
+    "geometry.suspend": { "layer": "structure", "cost": 1, "conflictsWith": ["density.lift"] },
+    "geometry.orbit": { "layer": "structure", "cost": 2, "conflictsWith": ["geometry.cut"] },
+    "memory.echo": { "layer": "lyricSupport", "cost": 2, "conflictsWith": [] },
+    "memory.trail": { "layer": "lyricSupport", "cost": 2, "conflictsWith": [] },
+    "density.lift": { "layer": "structure", "cost": 2, "conflictsWith": ["density.release", "field.aperture", "geometry.suspend"] },
+    "density.release": { "layer": "environment", "cost": 1, "conflictsWith": ["density.lift"] },
+    "motif.recall": { "layer": "lyricSupport", "cost": 1, "conflictsWith": [] },
+    "cover.island": { "layer": "cover", "cost": 1, "conflictsWith": ["field.aperture"] },
+    "cover.portal": { "layer": "cover", "cost": 2, "conflictsWith": ["field.aperture", "cover.island"] },
+    "transition.bloom": { "layer": "transition", "cost": 2, "conflictsWith": ["geometry.cut"] },
+    "transition.dissolve": { "layer": "transition", "cost": 2, "conflictsWith": ["geometry.cut"] }
+  }
+}
