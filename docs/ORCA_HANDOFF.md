@@ -62,10 +62,11 @@ Never inspect, print, or migrate the user's provider key. If a fresh extension i
 
 ## Current verified baseline
 
-- Web: 297/297 tests.
+- Web: 315/315 tests.
 - Director gateway: 27/27 tests.
-- TypeScript, `build:all`, Manifest V3 CSP, independent byte-for-byte rebuild, and `npm audit` passed.
-- Final Vite 8.2.2 extension passed real Chrome lifecycle UAT under the original extension ID.
+- The full-tab extension settings UI is merged; the popup is now limited to status, lyrics activation, and the settings entry.
+- TypeScript, the current extension production build, and Manifest V3 CSP passed after the settings merge.
+- The preceding Vite 8.2.2 extension baseline passed real Chrome lifecycle UAT under the original extension ID; the settings-page build still needs a stable-path reload/UAT before that claim can be extended to the current commit.
 - Owner-only Stage deployment: `https://lyricstage.yihanchen617.chatgpt.site`.
 - Frozen extraction tag: `lyricstage-monorepo-v0.3.0`.
 
@@ -73,8 +74,9 @@ Recheck drift-prone runtime and deployment state before claiming it is still cur
 
 ## Open work
 
-1. After the user restores BYOK configuration, verify one real provider takeover, fallback-provider switching, and deterministic local fallback without recording the key.
-2. Run whole-song subjective A/B for fast, slow, repeated-chorus, duet, and long-line tracks.
-3. Run a bounded multi-tab soak covering authority handoff, pause/seek, artwork fallback, capture ownership, and extension reload recovery.
+1. Mirror the reviewed build into the stable unpacked-extension directory, reload it, and verify the new popup/settings lifecycle without changing the extension identity.
+2. After the user restores BYOK configuration, verify one real provider takeover, fallback-provider switching, and deterministic local fallback without recording the key.
+3. Run whole-song subjective A/B for fast, slow, repeated-chorus, duet, and long-line tracks.
+4. Run a bounded multi-tab soak covering authority handoff, pause/seek, artwork fallback, capture ownership, and extension reload recovery.
 
 These are post-migration quality gates. Repository extraction, GitHub upload, owner-only deployment, and the final local Chrome lifecycle gate are complete.
