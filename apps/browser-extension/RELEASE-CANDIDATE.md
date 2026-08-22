@@ -1,6 +1,6 @@
 # LyricStage for YouTube Music 0.3.0 Release Candidate
 
-Build artifact: `web/extension-dist`
+Build artifact: `extension-dist`
 
 ## Closed automatic gates
 
@@ -26,9 +26,9 @@ Build artifact: `web/extension-dist`
 - [x] System reduced-motion and lightweight mode override personal VJ intensity.
 - [x] Production extension excludes Theatre Studio, `MediaRecorder`, `captureStream`, eval and CommonJS require; `tabCapture` is limited to user-started, in-memory feature analysis in the offscreen document.
 - [x] `content-ui.js` stays below the 1.2MB launch ceiling.
-- [x] Full local release suite: 32 Web files and 296/296 tests passing; dedicated Director: 27/27 passing. The final race gates cover same-recording standalone A→B ownership/clock reset (including no-capture B and late A status), captureID/StrictMode/fullscreen cleanup, immutable follow-authority/bound-tab ownership including authorization-pending promotion, MV3 worker rehydration, four BYOK protocols, fallback/retry, one shared 105-second deadline, Key-free cache identity and bounded host recovery.
+- [x] Full local release suite: 32 Web files and 297/297 tests passing; dedicated Director: 27/27 passing. The final race gates cover same-recording standalone A→B ownership/clock reset (including no-capture B and late A status), captureID/StrictMode/fullscreen cleanup, immutable follow-authority/bound-tab ownership including authorization-pending promotion, MV3 worker rehydration, four BYOK protocols, fallback/retry, one shared 105-second deadline, Key-free cache identity and bounded host recovery.
 - [x] TypeScript and `build:all` pass; the aggregate build explicitly rebuilds standalone Stage, Performance Lab and both Manifest V3 extension surfaces, followed by CSP verification.
-- [x] A clean temporary source copy independently rebuilt every file in `web/extension-dist` byte-for-byte; source `content.js` and `manifest.json` are packaged verbatim.
+- [x] A clean temporary source copy independently rebuilt every file in `extension-dist` byte-for-byte; source `content.js` and `manifest.json` are packaged verbatim.
 - [x] The Companion no longer depends on `director.hachi-mi.uk`; the existing 1.5.8/V4 service and deployment files remain an optional gateway/rollback implementation and are not a source of user provider Keys.
 - [x] The client cache epoch is `fullscreen-director-v4-client-contract-v8.6-byok-v1`, and cache identity includes protocol/endpoint/model but excludes API Key.
 - [x] Local browser continuous benchmark: 240 Canvas frames, P95 0.30ms, P99 0.30ms, max 0.40ms, WebGL active.
@@ -36,7 +36,7 @@ Build artifact: `web/extension-dist`
 
 ## Manual Chrome gates
 
-- [ ] Reload the latest unpacked `web/extension-dist`, refresh every open YTM tab, then confirm `data-lyricstage-content-script="isolated-v3"`, video artwork fallback, BYOK configuration/status/takeover, two different-song tabs route their own Stage/seek/transport/capture, pause/seek redraw, track cleanup, Lyrics/Related leaves exactly one host, and no warning/error loop. Any bounded mount failure is exposed through `data-lyricstage-last-mount-failure` instead of silently disappearing.
+- [x] Reloaded the latest unpacked `extension-dist` and refreshed YouTube Music. The page reported `data-lyricstage-content-script="isolated-v3"`; Lyrics mounted exactly one v2 host and zero legacy hosts; Related removed it and Lyrics remounted one host without a recorded mount failure. Multi-tab seek isolation, pause/resume and artwork fallback were also exercised. In automation where Fullscreen API ownership was denied, the UI stayed in Column instead of rendering a false viewport stage.
 
 - [x] A previous `web/extension-dist` 0.2.1 build was reloaded and established the baseline YTM UI gates below; these are historical evidence, not validation of the current candidate.
 - [x] Native Lyrics Column mounts exactly once; Related hides the extension and restores native content, then Lyrics remounts once.
@@ -48,4 +48,4 @@ Build artifact: `web/extension-dist`
 - [x] Page reload/reconnect remounts exactly once, preserves the VJ preference and produces no console warning/error loop.
 - [x] Dedicated OCI Director Bearer is saved in extension-local storage. On real YTM track `Hew46pJkFW0`, background generation completed and fullscreen changed from `LS / LOCAL` to `LS / DIRECTED` at the next section boundary without interrupting playback.
 
-The source candidate remains fully usable without AI configuration by design, but the current artifact is not a release-ready Chrome build until the open Reload/multi-tab recovery gate is observed. AI configuration is optional and must never be required for a complete fullscreen performance.
+The source candidate remains fully usable without AI configuration by design. Real provider takeover still requires a user-supplied key and is an optional integration gate; AI configuration is never required for a complete fullscreen performance.

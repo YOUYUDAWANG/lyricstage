@@ -4,7 +4,7 @@ import { fileURLToPath } from "node:url";
 
 const extensionRoot = fileURLToPath(new URL("../extension-dist/", import.meta.url));
 const publicRoot = fileURLToPath(
-  new URL("../apps/youtube-music-companion/public/", import.meta.url),
+  new URL("../apps/browser-extension/public/", import.meta.url),
 );
 const forbidden = [
   { label: "eval", pattern: /\beval\s*\(/ },

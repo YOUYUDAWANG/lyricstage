@@ -5,8 +5,8 @@ import { defineConfig } from "vite";
 const fromRoot = (path: string) => fileURLToPath(new URL(path, import.meta.url));
 
 export default defineConfig({
-  root: fromRoot("./apps/youtube-music-companion"),
-  publicDir: fromRoot("./apps/youtube-music-companion/public"),
+  root: fromRoot("./apps/browser-extension"),
+  publicDir: fromRoot("./apps/browser-extension/public"),
   base: "./",
   plugins: [react()],
   resolve: {
@@ -24,10 +24,10 @@ export default defineConfig({
     emptyOutDir: true,
     rollupOptions: {
       input: {
-        stage: fromRoot("./apps/youtube-music-companion/stage.html"),
-        popup: fromRoot("./apps/youtube-music-companion/popup.html"),
-        offscreen: fromRoot("./apps/youtube-music-companion/offscreen.html"),
-        background: fromRoot("./apps/youtube-music-companion/src/background.ts"),
+        stage: fromRoot("./apps/browser-extension/stage.html"),
+        popup: fromRoot("./apps/browser-extension/popup.html"),
+        offscreen: fromRoot("./apps/browser-extension/offscreen.html"),
+        background: fromRoot("./apps/browser-extension/src/background.ts"),
       },
       output: {
         entryFileNames: "assets/[name].js",

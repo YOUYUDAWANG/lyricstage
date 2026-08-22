@@ -18,9 +18,9 @@
 
 ## 本地安装
 
-1. 在 `web/` 运行 `npm run build:extension`。
+1. 在仓库根目录运行 `npm run build:extension`。
 2. 打开 `chrome://extensions` 或 `edge://extensions`，开启开发者模式。
-3. 选择“加载已解压的扩展程序”，载入 `web/extension-dist`。
+3. 选择“加载已解压的扩展程序”，载入根目录的 `extension-dist`。
 4. **重新加载扩展**并刷新 YouTube Music；播放歌曲后点击原生「歌词 / Lyrics」标签，或从扩展弹窗激活。
 
 切换到「接下来播放」、「评论」或「相关内容」会自动恢复原生节点；在全屏状态按 `Esc` 可返回侧栏 Column。宿主音乐不会被接管。

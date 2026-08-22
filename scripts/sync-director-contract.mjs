@@ -1,7 +1,7 @@
 import { readFile, writeFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 
-const sourceURL = new URL("../../services/lyricstage-director/src/contract.js", import.meta.url);
+const sourceURL = new URL("../services/director-gateway/src/contract.js", import.meta.url);
 const targetURL = new URL("../packages/performance/src/directorContract.generated.ts", import.meta.url);
 const source = await readFile(sourceURL, "utf8");
 const browserSource = source.replace(

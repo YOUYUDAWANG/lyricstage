@@ -1,16 +1,9 @@
-import react from "@vitejs/plugin-react";
 import { fileURLToPath, URL } from "node:url";
-import { defineConfig } from "vite";
+import { defineConfig } from "vitest/config";
 
 const fromRoot = (path: string) => fileURLToPath(new URL(path, import.meta.url));
 
 export default defineConfig({
-  root: fromRoot("./apps/youtube-music-companion"),
-  publicDir: false,
-  define: {
-    "process.env.NODE_ENV": JSON.stringify("production"),
-  },
-  plugins: [react()],
   resolve: {
     alias: {
       "@lyricstage/contracts": fromRoot("./packages/contracts/src/index.ts"),
@@ -21,14 +14,12 @@ export default defineConfig({
       "@lyricstage/renderer": fromRoot("./packages/renderer/src/index.ts"),
     },
   },
-  build: {
-    outDir: fromRoot("./extension-dist"),
-    emptyOutDir: false,
-    lib: {
-      entry: fromRoot("./apps/youtube-music-companion/src/content-ui.tsx"),
-      name: "LyricStageEmbeddedColumn",
-      formats: ["iife"],
-      fileName: () => "content-ui.js",
-    },
+  test: {
+    environment: "node",
+    include: [
+      "packages/**/*.test.ts",
+      "apps/stage/src/**/*.test.ts",
+      "apps/browser-extension/src/**/*.test.ts",
+    ],
   },
 });

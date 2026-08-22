@@ -4,15 +4,15 @@ import { describe, expect, it, vi } from "vitest";
 
 describe("YouTube Music companion isolated content script lifecycle (real DOM shape)", () => {
   const contentScriptSource = readFileSync(
-    new URL("../../../apps/youtube-music-companion/public/content.js", import.meta.url),
+    new URL("../../../apps/browser-extension/public/content.js", import.meta.url),
     "utf8",
   );
   const manifestSource = readFileSync(
-    new URL("../../../apps/youtube-music-companion/public/manifest.json", import.meta.url),
+    new URL("../../../apps/browser-extension/public/manifest.json", import.meta.url),
     "utf8",
   );
   const contentUISource = readFileSync(
-    new URL("../../../apps/youtube-music-companion/src/content-ui.tsx", import.meta.url),
+    new URL("../../../apps/browser-extension/src/content-ui.tsx", import.meta.url),
     "utf8",
   );
   class FakeClock {

@@ -1,46 +1,14 @@
-# Xcode / 构建产物(工程由 xcodegen 从 project.yml 生成,不入库)
-BiliMusic.xcodeproj/
-DerivedData/
-.derivedData/
-build/
-*.xcuserstate
-xcuserdata/
-
-# macOS
 .DS_Store
-
-# 测试下载的音频
-scripts/*.m4a
-
-# 本地签名配置(各自的 Team ID,不入库;模板见 Local.xcconfig.example)
-Local.xcconfig
-
-# Claude Code 本地代码索引缓存(机器相关,可再生)
-.claude/index.json
-.claude/settings.local.json
-.claude/worktrees/
-
-# 本地 Agent/索引/研究缓存(机器相关,可再生)
-.ccg/
 .codegraph/
-.planning/research/.cache/
-
-# Project Cairn 外部原始输入（可能含敏感材料）
-cairn/Reference/
-
-# 本地工具与运行缓存
-.superpowers/
+node_modules/
+dist/
+performance-dist/
+extension-dist/
+.vite/
+coverage/
 .wrangler/
-**/.wrangler/
-**/__pycache__/
-**/node_modules/
-**/dist/
-web/extension-dist/
-web/performance-dist/
-**/.vite/
-*.pyc
-.pytest_cache/
+.dev.vars
+*.log
 .env
 .env.*
-.dev.vars
-**/.dev.vars
+!.env.example

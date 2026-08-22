@@ -1,10 +1,10 @@
-import antiPatterns from "../../../../services/lyricstage-director/skills/performance-direction-v1/anti-patterns.md?raw";
-import effectCards from "../../../../services/lyricstage-director/skills/performance-direction-v1/effect-cards/catalog.json";
-import grammar from "../../../../services/lyricstage-director/skills/performance-direction-v1/grammar.json";
-import gestureGrammar from "../../../../services/lyricstage-director/skills/performance-direction-v2/gesture-grammar.json";
-import responseSchemaSource from "../../../../services/lyricstage-director/skills/performance-direction-v2/schema.json";
-import instructions from "../../../../services/lyricstage-director/skills/performance-direction-v3/SKILL.md?raw";
-import dramaticGrammar from "../../../../services/lyricstage-director/skills/performance-direction-v3/dramatic-grammar.json";
+import antiPatterns from "../../../services/director-gateway/skills/performance-direction-v1/anti-patterns.md?raw";
+import effectCards from "../../../services/director-gateway/skills/performance-direction-v1/effect-cards/catalog.json";
+import grammar from "../../../services/director-gateway/skills/performance-direction-v1/grammar.json";
+import gestureGrammar from "../../../services/director-gateway/skills/performance-direction-v2/gesture-grammar.json";
+import responseSchemaSource from "../../../services/director-gateway/skills/performance-direction-v2/schema.json";
+import instructions from "../../../services/director-gateway/skills/performance-direction-v3/SKILL.md?raw";
+import dramaticGrammar from "../../../services/director-gateway/skills/performance-direction-v3/dramatic-grammar.json";
 
 type JSONRecord = Record<string, unknown>;
 

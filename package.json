@@ -1,5 +1,5 @@
 {
-  "name": "lyricstage-web",
+  "name": "lyricstage",
   "version": "0.3.0",
   "private": true,
   "license": "AGPL-3.0-only",
@@ -21,7 +21,7 @@
     "typecheck": "npm run sync:director-contract && tsc -p tsconfig.json"
   },
   "dependencies": {
-    "ajv": "8.17.1",
+    "ajv": "8.20.0",
     "pixi.js": "8.20.0",
     "react": "19.2.6",
     "react-dom": "19.2.6"
@@ -35,7 +35,7 @@
     "@types/react-dom": "19.2.3",
     "@vitejs/plugin-react": "6.0.2",
     "typescript": "5.9.3",
-    "vite": "8.0.13",
+    "vite": "8.2.2",
     "vitest": "4.1.0"
   }
 }
