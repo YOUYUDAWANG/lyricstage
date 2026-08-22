@@ -4,6 +4,7 @@ import {
   apiKeyPlaceholder,
   buildDirectorDiscoveryPayload,
   buildDirectorSavePayload,
+  canReuseSavedProviderKey,
   defaultDirectorEndpoint,
   displayLyricsEndpoint,
   draftFromPublicProvider,
@@ -49,6 +50,27 @@ describe("extension settings model", () => {
     expect(draft.apiKey).toBe("");
     expect(draft.model).toBe("gpt-5");
     expect(apiKeyPlaceholder(true)).toBe("同一接口已保存；留空可继续使用");
+  });
+
+  it("only promises saved-key reuse for the same protocol and endpoint", () => {
+    const saved = {
+      protocol: "gemini" as const,
+      endpoint: "https://generativelanguage.googleapis.com/v1beta",
+      model: "gemini-flash",
+      hasApiKey: true,
+    };
+    expect(canReuseSavedProviderKey(saved, {
+      protocol: "gemini",
+      endpoint: "https://generativelanguage.googleapis.com/v1beta/",
+      model: "gemini-flash",
+      apiKey: "",
+    })).toBe(true);
+    expect(canReuseSavedProviderKey(saved, {
+      protocol: "openai-responses",
+      endpoint: "https://api.openai.com/v1",
+      model: "",
+      apiKey: "",
+    })).toBe(false);
   });
 
   it("builds a BYOK save payload without inventing a fallback", () => {

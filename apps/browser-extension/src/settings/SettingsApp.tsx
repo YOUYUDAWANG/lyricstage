@@ -16,6 +16,7 @@ import {
 } from "./settingsClient";
 import {
   apiKeyPlaceholder,
+  canReuseSavedProviderKey,
   directorProtocolOptions,
   directorStatusCopy,
   directorTimingCopy,
@@ -70,10 +71,14 @@ const readConnection = (value: unknown): ConnectionStatus => {
 };
 
 const sectionIcon = (section: SettingsSection): ReactNode => {
-  if (section === "lyrics") return "♫";
-  if (section === "director") return "✦";
-  if (section === "performance") return "◫";
-  return "⌾";
+  const paths = section === "lyrics"
+    ? <><path d="M9 18V5l9-2v13" /><circle cx="6" cy="18" r="3" /><circle cx="15" cy="16" r="3" /></>
+    : section === "director"
+      ? <><path d="M12 3v3M12 18v3M3 12h3M18 12h3" /><path d="m6.3 6.3 2.1 2.1m7.2 7.2 2.1 2.1m0-11.4-2.1 2.1m-7.2 7.2-2.1 2.1" /><circle cx="12" cy="12" r="3.2" /></>
+      : section === "performance"
+        ? <path d="M4 19V9m5 10V5m5 14v-7m5 7V3" />
+        : <><path d="M12 3a7 7 0 0 0-4 12.7V21h8v-5.3A7 7 0 0 0 12 3Z" /><path d="M9 17h6" /></>;
+  return <svg viewBox="0 0 24 24" aria-hidden="true">{paths}</svg>;
 };
 
 const discoveryCopy = (state: ModelDiscoveryState): string => {
@@ -82,6 +87,13 @@ const discoveryCopy = (state: ModelDiscoveryState): string => {
   if (state.phase === "saved") return "当前为已保存模型；连接后可刷新列表";
   if (state.phase === "error") return state.reason ?? "连接失败";
   return "连接提供商后选择模型";
+};
+
+const sectionDescription = (section: SettingsSection): string => {
+  if (section === "lyrics") return "配置可选的私有歌词服务；公开只读来源始终保留。";
+  if (section === "director") return "连接模型提供商，验证账户，再选择用于整曲演出的模型。";
+  if (section === "performance") return "调整歌词栏和全屏舞台的本机演出偏好。";
+  return "查看 LyricStage 如何处理密钥、媒体和站点权限。";
 };
 
 interface ProviderFieldsProps {
@@ -121,17 +133,17 @@ const ProviderFields = ({
     <section className="provider-panel" aria-label={fallback ? "备用模型提供商" : "主要模型提供商"}>
       <header className="provider-heading">
         <div>
-          <span className="provider-eyebrow">{fallback ? "Fallback" : "Primary"}</span>
-          <h3>{fallback ? "备用提供商" : "主要提供商"}</h3>
+          <h3>{fallback ? "备用提供商" : "模型提供商"}</h3>
+          <p>{fallback ? "主模型不可用时按相同规则接替。" : "先验证连接，再从账户实际可用的模型中选择。"}</p>
         </div>
         <span className="connection-state" data-phase={discovery.phase}>
-          <i />{discovery.phase === "connected" ? "已连接" : discovery.phase === "error" ? "连接失败" : "待连接"}
+          <i />{discovery.phase === "connected" ? "本次已验证" : discovery.phase === "error" ? "连接失败" : discovery.phase === "saved" ? "已保存" : "未验证"}
         </span>
       </header>
 
-      <div className="provider-grid">
-        <label className="field-group compact-field">
-          <span>接口协议</span>
+      <div className="provider-rows">
+        <label className="provider-row">
+          <span><strong>提供商</strong><small>决定连接协议和默认 API 地址</small></span>
           <select
             data-director-protocol={fallback ? undefined : ""}
             data-director-fallback-protocol={fallback ? "" : undefined}
@@ -143,22 +155,8 @@ const ProviderFields = ({
           </select>
         </label>
 
-        <label className="field-group endpoint-field">
-          <span>API 地址</span>
-          <input
-            data-director-endpoint={fallback ? undefined : ""}
-            data-director-fallback-endpoint={fallback ? "" : undefined}
-            type="url"
-            value={draft.endpoint}
-            disabled={disabled || connecting}
-            placeholder={fallback ? "http://127.0.0.1:11434/v1" : "https://api.openai.com/v1"}
-            autoComplete="off"
-            onChange={(event) => updateConnection({ endpoint: event.target.value }, true)}
-          />
-        </label>
-
-        <label className="field-group key-field">
-          <span>{fallback ? "备用 API Key" : "API Key"}</span>
+        <label className="provider-row">
+          <span><strong>{fallback ? "备用 API Key" : "API Key"}</strong><small>{hasApiKey ? "同一提供商已保存，可留空继续使用" : draft.protocol === "openai-compatible" ? "本地无鉴权服务可以留空" : "只保存在本机扩展存储"}</small></span>
           <input
             data-director-api-key={fallback ? undefined : ""}
             data-director-fallback-api-key={fallback ? "" : undefined}
@@ -174,38 +172,59 @@ const ProviderFields = ({
           />
         </label>
 
-        <button
-          className="connect-button"
-          type="button"
-          data-discover-director-models={fallback ? undefined : ""}
-          data-discover-fallback-models={fallback ? "" : undefined}
-          disabled={disabled || connecting || !draft.endpoint.trim()}
-          onClick={onDiscover}
-        >
-          <span aria-hidden="true">↻</span>
-          {connecting ? "连接中" : discovery.phase === "connected" ? "刷新模型" : "连接提供商"}
-        </button>
-
-        <label className="field-group model-field">
-          <span>可用模型</span>
-          <select
-            data-director-model={fallback ? undefined : ""}
-            data-director-fallback-model={fallback ? "" : undefined}
-            value={draft.model}
-            disabled={disabled || connecting || modelOptions.length === 0}
-            onChange={(event) => onChange({ ...draft, model: event.target.value })}
+        <div className="provider-row provider-connect-row">
+          <span><strong>连接验证</strong><small>仅请求当前 API origin 并读取模型列表</small></span>
+          <button
+            className="connect-button"
+            type="button"
+            data-discover-director-models={fallback ? undefined : ""}
+            data-discover-fallback-models={fallback ? "" : undefined}
+            disabled={disabled || connecting || !draft.endpoint.trim()}
+            onClick={onDiscover}
           >
-            <option value="">{modelOptions.length > 0 ? "选择模型" : "请先连接提供商"}</option>
-            {modelOptions.map((model) => (
-              <option key={model.id} value={model.id}>
-                {model.label === model.id ? model.id : `${model.label} · ${model.id}`}
-              </option>
-            ))}
-          </select>
-        </label>
+            {connecting ? "正在连接…" : discovery.phase === "connected" ? "刷新模型" : "连接并读取模型"}
+          </button>
+        </div>
+
+        {modelOptions.length > 0 && (
+          <label className="provider-row model-row">
+            <span><strong>可用模型</strong><small>{discovery.phase === "saved" ? "当前为已保存选择，重新连接可刷新" : `${modelOptions.length} 个模型可供选择`}</small></span>
+            <select
+              data-director-model={fallback ? undefined : ""}
+              data-director-fallback-model={fallback ? "" : undefined}
+              value={draft.model}
+              disabled={disabled || connecting}
+              onChange={(event) => onChange({ ...draft, model: event.target.value })}
+            >
+              <option value="">请选择模型</option>
+              {modelOptions.map((model) => (
+                <option key={model.id} value={model.id}>
+                  {model.label === model.id ? model.id : `${model.label} · ${model.id}`}
+                </option>
+              ))}
+            </select>
+          </label>
+        )}
       </div>
 
       <p className="provider-footnote" data-phase={discovery.phase} aria-live="polite">{discoveryCopy(discovery)}</p>
+
+      <details className="advanced-disclosure">
+        <summary>高级连接设置</summary>
+        <label className="advanced-endpoint">
+          <span>API 地址</span>
+          <input
+            data-director-endpoint={fallback ? undefined : ""}
+            data-director-fallback-endpoint={fallback ? "" : undefined}
+            type="url"
+            value={draft.endpoint}
+            disabled={disabled || connecting}
+            placeholder={fallback ? "http://127.0.0.1:11434/v1" : "https://api.openai.com/v1"}
+            autoComplete="off"
+            onChange={(event) => updateConnection({ endpoint: event.target.value }, true)}
+          />
+        </label>
+      </details>
     </section>
   );
 };
@@ -220,25 +239,36 @@ export const SettingsApp = () => {
   const [lyrics, setLyrics] = useState<LyricsConfigView>({ configured: false });
   const [lyricsEndpoint, setLyricsEndpoint] = useState(displayLyricsEndpoint(undefined));
   const [lyricsToken, setLyricsToken] = useState("");
+  const [lyricsDirty, setLyricsDirty] = useState(false);
   const [director, setDirector] = useState<DirectorConfigView>({ configured: false });
   const [primary, setPrimary] = useState<ProviderDraft>(emptyProviderDraft());
   const [primaryDiscovery, setPrimaryDiscovery] = useState<ModelDiscoveryState>(emptyDiscovery);
   const [fallbackEnabled, setFallbackEnabled] = useState(false);
   const [fallback, setFallback] = useState<ProviderDraft>(emptyProviderDraft(true));
   const [fallbackDiscovery, setFallbackDiscovery] = useState<ModelDiscoveryState>(emptyDiscovery);
+  const [directorDirty, setDirectorDirty] = useState(false);
   const [preferences, setPreferences] = useState<ExtensionPreferencesV0>({ lightweight: false, vjMode: false });
+  const [preferenceStatus, setPreferenceStatus] = useState("修改后立即保存在本机");
   const [busy, setBusy] = useState<"lyrics" | "director" | "performance" | undefined>();
   const available = runtimeAvailable();
 
   const applyLyrics = useCallback((next: LyricsConfigView) => {
+    if (next.reason) {
+      setLyrics((current) => ({ ...current, reason: next.reason }));
+      return;
+    }
     setLyrics(next);
     setLyricsEndpoint(displayLyricsEndpoint(next));
     setLyricsToken("");
+    setLyricsDirty(false);
   }, []);
 
   const applyDirector = useCallback((next: DirectorConfigView) => {
+    if (next.reason) {
+      setDirector((current) => ({ ...current, reason: next.reason }));
+      return;
+    }
     setDirector(next);
-    if (next.reason) return;
     const nextPrimary = draftFromPublicProvider(next.primary);
     const nextFallback = draftFromPublicProvider(next.fallback, true);
     setPrimary(nextPrimary);
@@ -246,7 +276,18 @@ export const SettingsApp = () => {
     setPrimaryDiscovery(savedDiscovery(nextPrimary.model));
     setFallbackDiscovery(savedDiscovery(nextFallback.model));
     setFallbackEnabled(Boolean(next.fallback));
+    setDirectorDirty(false);
   }, []);
+
+  useEffect(() => {
+    if (!lyricsDirty && !directorDirty) return undefined;
+    const preventAccidentalClose = (event: BeforeUnloadEvent) => {
+      event.preventDefault();
+      event.returnValue = "";
+    };
+    window.addEventListener("beforeunload", preventAccidentalClose);
+    return () => window.removeEventListener("beforeunload", preventAccidentalClose);
+  }, [directorDirty, lyricsDirty]);
 
   useEffect(() => {
     const syncSection = () => setSection(settingsSectionFromHash(window.location.hash));
@@ -291,6 +332,7 @@ export const SettingsApp = () => {
   };
 
   const onClearLyrics = async () => {
+    if (!window.confirm("删除私有歌词服务地址和本机保存的 Bearer 令牌？公开歌词来源不会受影响。")) return;
     setBusy("lyrics");
     applyLyrics(await saveLyricsConfiguration("", ""));
     setBusy(undefined);
@@ -307,12 +349,11 @@ export const SettingsApp = () => {
       return;
     }
     setDiscovery({ phase: "connected", models: result.models });
-    setDraft((current) => ({
-      ...current,
-      model: result.models.some((model) => model.id === current.model)
-        ? current.model
-        : result.models[0]?.id ?? "",
-    }));
+    setDraft((current) => {
+      const model = result.models.some((candidate) => candidate.id === current.model) ? current.model : "";
+      if (model !== current.model) setDirectorDirty(true);
+      return { ...current, model };
+    });
   };
 
   const onSaveDirector = async (event: FormEvent) => {
@@ -323,22 +364,38 @@ export const SettingsApp = () => {
   };
 
   const onClearDirector = async () => {
+    if (!window.confirm("删除 AI 导演配置和本机保存的提供商 Key？删除后仍会继续使用本地确定性演出。")) return;
     setBusy("director");
     applyDirector(await clearDirectorConfiguration());
     setBusy(undefined);
   };
 
   const onTogglePreference = async (patch: Partial<ExtensionPreferencesV0>) => {
+    const previous = preferences;
     const next = { ...preferences, ...patch };
     setPreferences(next);
     setBusy("performance");
+    setPreferenceStatus("正在保存…");
     try {
       await saveExtensionPreferences(next);
+      setPreferenceStatus("已保存");
     } catch {
-      setPreferences(preferences);
+      setPreferences(previous);
+      setPreferenceStatus("保存失败，已恢复原设置");
     } finally {
       setBusy(undefined);
     }
+  };
+
+  const resetLyricsDraft = () => {
+    setLyricsEndpoint(displayLyricsEndpoint(lyrics));
+    setLyricsToken("");
+    setLyricsDirty(false);
+  };
+
+  const resetDirectorDraft = () => {
+    const { reason: _reason, ...saved } = director;
+    applyDirector(saved);
   };
 
   if (!available) {
@@ -352,12 +409,14 @@ export const SettingsApp = () => {
   }
 
   const currentSection = settingsSections.find((item) => item.id === section);
+  const currentSummary = section === "lyrics"
+    ? summarizeLyricsConfig(lyrics)
+    : section === "director"
+      ? summarizeDirectorConfig(director)
+      : section === "performance" ? preferenceStatus : "本机优先";
 
   return (
     <div className="settings-window">
-      <div className="ambient-shape ambient-one" />
-      <div className="ambient-shape ambient-two" />
-
       <aside className="settings-sidebar">
         <header className="settings-brand">
           <span className="settings-mark">LS</span>
@@ -370,7 +429,7 @@ export const SettingsApp = () => {
               event.preventDefault();
               openSection(item.id);
             }}>
-              <i aria-hidden="true">{sectionIcon(item.id)}</i><span>{item.label}</span>
+              <span className="nav-icon">{sectionIcon(item.id)}</span><span>{item.label}</span>
             </a>
           ))}
         </nav>
@@ -381,67 +440,60 @@ export const SettingsApp = () => {
       </aside>
 
       <main className="settings-content">
-        <header className="settings-toolbar">
-          <div><span className="toolbar-eyebrow">LyricStage</span><h1>{currentSection?.label}</h1></div>
-          <span className="toolbar-status" data-connected={connection.connected || undefined}><i />{connection.connected ? connection.artist : "未连接播放器"}</span>
+        <header className="settings-page-header">
+          <div><h1>{currentSection?.label}</h1><p>{sectionDescription(section)}</p></div>
+          <span className="page-status" data-on={(section === "lyrics" ? lyrics.configured : section === "director" ? director.configured : true) || undefined}>{currentSummary}</span>
         </header>
 
         <div className="settings-scroll">
           {section === "lyrics" && (
             <form className="settings-card" onSubmit={(event) => void onSaveLyrics(event)}>
-              <header className="settings-card-head">
-                <div className="card-icon lyrics-icon">♫</div>
-                <div><h2>私有多源歌词</h2><p>接入自己的 LDDC，同时保留 LRCLIB 与酷狗的自动搜索。</p></div>
-                <span className="settings-pill" data-on={lyrics.configured || undefined}>{summarizeLyricsConfig(lyrics)}</span>
-              </header>
+              <div className="section-intro"><h2>私有多源歌词</h2><p>接入自己的 LDDC；LRCLIB 与酷狗仍作为公开只读来源。</p></div>
               <div className="grouped-form">
-                <label className="form-row"><span>后端地址</span><input data-lyrics-endpoint="" type="url" value={lyricsEndpoint} disabled={busy === "lyrics"} placeholder="http://100.x.x.x:8788/" autoComplete="off" onChange={(event) => setLyricsEndpoint(event.target.value)} /></label>
-                <label className="form-row"><span>Bearer 令牌</span><input data-lyrics-token="" type="password" value={lyricsToken} disabled={busy === "lyrics"} placeholder="原地址已配置时可留空" autoComplete="new-password" onChange={(event) => setLyricsToken(event.target.value)} /></label>
+                <label className="form-row"><span><strong>后端地址</strong><small>支持本机、局域网或 Tailscale 地址</small></span><input data-lyrics-endpoint="" type="url" value={lyricsEndpoint} disabled={busy === "lyrics"} placeholder="http://100.x.x.x:8788/" autoComplete="off" onChange={(event) => { setLyricsEndpoint(event.target.value); setLyricsDirty(true); }} /></label>
+                <label className="form-row"><span><strong>Bearer 令牌</strong><small>{lyrics.configured ? "原地址已配置时可留空" : "仅保存在本机扩展存储"}</small></span><input data-lyrics-token="" type="password" value={lyricsToken} disabled={busy === "lyrics"} placeholder="可选" autoComplete="new-password" onChange={(event) => { setLyricsToken(event.target.value); setLyricsDirty(true); }} /></label>
               </div>
               <footer className="settings-card-footer">
-                <small className="settings-status" data-lyrics-config-status="">{lyricsStatusCopy(lyrics)}</small>
-                <div className="settings-actions"><button type="button" data-clear-lyrics-config="" disabled={busy === "lyrics"} onClick={() => void onClearLyrics()}>停用</button><button className="primary" type="submit" data-save-lyrics-config="" disabled={busy === "lyrics"}>保存</button></div>
+                <small className="settings-status" data-lyrics-config-status="">{lyricsDirty ? "有未保存修改" : lyricsStatusCopy(lyrics)}</small>
+                <div className="settings-actions"><button type="button" className="danger" data-clear-lyrics-config="" disabled={busy === "lyrics" || !lyrics.configured} onClick={() => void onClearLyrics()}>删除配置与令牌</button>{lyricsDirty && <button type="button" disabled={busy === "lyrics"} onClick={resetLyricsDraft}>取消修改</button>}<button className="primary" type="submit" data-save-lyrics-config="" disabled={busy === "lyrics" || (lyrics.configured && !lyricsDirty)}>{busy === "lyrics" ? "正在保存…" : "保存"}</button></div>
               </footer>
             </form>
           )}
 
           {section === "director" && (
             <form className="settings-card director-card" onSubmit={(event) => void onSaveDirector(event)}>
-              <header className="settings-card-head">
-                <div className="card-icon director-icon">✦</div>
-                <div><h2>AI 导演</h2><p>连接模型提供商，读取账户实际可用的模型，再选择演出导演。</p></div>
-                <span className="settings-pill" data-on={director.configured || undefined}>{summarizeDirectorConfig(director)}</span>
-              </header>
-              <ProviderFields draft={primary} discovery={primaryDiscovery} hasApiKey={director.primary?.hasApiKey === true} disabled={busy === "director"} onChange={setPrimary} onDiscoveryReset={() => setPrimaryDiscovery(emptyDiscovery())} onDiscover={() => void onDiscover("primary")} />
+              <ProviderFields draft={primary} discovery={primaryDiscovery} hasApiKey={canReuseSavedProviderKey(director.primary, primary)} disabled={busy === "director"} onChange={(next) => { setPrimary(next); setDirectorDirty(true); }} onDiscoveryReset={() => setPrimaryDiscovery(emptyDiscovery())} onDiscover={() => void onDiscover("primary")} />
               <label className="settings-toggle fallback-toggle">
                 <span><strong>备用提供商</strong><small>主模型失败时自动切换，然后再回到本地确定性演出。</small></span>
                 <input data-director-fallback-enabled="" type="checkbox" checked={fallbackEnabled} disabled={busy === "director"} onChange={(event) => {
                   setFallbackEnabled(event.target.checked);
+                  setDirectorDirty(true);
                   if (event.target.checked) setFallback((current) => ({ ...current, endpoint: endpointForChangedProtocol(current.protocol, current.endpoint) }));
                 }} />
               </label>
-              {fallbackEnabled && <ProviderFields draft={fallback} discovery={fallbackDiscovery} hasApiKey={director.fallback?.hasApiKey === true} fallback disabled={busy === "director"} onChange={setFallback} onDiscoveryReset={() => setFallbackDiscovery(emptyDiscovery())} onDiscover={() => void onDiscover("fallback")} />}
-              <div className="privacy-banner"><span aria-hidden="true">⌾</span><p>请求从扩展直接发往所选 API。Key 只保存在本机扩展存储；模型列表和导演计划都不会包含 Key。HTTP 仅允许本机、局域网、link-local 或 Tailscale 地址。</p></div>
+              {fallbackEnabled && <ProviderFields draft={fallback} discovery={fallbackDiscovery} hasApiKey={canReuseSavedProviderKey(director.fallback, fallback)} fallback disabled={busy === "director"} onChange={(next) => { setFallback(next); setDirectorDirty(true); }} onDiscoveryReset={() => setFallbackDiscovery(emptyDiscovery())} onDiscover={() => void onDiscover("fallback")} />}
+              <div className="privacy-banner"><span aria-hidden="true">i</span><p>请求直接发往所选 API。Key 只保存在本机，模型列表与导演计划都不会包含 Key。</p></div>
               <footer className="settings-card-footer">
-                <div className="settings-status-stack"><small className="settings-status" data-director-config-status="">{directorStatusCopy(director)}</small><small className="settings-status" data-director-last-timing="">{directorTimingCopy(director)}</small></div>
-                <div className="settings-actions"><button type="button" data-clear-director-config="" disabled={busy === "director"} onClick={() => void onClearDirector()}>停用</button><button className="primary" type="submit" data-save-director-config="" disabled={busy === "director" || !primary.model}>保存并启用</button></div>
+                <div className="settings-status-stack"><small className="settings-status" data-director-config-status="">{directorDirty ? "有未保存修改" : directorStatusCopy(director)}</small><small className="settings-status" data-director-last-timing="">{directorTimingCopy(director)}</small></div>
+                <div className="settings-actions"><button type="button" className="danger" data-clear-director-config="" disabled={busy === "director" || !director.configured} onClick={() => void onClearDirector()}>删除配置与 Key</button>{directorDirty && <button type="button" disabled={busy === "director"} onClick={resetDirectorDraft}>取消修改</button>}<button className="primary" type="submit" data-save-director-config="" disabled={busy === "director" || !directorDirty || !primary.model}>{busy === "director" ? "正在保存…" : "保存并启用"}</button></div>
               </footer>
             </form>
           )}
 
           {section === "performance" && (
             <section className="settings-card">
-              <header className="settings-card-head"><div className="card-icon performance-icon">◫</div><div><h2>演出偏好</h2><p>与 YouTube Music 侧栏共用同一份本机设置，并实时生效。</p></div></header>
+              <div className="section-intro"><h2>演出偏好</h2><p>与 YouTube Music 歌词栏共用，并在修改后立即保存。</p></div>
               <div className="grouped-list">
                 <label className="settings-switch"><span><strong>轻量模式</strong><small>减少模糊和动态效果，适合低性能设备或安静阅读。</small></span><input type="checkbox" checked={preferences.lightweight} disabled={busy === "performance"} onChange={(event) => void onTogglePreference({ lightweight: event.target.checked })} /></label>
                 <label className="settings-switch"><span><strong>个人 VJ 模式</strong><small>增强全屏环境运动；系统“减少动态效果”仍拥有最终优先级。</small></span><input type="checkbox" checked={preferences.vjMode} disabled={busy === "performance"} onChange={(event) => void onTogglePreference({ vjMode: event.target.checked })} /></label>
               </div>
+              <small className="inline-status" aria-live="polite">{preferenceStatus}</small>
             </section>
           )}
 
           {section === "privacy" && (
             <section className="settings-card">
-              <header className="settings-card-head"><div className="card-icon privacy-icon">⌾</div><div><h2>本机边界</h2><p>LyricStage 只取完成同步演出所需的最小数据。</p></div></header>
+              <div className="section-intro"><h2>本机边界</h2><p>LyricStage 只取完成同步演出所需的最小数据。</p></div>
               <div className="privacy-list">
                 <article><span>1</span><div><strong>密钥留在本机</strong><p>LDDC Bearer 与供应商 API Key 只写入 <code>chrome.storage.local</code>。</p></div></article>
                 <article><span>2</span><div><strong>不接管媒体</strong><p>扩展不读取 Cookie、不下载媒体、不持久化 PCM，也不上传原始音频。</p></div></article>

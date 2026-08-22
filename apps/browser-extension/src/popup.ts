@@ -9,6 +9,7 @@ import {
   saveExtensionPreferences,
   type ExtensionPreferencesV0,
 } from "../../stage/src/playback/extensionPreferences";
+import { persistPopupPreferencePatch } from "./popupPreferences";
 
 interface PopupChrome {
   runtime: {
@@ -39,9 +40,23 @@ const lyricsSummary = document.querySelector<HTMLElement>("[data-lyrics-summary]
 const directorSummary = document.querySelector<HTMLElement>("[data-director-summary]");
 const lightweightToggle = document.querySelector<HTMLInputElement>("[data-lightweight-toggle]");
 const vjToggle = document.querySelector<HTMLInputElement>("[data-vj-toggle]");
+const notice = document.querySelector<HTMLElement>("[data-popup-notice]");
 let refreshGeneration = 0;
 let activationMessageUntil = 0;
 let preferences: ExtensionPreferencesV0 = { lightweight: false, vjMode: false };
+let noticeTimer: number | undefined;
+let preferenceSaveGeneration = 0;
+
+const showNotice = (message: string, tone: "info" | "error" = "info", durationMs = 4200) => {
+  if (!notice) return;
+  window.clearTimeout(noticeTimer);
+  notice.textContent = message;
+  notice.dataset.tone = tone;
+  noticeTimer = window.setTimeout(() => {
+    notice.textContent = "";
+    delete notice.dataset.tone;
+  }, durationMs);
+};
 
 const render = (value: unknown) => {
   const next = value as PopupStatus;
@@ -73,7 +88,7 @@ const activationFailureCopy = (reason: string | undefined): string => {
 
 openStageButton?.addEventListener("click", () => {
   openStageButton.disabled = true;
-  if (statusElement) statusElement.textContent = "正在打开歌词";
+  showNotice("正在打开歌词舞台…", "info", 8000);
   void chromeAPI.runtime.sendMessage({ type: "youtube-music-open-stage" }).then((response) => {
     const result = response as { ok?: boolean; reason?: string } | undefined;
     if (result?.ok) {
@@ -82,20 +97,18 @@ openStageButton?.addEventListener("click", () => {
     }
     refreshGeneration += 1;
     activationMessageUntil = Date.now() + 5000;
-    if (statusElement) statusElement.textContent = "需要处理";
-    if (artist) artist.textContent = activationFailureCopy(result?.reason);
+    showNotice(activationFailureCopy(result?.reason), "error");
   }).catch(() => {
     refreshGeneration += 1;
     activationMessageUntil = Date.now() + 5000;
-    if (statusElement) statusElement.textContent = "打开失败";
-    if (artist) artist.textContent = activationFailureCopy(undefined);
+    showNotice(activationFailureCopy(undefined), "error");
   }).finally(() => {
     openStageButton.disabled = false;
   });
 });
 document.querySelector("[data-open-source]")?.addEventListener("click", () => {
   void chromeAPI.runtime.sendMessage({ type: "youtube-music-open-source" }).catch(() => {
-    if (statusElement) statusElement.textContent = "无法打开 YouTube Music";
+    showNotice("无法打开 YouTube Music", "error");
   });
 });
 document.querySelector("[data-open-settings]")?.addEventListener("click", () => {
@@ -104,7 +117,7 @@ document.querySelector("[data-open-settings]")?.addEventListener("click", () => 
       window.close();
       return;
     }
-    if (statusElement) statusElement.textContent = "无法打开设置";
+    showNotice("无法打开设置", "error");
   });
 });
 
@@ -115,7 +128,7 @@ document.querySelectorAll<HTMLElement>("[data-open-settings-section]").forEach((
       url: chromeAPI.runtime.getURL(`settings.html#${section}`),
       active: true,
     }).then(() => window.close()).catch(() => {
-      if (statusElement) statusElement.textContent = "无法打开设置";
+      showNotice("无法打开设置", "error");
     });
   });
 });
@@ -126,10 +139,15 @@ const renderPreferences = () => {
 };
 
 const updatePreferences = (patch: Partial<ExtensionPreferencesV0>) => {
-  preferences = { ...preferences, ...patch };
+  const previous = preferences;
+  const generation = ++preferenceSaveGeneration;
+  preferences = { ...previous, ...patch };
   renderPreferences();
-  void saveExtensionPreferences(preferences).catch(() => {
-    if (statusElement) statusElement.textContent = "偏好保存失败";
+  void persistPopupPreferencePatch(previous, patch, saveExtensionPreferences).then((result) => {
+    if (generation !== preferenceSaveGeneration) return;
+    preferences = result.preferences;
+    renderPreferences();
+    showNotice(result.saved ? "演出偏好已保存" : "保存失败，已恢复原设置", result.saved ? "info" : "error", result.saved ? 1800 : 4200);
   });
 };
 
@@ -143,10 +161,9 @@ const resumePendingAudioAnalysis = () => {
       if (!result?.pending) return;
       refreshGeneration += 1;
       activationMessageUntil = Date.now() + 3500;
-      if (statusElement) statusElement.textContent = result.ok ? "人声增强已启动" : "音频授权失败";
-      if (artist) artist.textContent = result.ok
+      showNotice(result.ok
         ? "可关闭此窗口，歌词会按本地人声节奏修正"
-        : result.reason || "请回到 YouTube Music 后重试";
+        : result.reason || "请回到 YouTube Music 后重试", result.ok ? "info" : "error");
     })
     .catch(() => undefined);
 };

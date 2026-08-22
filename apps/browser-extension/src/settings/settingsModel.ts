@@ -136,6 +136,15 @@ export const apiKeyPlaceholder = (hasApiKey: boolean, fallback = false): string 
   return "只保存在本机扩展存储";
 };
 
+export const canReuseSavedProviderKey = (
+  saved: PublicDirectorProviderConfigurationV1 | undefined,
+  draft: ProviderDraft,
+): boolean => Boolean(
+  saved?.hasApiKey
+  && saved.protocol === draft.protocol
+  && saved.endpoint.trim().replace(/\/+$/u, "") === draft.endpoint.trim().replace(/\/+$/u, ""),
+);
+
 export const lyricsStatusCopy = (config: LyricsConfigView | undefined): string => {
   if (config?.reason) return config.reason;
   return config?.configured

@@ -64,14 +64,14 @@ Never inspect, print, or migrate the user's provider key. If a fresh extension i
 
 ## Current verified baseline
 
-- Web: `0.3.1` passes 331/331 tests.
+- Web: `0.3.1` passes 334/334 tests.
 - Director gateway: 27/27 tests.
 - The low-latency Director authors a compact whole-song intent under a 45-second/three-request boundary and expands routine per-line mechanics locally.
-- The settings UI uses a macOS-style floating sidebar/toolbar and standard-material content cards with adaptive light/dark presentation. It keeps the sanitized last-run timing row without exposing endpoint, Key, lyrics, or response bodies.
+- The settings UI uses the light Control Room system in `docs/uiux-light-control-room.md`: one stable split view, warm neutral canvas, grouped rows, progressive provider setup, explicit unsaved/saving/error states, and destructive credential wording. It keeps the sanitized last-run timing row without exposing endpoint, Key, lyrics, or response bodies.
 - AI provider setup discovers the account's available models through the provider's Models API; model selection is no longer free text. OpenAI, OpenAI-compatible/local, Gemini, and Anthropic discovery paths have bounded unit and background-integration coverage.
-- The popup owns quick performance preferences and settings navigation. The embedded lyrics column keeps only `More` and fullscreen as persistent toolbar actions; search, timing, versions, import, and vocal timing live under `More`.
+- The popup is a compact remote for current track, Stage launch, quick performance preferences, and settings navigation. Preference persistence failure restores the prior switch state and uses an independent notice instead of replacing song metadata. The embedded lyrics column keeps only `More` and fullscreen as persistent toolbar actions; search, timing, versions, import, and vocal timing live under `More`.
 - TypeScript, the full Vite 8.2.2 production build, deterministic extension artifact comparison, Manifest V3 CSP, `npm audit`, and the Director gateway suite pass.
-- The reviewed `0.3.1` extension build was mirrored byte-for-byte to `/Users/chaoyiliu/Desktop/bilibili-music/web/extension-dist` and reloaded under the original extension ID. Computer Use UAT verified the redesigned popup, settings route, two-button lyrics toolbar, and compact lyrics-tools menu without changing BYOK storage.
+- The last verified `0.3.1` extension build was mirrored byte-for-byte to `/Users/chaoyiliu/Desktop/bilibili-music/web/extension-dist` and reloaded under the original extension ID. The subsequent light Control Room build passes static and production gates; at handoff, Computer Use could navigate the correct Chrome window but Chrome exposed only the window title, not a screenshot/accessibility tree, so fresh visual UAT must be rechecked without blind coordinate clicks.
 - Owner-only Stage deployment: `https://lyricstage.yihanchen617.chatgpt.site`.
 - Frozen extraction tag: `lyricstage-monorepo-v0.3.0`.
 
@@ -80,8 +80,9 @@ Recheck drift-prone runtime and deployment state before claiming it is still cur
 ## Open work
 
 1. Diagnose the current real Gemini attempt: Settings recorded 320 ms total / 307 ms provider / two attempts, then Stage returned to `AI 暂不可用`; its project/source restrictions also reject `ListModels` with HTTP 403. Never read or record the key.
-2. Verify one successful real provider model-list refresh, compact-intent takeover, the 45-second/three-attempt fallback boundary, and deterministic local fallback without recording either key.
-3. Run whole-song subjective A/B for fast, slow, repeated-chorus, duet, and long-line tracks.
-4. Run a bounded multi-tab soak covering authority handoff, pause/seek, artwork fallback, capture ownership, and extension reload recovery.
+2. Reload and visually verify the light Control Room settings/popup under the original extension identity once Chrome exposes a screenshot/accessibility tree again.
+3. Verify one successful real provider model-list refresh, compact-intent takeover, the 45-second/three-attempt fallback boundary, and deterministic local fallback without recording either key.
+4. Run whole-song subjective A/B for fast, slow, repeated-chorus, duet, and long-line tracks.
+5. Run a bounded multi-tab soak covering authority handoff, pause/seek, artwork fallback, capture ownership, and extension reload recovery.
 
 These are post-migration quality gates. Repository extraction, GitHub upload, owner-only deployment, and the final local Chrome lifecycle gate are complete.
