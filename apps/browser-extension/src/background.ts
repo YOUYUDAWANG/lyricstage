@@ -30,6 +30,7 @@ import {
   adaptFullscreenDirectorResponseV4,
   buildDirectorRequestPayloadV1,
   directorBYOKCacheIdentityV1,
+  directorBYOKDiagnosticsFromErrorV1,
   executeDirectorBYOKV1,
   isDirectorPlanV1ForLyrics,
   listDirectorProviderModelsV1,
@@ -42,6 +43,7 @@ import {
   type DirectorPlanV1,
   type DirectorProviderConfigurationV1,
   type DirectorResolutionResponseV1,
+  type DirectorTimingV1,
   type MusicMapV1,
   type VocalTimingMapV1,
 } from "@lyricstage/performance";
@@ -110,7 +112,8 @@ const legacyDirectorConfigurationStorageKey = "lyricstage-director-backend-v1";
 const directorConfigurationStorageKey = "lyricstage-director-byok-v1";
 const legacyDirectorCacheStorageKey = "lyricstage-director-cache-v4";
 const directorCacheStorageKey = "lyricstage-director-cache-v5";
-const directorCacheEpoch = "fullscreen-director-v4-client-contract-v8.6-byok-v1";
+const directorLastTimingStorageKey = "lyricstage-director-last-timing-v1";
+const directorCacheEpoch = "fullscreen-director-v4-client-contract-v8.7-byok-intent-v1";
 const lyricsCacheLimit = 100;
 const directorCacheLimit = 100;
 const lyricsLookupTasks = new Map<string, Promise<LyricsLookupResponseV0>>();
@@ -283,6 +286,7 @@ const saveDirectorConfiguration = async (value: unknown): Promise<{ configured: 
       [legacyDirectorConfigurationStorageKey]: null,
       [directorCacheStorageKey]: {},
       [legacyDirectorCacheStorageKey]: {},
+      [directorLastTimingStorageKey]: null,
     });
     return { configured: false };
   }
@@ -303,6 +307,7 @@ const saveDirectorConfiguration = async (value: unknown): Promise<{ configured: 
     [legacyDirectorConfigurationStorageKey]: null,
     [directorCacheStorageKey]: {},
     [legacyDirectorCacheStorageKey]: {},
+    [directorLastTimingStorageKey]: null,
   });
   return { configured: true };
 };
@@ -681,11 +686,23 @@ const saveDirectorPlanCache = (
   return directorCacheWrite;
 };
 
-const directorError = (reason: string): DirectorResolutionResponseV1 => ({
+const saveDirectorTiming = async (timing: DirectorTimingV1): Promise<void> => {
+  await chromeAPI.storage.local.set({ [directorLastTimingStorageKey]: timing });
+};
+
+const readDirectorTiming = async (): Promise<DirectorTimingV1 | undefined> => {
+  const value = (await chromeAPI.storage.local.get(directorLastTimingStorageKey))[directorLastTimingStorageKey];
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? value as DirectorTimingV1
+    : undefined;
+};
+
+const directorError = (reason: string, timing?: DirectorTimingV1): DirectorResolutionResponseV1 => ({
   type: "director-resolution-v1",
   status: "error",
   source: "network",
   reason: reason.slice(0, 180),
+  ...(timing ? { timing } : {}),
 });
 
 const resolveAutomaticDirector = async (
@@ -693,6 +710,7 @@ const resolveAutomaticDirector = async (
   lyrics: LyricDocumentV0,
   musicMap?: MusicMapV1,
 ): Promise<DirectorResolutionResponseV1> => {
+  const startedAt = Date.now();
   const configuration = await directorConfiguration();
   if (!configuration) {
     return {
@@ -702,39 +720,48 @@ const resolveAutomaticDirector = async (
       reason: "director-not-configured",
     };
   }
-  if (!musicMap) {
-    const cached = await cachedDirectorPlan(track, lyrics, configuration);
-    if (cached) {
-      return { type: "director-resolution-v1", status: "ready", source: "cache", plan: cached };
-    }
+  const cacheStartedAt = Date.now();
+  const cached = await cachedDirectorPlan(track, lyrics, configuration);
+  const cacheMs = Date.now() - cacheStartedAt;
+  if (cached) {
+    const timing: DirectorTimingV1 = {
+      version: "director-timing-v1",
+      cache: "hit",
+      totalMs: Date.now() - startedAt,
+      cacheMs,
+      requestBuildMs: 0,
+      providerMs: 0,
+      contractMs: 0,
+      adaptationMs: 0,
+      inputBytes: 0,
+      outputBytes: 0,
+      attempts: [],
+      completedAt: new Date().toISOString(),
+    };
+    await saveDirectorTiming(timing);
+    return { type: "director-resolution-v1", status: "ready", source: "cache", plan: cached, timing };
   }
-  const fingerprint = musicMap
-    ? stableHash32({ fingerprint: directorFingerprint(track, lyrics, configuration), musicMap })
-    : directorFingerprint(track, lyrics, configuration);
+  const fingerprint = directorFingerprint(track, lyrics, configuration);
   const existing = directorLookupTasks.get(fingerprint);
   if (existing) return existing;
 
   const task = (async (): Promise<DirectorResolutionResponseV1> => {
+    const requestBuildStartedAt = Date.now();
     let payload = await buildDirectorRequestPayloadV1(track, lyrics, musicMap);
+    if (payload && new TextEncoder().encode(payload.body).byteLength > 60_000) {
+      payload = await buildDirectorRequestPayloadV1(track, lyrics, musicMap, { lineTimingOnly: true });
+    }
+    const requestBuildMs = Date.now() - requestBuildStartedAt;
     if (!payload) return directorError("歌曲过长，使用本地演出");
     try {
-      let execution;
-      try {
-        execution = await executeDirectorBYOKV1(configuration, JSON.parse(payload.body) as unknown);
-      } catch (firstError) {
-        const lineTimingPayload = await buildDirectorRequestPayloadV1(
-          track,
-          lyrics,
-          musicMap,
-          { lineTimingOnly: true },
-        );
-        if (lineTimingPayload && lineTimingPayload.body !== payload.body) {
-          payload = lineTimingPayload;
-          execution = await executeDirectorBYOKV1(configuration, JSON.parse(payload.body) as unknown);
-        } else {
-          throw firstError;
-        }
-      }
+      const remainingBudgetMs = Math.max(1, 45_000 - (Date.now() - startedAt));
+      const execution = await executeDirectorBYOKV1(
+        configuration,
+        JSON.parse(payload.body) as unknown,
+        fetch,
+        remainingBudgetMs,
+      );
+      const adaptationStartedAt = Date.now();
       const plan = adaptFullscreenDirectorResponseV4(
         lyrics,
         track.trackID,
@@ -760,23 +787,57 @@ const resolveAutomaticDirector = async (
         execution.response,
         "ai",
       );
+      const adaptationMs = Date.now() - adaptationStartedAt;
+      const timing: DirectorTimingV1 = {
+        version: "director-timing-v1",
+        cache: "miss",
+        totalMs: Date.now() - startedAt,
+        cacheMs,
+        requestBuildMs,
+        providerMs: execution.diagnostics.providerMs,
+        contractMs: execution.diagnostics.contractMs,
+        adaptationMs,
+        inputBytes: execution.diagnostics.inputBytes,
+        outputBytes: execution.diagnostics.outputBytes,
+        attempts: execution.diagnostics.attempts,
+        completedAt: new Date().toISOString(),
+      };
       if (!plan) {
         const degradedReason = execution.response && typeof execution.response === "object" && !Array.isArray(execution.response)
           && typeof (execution.response as { degradedReason?: unknown }).degradedReason === "string"
           ? (execution.response as { degradedReason: string }).degradedReason.slice(0, 120)
           : "";
+        await saveDirectorTiming(timing);
         return directorError(degradedReason
           ? `导演降级：${degradedReason}`
-          : "导演响应未通过本地合同");
+          : "导演响应未通过本地合同", timing);
       }
       await saveDirectorPlanCache(track, lyrics, plan, configuration);
-      return { type: "director-resolution-v1", status: "ready", source: "network", plan };
+      timing.totalMs = Date.now() - startedAt;
+      await saveDirectorTiming(timing);
+      return { type: "director-resolution-v1", status: "ready", source: "network", plan, timing };
     } catch (error) {
       let reason = error instanceof Error ? error.message : "AI 导演请求失败";
       for (const provider of [configuration.primary, configuration.fallback]) {
         if (provider?.apiKey) reason = reason.replaceAll(provider.apiKey, "[redacted]");
       }
-      return directorError(reason);
+      const diagnostics = directorBYOKDiagnosticsFromErrorV1(error);
+      const timing: DirectorTimingV1 = {
+        version: "director-timing-v1",
+        cache: "miss",
+        totalMs: Date.now() - startedAt,
+        cacheMs,
+        requestBuildMs,
+        providerMs: diagnostics?.providerMs ?? 0,
+        contractMs: diagnostics?.contractMs ?? 0,
+        adaptationMs: 0,
+        inputBytes: diagnostics?.inputBytes ?? 0,
+        outputBytes: diagnostics?.outputBytes ?? 0,
+        attempts: diagnostics?.attempts ?? [],
+        completedAt: new Date().toISOString(),
+      };
+      await saveDirectorTiming(timing);
+      return directorError(reason, timing);
     } finally {
       directorLookupTasks.delete(fingerprint);
     }
@@ -1874,9 +1935,9 @@ chromeAPI.runtime.onMessage.addListener((message, sender, sendResponse) => {
   }
 
   if (request.type === "youtube-music-director-config") {
-    void directorConfiguration().then((configuration) => sendResponse(configuration
-      ? publicDirectorBYOKConfigurationV1(configuration)
-      : { version: "lyricstage-director-byok-v1", configured: false }),
+    void Promise.all([directorConfiguration(), readDirectorTiming()]).then(([configuration, lastTiming]) => sendResponse(configuration
+      ? { ...publicDirectorBYOKConfigurationV1(configuration), ...(lastTiming ? { lastTiming } : {}) }
+      : { version: "lyricstage-director-byok-v1", configured: false, ...(lastTiming ? { lastTiming } : {}) }),
     () => sendResponse({ version: "lyricstage-director-byok-v1", configured: false }));
     return true;
   }

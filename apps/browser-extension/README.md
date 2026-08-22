@@ -11,7 +11,7 @@
 - **全屏 Fullscreen Stage**：侧栏右上角全屏按钮或快捷键 `F` 进入 Performance Runtime；PixiJS WebGL 负责抽象环境，Canvas2D 负责 CJK/逐字正文，封面不会直接铺到背景。标题/歌手只在开场短暂出现；`Esc` 只退出全屏并回到当前 Lyrics Column。
 - **本地导演始终可用**：每首歌按真实歌词结构、重复 Hook、声部重叠与 recording identity 编译确定性 `DirectorPlanV1`；离线、未配置 AI、超时或响应无效都保持完整演出。
 - **独立设置页**：弹窗只负责连接状态和打开歌词；LDDC、BYOK、轻量/VJ 偏好在全页 `settings.html` 配置，也可从 `chrome://extensions` 的扩展选项进入。Key 仅保存在 `chrome.storage.local`，不会进入计划缓存、日志或构建产物。
-- **可选全屏 AI 导演（BYOK）**：扩展直接调用用户选择的 OpenAI Responses、OpenAI-compatible、本地模型、Gemini 或 Anthropic Messages API，不再依赖固定 LyricStage Director 服务器。设置页连接提供商后会读取账户实际可用的模型供选择，不要求手填模型 ID；主供应商可配置一个备用供应商。模型输出必须先经过扩展内与服务端同源的 Performance Direction Skill、严格合同与本地 plan 适配，失败会重试、切备用，最终回到完整确定性演出。
+- **可选全屏 AI 导演（BYOK）**：扩展直接调用用户选择的 OpenAI Responses、OpenAI-compatible、本地模型、Gemini 或 Anthropic Messages API，不再依赖固定 LyricStage Director 服务器。设置页连接提供商后读取账户实际可用的模型供选择，不要求手填模型 ID；主供应商可配置一个备用供应商。模型只编排紧凑的整曲叙事意图与少量重点 cue，本地再确定性补齐逐行演出；整条主/修复/备用链共享 45 秒、最多 3 次 HTTP，同曲并发与迟到 MusicMap 不会重复生成。设置页显示最近一次缓存、模型、合同与总耗时，但不记录 endpoint、Key、歌词或响应正文；失败最终回到完整确定性演出。
 - **原唱识别保持证据边界**：通用 BYOK 文本接口不能保证联网 grounding，因此扩展不再把模型自写的作品身份当成搜索事实；当前只使用标题中可验证的 cover/original credit 与确定性歌词候选规则。原有 OCI `/v1/music/identity` 服务保留作历史/独立服务，但不再是 Companion 运行依赖。
 - **两档运动预算**：轻量模式遵守 reduced-motion；显式个人 VJ 模式提高全屏环境强度，但系统 reduced-motion / 轻量模式仍拥有最终优先级。
 - **安全恢复模型**：原生歌词节点在增强态下仅隐藏（保留 display / hidden / aria-hidden / inert），切换到 Up next、Comments、Related、页面导航、扩展停用或 context 失效时精确恢复原生歌词节点。

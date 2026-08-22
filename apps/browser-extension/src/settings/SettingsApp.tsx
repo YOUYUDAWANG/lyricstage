@@ -18,6 +18,7 @@ import {
   apiKeyPlaceholder,
   directorProtocolOptions,
   directorStatusCopy,
+  directorTimingCopy,
   displayLyricsEndpoint,
   draftFromPublicProvider,
   emptyProviderDraft,
@@ -420,9 +421,9 @@ export const SettingsApp = () => {
                 }} />
               </label>
               {fallbackEnabled && <ProviderFields draft={fallback} discovery={fallbackDiscovery} hasApiKey={director.fallback?.hasApiKey === true} fallback disabled={busy === "director"} onChange={setFallback} onDiscoveryReset={() => setFallbackDiscovery(emptyDiscovery())} onDiscover={() => void onDiscover("fallback")} />}
-              <div className="privacy-banner"><span aria-hidden="true">⌾</span><p>请求从扩展直接发往所选 API。Key 只保存在本机扩展存储；模型列表和导演计划都不会包含 Key。</p></div>
+              <div className="privacy-banner"><span aria-hidden="true">⌾</span><p>请求从扩展直接发往所选 API。Key 只保存在本机扩展存储；模型列表和导演计划都不会包含 Key。HTTP 仅允许本机、局域网、link-local 或 Tailscale 地址。</p></div>
               <footer className="settings-card-footer">
-                <small className="settings-status" data-director-config-status="">{directorStatusCopy(director)}</small>
+                <div className="settings-status-stack"><small className="settings-status" data-director-config-status="">{directorStatusCopy(director)}</small><small className="settings-status" data-director-last-timing="">{directorTimingCopy(director)}</small></div>
                 <div className="settings-actions"><button type="button" data-clear-director-config="" disabled={busy === "director"} onClick={() => void onClearDirector()}>停用</button><button className="primary" type="submit" data-save-director-config="" disabled={busy === "director" || !primary.model}>保存并启用</button></div>
               </footer>
             </form>

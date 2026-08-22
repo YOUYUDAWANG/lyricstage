@@ -4,6 +4,7 @@ import { compileLocalDirectorPlanV1, type MusicMapV1 } from "@lyricstage/perform
 import type { LyricsLookupTrackV0 } from "@lyricstage/lyrics";
 import {
   directorPlanForStageEntry,
+  directorStatusDetail,
   directorStatusLabel,
   requestAutomaticDirectorPlan,
   requestDirectorBridgeWithOneRecovery,
@@ -44,7 +45,7 @@ describe("requestAutomaticDirectorPlan", () => {
     });
   });
 
-  it("forwards the bounded music map for the second director pass", async () => {
+  it("forwards a bounded MusicMap when it already exists at single-flight start", async () => {
     const lyrics = lyricFixtures.wordTimedMixed;
     const plan = compileLocalDirectorPlanV1(lyrics);
     let request: unknown;
@@ -70,6 +71,29 @@ describe("requestAutomaticDirectorPlan", () => {
     };
     await requestAutomaticDirectorPlan(track, lyrics, musicMap);
     expect(request).toMatchObject({ type: "youtube-music-resolve-performance", musicMap });
+  });
+
+  it("coalesces a late MusicMap request instead of starting a second generation", async () => {
+    const lyrics = lyricFixtures.wordTimedMixed;
+    const plan = compileLocalDirectorPlanV1(lyrics);
+    let requestCount = 0;
+    let release: ((value: unknown) => void) | undefined;
+    const pending = new Promise<unknown>((resolve) => { release = resolve; });
+    const musicMap: MusicMapV1 = {
+      version: "music-map-v1", source: "tab-capture", durationMs: lyrics.durationMs,
+      analyzedMs: 28_000, featureRateHz: 30, tempo: null,
+      summary: { dynamicRange: 0.4, meanEnergy: 0.3, peakEnergy: 0.8, silenceRatio: 0.1 },
+      segments: [], landmarks: [],
+    };
+    (globalThis as typeof globalThis & { chrome?: unknown }).chrome = {
+      runtime: { id: "extension-test", sendMessage: async () => { requestCount += 1; return pending; } },
+    };
+    const first = requestAutomaticDirectorPlan(track, lyrics);
+    const second = requestAutomaticDirectorPlan(track, lyrics, musicMap);
+    expect(requestCount).toBe(1);
+    release?.({ type: "director-resolution-v1", status: "ready", source: "network", plan });
+    await expect(Promise.all([first, second])).resolves.toHaveLength(2);
+    expect(requestCount).toBe(1);
   });
 
   it("rejects a plan for another lyric identity without throwing", async () => {
@@ -187,6 +211,18 @@ describe("requestAutomaticDirectorPlan", () => {
       source: "local",
       reason: "extension-bridge-unavailable",
     })).toBe("本地演出 · 扩展桥接不可用");
+    expect(directorStatusDetail({
+      type: "director-resolution-v1",
+      status: "ready",
+      source: "network",
+      timing: {
+        version: "director-timing-v1", cache: "miss", totalMs: 12_400, cacheMs: 2,
+        requestBuildMs: 3, providerMs: 12_360, contractMs: 5, adaptationMs: 1,
+        inputBytes: 24_000, outputBytes: 8_000,
+        attempts: [{ sequence: 1, protocol: "openai-responses", model: "fast", format: "json-schema", status: 200, elapsedMs: 12_360, responseBytes: 8_000, outcome: "ready" }],
+        completedAt: "2026-08-23T00:00:00.000Z",
+      },
+    })).toContain("模型 12360ms");
   });
 });
 

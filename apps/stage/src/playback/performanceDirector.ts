@@ -1,4 +1,4 @@
-import type { LyricDocumentV0 } from "@lyricstage/contracts";
+import { stableHash32, type LyricDocumentV0 } from "@lyricstage/contracts";
 import {
   youtubeMusicBridgeFailureReasonV0,
   type YouTubeMusicBridgeFailureReasonV0,
@@ -14,6 +14,8 @@ import {
 export type DirectorLookupState =
   | { status: "idle" | "requesting"; reason?: string }
   | DirectorResolutionResponseV1;
+
+const automaticDirectorTasks = new Map<string, Promise<DirectorResolutionResponseV1>>();
 
 export const directorPlanForStageEntry = (
   localPlan: DirectorPlanV1,
@@ -86,38 +88,45 @@ export const requestAutomaticDirectorPlan = async (
   lyrics: LyricDocumentV0,
   musicMap?: MusicMapV1,
 ): Promise<DirectorResolutionResponseV1> => {
-  const result = await requestDirectorBridgeWithOneRecovery({
-    type: "youtube-music-resolve-performance",
-    track,
-    lyrics,
-    ...(musicMap ? { musicMap } : {}),
-  });
-  if (!result.ok) {
-    return {
-      type: "director-resolution-v1",
-      status: result.reason === "extension-bridge-unavailable" ? "unavailable" : "error",
-      source: "local",
-      reason: result.reason,
-    };
-  }
-  const response = result.response as DirectorResolutionResponseV1 | undefined;
-  if (response?.type !== "director-resolution-v1") {
-    return {
-      type: "director-resolution-v1",
-      status: "error",
-      source: "network",
-      reason: "extension-bridge-response-invalid",
-    };
-  }
-  if (response.status === "ready" && (!response.plan || !isDirectorPlanV1ForLyrics(response.plan, lyrics))) {
-    return {
-      type: "director-resolution-v1",
-      status: "error",
-      source: response.source,
-      reason: "director-plan-invalid",
-    };
-  }
-  return response;
+  const identity = stableHash32({ trackID: track.trackID, recordingID: lyrics.recordingID, lyrics });
+  const existing = automaticDirectorTasks.get(identity);
+  if (existing) return existing;
+  const task = (async () => {
+    const result = await requestDirectorBridgeWithOneRecovery({
+      type: "youtube-music-resolve-performance",
+      track,
+      lyrics,
+      ...(musicMap ? { musicMap } : {}),
+    });
+    if (!result.ok) {
+      return {
+        type: "director-resolution-v1" as const,
+        status: result.reason === "extension-bridge-unavailable" ? "unavailable" as const : "error" as const,
+        source: "local" as const,
+        reason: result.reason,
+      };
+    }
+    const response = result.response as DirectorResolutionResponseV1 | undefined;
+    if (response?.type !== "director-resolution-v1") {
+      return {
+        type: "director-resolution-v1" as const,
+        status: "error" as const,
+        source: "network" as const,
+        reason: "extension-bridge-response-invalid",
+      };
+    }
+    if (response.status === "ready" && (!response.plan || !isDirectorPlanV1ForLyrics(response.plan, lyrics))) {
+      return {
+        type: "director-resolution-v1" as const,
+        status: "error" as const,
+        source: response.source,
+        reason: "director-plan-invalid",
+      };
+    }
+    return response;
+  })().finally(() => automaticDirectorTasks.delete(identity));
+  automaticDirectorTasks.set(identity, task);
+  return task;
 };
 
 export const directorStatusLabel = (
@@ -142,4 +151,11 @@ export const directorStatusLabel = (
     return "本地演出 · 扩展桥接不可用";
   }
   return "本地演出";
+};
+
+export const directorStatusDetail = (state: DirectorLookupState): string | undefined => {
+  if (state.status === "requesting") return "同曲只生成一次；音乐分析稍后在本地融合";
+  if (!("timing" in state) || !state.timing) return state.reason;
+  const timing = state.timing;
+  return `总计 ${timing.totalMs}ms · 模型 ${timing.providerMs}ms · 合同 ${timing.contractMs}ms · ${timing.attempts.length} 次 · 输入 ${Math.round(timing.inputBytes / 1024)}KB`;
 };

@@ -584,6 +584,7 @@ a:focus-visible {
 }
 
 .settings-status { color: var(--secondary); font-size: 10px; line-height: 1.45; }
+.settings-status-stack { display: grid; gap: 3px; min-width: 0; }
 .settings-actions { display: flex; gap: 8px; flex: 0 0 auto; }
 .settings-actions button { min-width: 82px; }
 .settings-actions button.primary {

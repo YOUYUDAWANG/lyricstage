@@ -16,13 +16,15 @@ LyricStage owns the Web Performance Runtime, Manifest V3 browser extension, YouT
 
 The Bilibili browser provider is explicitly deferred. Do not start it or generalize the YouTube Music protocol unless the user reopens that scope.
 
-The current product line is `0.3.0`:
+The current product line is `0.3.1`:
 
 - YouTube Music retains playback, account state, transport, and the authoritative clock.
 - The extension owns only its Shadow DOM and bounded performance state.
 - BYOK supports OpenAI Responses, OpenAI-compatible/local chat completions, Gemini, and Anthropic, with an optional fallback provider.
 - Provider keys stay in `chrome.storage.local`; never copy them into a worktree, prompt, log, fixture, commit, or deployment.
 - AI failure must preserve the complete deterministic local performance.
+- BYOK generation uses compact Director intent, a 45-second total budget, at most three HTTP attempts, and one in-flight request per track/lyrics identity. Late MusicMap data is fused locally without a second provider call.
+- Settings exposes only sanitized last-run phase timing; provider keys, endpoints, lyric text and response bodies are not diagnostic data.
 
 ## Commands
 
@@ -62,13 +64,14 @@ Never inspect, print, or migrate the user's provider key. If a fresh extension i
 
 ## Current verified baseline
 
-- Web: 325/325 tests.
+- Web: `0.3.1` passes 331/331 tests.
 - Director gateway: 27/27 tests.
-- The settings UI uses a macOS-style floating sidebar/toolbar and standard-material content cards with adaptive light/dark presentation.
+- The low-latency Director authors a compact whole-song intent under a 45-second/three-request boundary and expands routine per-line mechanics locally.
+- The settings UI uses a macOS-style floating sidebar/toolbar and standard-material content cards with adaptive light/dark presentation. It keeps the sanitized last-run timing row without exposing endpoint, Key, lyrics, or response bodies.
 - AI provider setup discovers the account's available models through the provider's Models API; model selection is no longer free text. OpenAI, OpenAI-compatible/local, Gemini, and Anthropic discovery paths have bounded unit and background-integration coverage.
 - The popup owns quick performance preferences and settings navigation. The embedded lyrics column keeps only `More` and fullscreen as persistent toolbar actions; search, timing, versions, import, and vocal timing live under `More`.
-- TypeScript, the full Vite 8.2.2 production build, Manifest V3 CSP, `npm audit`, and the Director gateway suite pass.
-- The reviewed extension build was mirrored into the stable unpacked path and reloaded under the original extension ID. Real Chrome UAT verified the redesigned popup, the settings route, the two-button lyrics toolbar, and the compact lyrics-tools menu without changing BYOK storage.
+- TypeScript, the full Vite 8.2.2 production build, deterministic extension artifact comparison, Manifest V3 CSP, `npm audit`, and the Director gateway suite pass.
+- The reviewed `0.3.1` extension build was mirrored byte-for-byte to `/Users/chaoyiliu/Desktop/bilibili-music/web/extension-dist` and reloaded under the original extension ID. Computer Use UAT verified the redesigned popup, settings route, two-button lyrics toolbar, and compact lyrics-tools menu without changing BYOK storage.
 - Owner-only Stage deployment: `https://lyricstage.yihanchen617.chatgpt.site`.
 - Frozen extraction tag: `lyricstage-monorepo-v0.3.0`.
 
@@ -76,8 +79,8 @@ Recheck drift-prone runtime and deployment state before claiming it is still cur
 
 ## Open work
 
-1. Verify a successful real provider model-list refresh and one real provider takeover; the current Gemini key reaches the provider but its project/source restrictions reject `ListModels` with HTTP 403. Never record or inspect the key while diagnosing it.
-2. Verify fallback-provider switching and deterministic local fallback without recording either key.
+1. Diagnose the current real Gemini attempt: Settings recorded 320 ms total / 307 ms provider / two attempts, then Stage returned to `AI 暂不可用`; its project/source restrictions also reject `ListModels` with HTTP 403. Never read or record the key.
+2. Verify one successful real provider model-list refresh, compact-intent takeover, the 45-second/three-attempt fallback boundary, and deterministic local fallback without recording either key.
 3. Run whole-song subjective A/B for fast, slow, repeated-chorus, duet, and long-line tracks.
 4. Run a bounded multi-tab soak covering authority handoff, pause/seek, artwork fallback, capture ownership, and extension reload recovery.
 
