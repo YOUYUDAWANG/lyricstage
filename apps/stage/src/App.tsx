@@ -47,6 +47,7 @@ import {
   readLyricsOffset,
   saveExtensionPreferences,
   saveLyricsOffset,
+  subscribeExtensionPreferences,
 } from "./playback/extensionPreferences";
 import {
   clampLyricsOffsetMs,
@@ -478,14 +479,16 @@ export default function App({ embedded = embeddedStageFromLocation, onEmbeddedRe
   useEffect(() => {
     if (!embeddedStage) return undefined;
     let cancelled = false;
-    void readExtensionPreferences().then((preferences) => {
-      if (!cancelled) {
-        setLightweight(preferences.lightweight);
-        setVJMode(preferences.vjMode);
-      }
-    }).catch(() => undefined);
+    const applyPreferences = (preferences: { lightweight: boolean; vjMode: boolean }) => {
+      if (cancelled) return;
+      setLightweight(preferences.lightweight);
+      setVJMode(preferences.vjMode);
+    };
+    void readExtensionPreferences().then(applyPreferences).catch(() => undefined);
+    const unsubscribe = subscribeExtensionPreferences(applyPreferences);
     return () => {
       cancelled = true;
+      unsubscribe();
     };
   }, [embeddedStage]);
 

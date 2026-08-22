@@ -18,79 +18,17 @@
       </section>
       <button class="primary" type="button" data-open-stage>打开 YouTube Music 歌词</button>
       <button type="button" data-open-source>打开 YouTube Music</button>
-      <details class="lyrics-settings">
-        <summary>私有多源歌词</summary>
-        <label>
-          <span>后端地址</span>
-          <input data-lyrics-endpoint type="url" placeholder="http://100.x.x.x:8788/" autocomplete="off" />
-        </label>
-        <label>
-          <span>Bearer 令牌</span>
-          <input data-lyrics-token type="password" placeholder="已配置时可留空" autocomplete="new-password" />
-        </label>
-        <div class="settings-actions">
-          <button type="button" data-save-lyrics-config>保存</button>
-          <button type="button" data-clear-lyrics-config>停用</button>
+      <dl class="config-status">
+        <div>
+          <dt>歌词源</dt>
+          <dd data-lyrics-summary>LRCLIB · 酷狗</dd>
         </div>
-        <small data-lyrics-config-status>未配置时仍会搜索 LRCLIB 与酷狗</small>
-      </details>
-      <details class="lyrics-settings">
-        <summary>AI 导演 · 本地 BYOK</summary>
-        <label>
-          <span>接口协议</span>
-          <select data-director-protocol>
-            <option value="openai-responses">OpenAI Responses</option>
-            <option value="openai-compatible">OpenAI-compatible / 本地模型</option>
-            <option value="gemini">Google Gemini</option>
-            <option value="anthropic">Anthropic Messages</option>
-          </select>
-        </label>
-        <label>
-          <span>API 地址</span>
-          <input data-director-endpoint type="url" placeholder="https://api.openai.com/v1" autocomplete="off" />
-        </label>
-        <label>
-          <span>模型</span>
-          <input data-director-model type="text" placeholder="输入供应商模型 ID" autocomplete="off" />
-        </label>
-        <label>
-          <span>API Key</span>
-          <input data-director-api-key type="password" placeholder="已配置时可留空；本地模型可为空" autocomplete="new-password" />
-        </label>
-        <label class="toggle-setting">
-          <input data-director-fallback-enabled type="checkbox" />
-          <span>配置备用供应商</span>
-        </label>
-        <div class="fallback-settings" data-director-fallback hidden>
-          <label>
-            <span>备用协议</span>
-            <select data-director-fallback-protocol>
-              <option value="openai-compatible">OpenAI-compatible / 本地模型</option>
-              <option value="openai-responses">OpenAI Responses</option>
-              <option value="gemini">Google Gemini</option>
-              <option value="anthropic">Anthropic Messages</option>
-            </select>
-          </label>
-          <label>
-            <span>备用 API 地址</span>
-            <input data-director-fallback-endpoint type="url" placeholder="http://127.0.0.1:11434/v1" autocomplete="off" />
-          </label>
-          <label>
-            <span>备用模型</span>
-            <input data-director-fallback-model type="text" placeholder="输入备用模型 ID" autocomplete="off" />
-          </label>
-          <label>
-            <span>备用 API Key</span>
-            <input data-director-fallback-api-key type="password" placeholder="已配置时可留空" autocomplete="new-password" />
-          </label>
+        <div>
+          <dt>AI 导演</dt>
+          <dd data-director-summary>本地确定性演出</dd>
         </div>
-        <p class="privacy-note">请求从扩展直接发往你选择的 API；Key 仅保存在本机扩展存储，不经过 LyricStage 服务器。</p>
-        <div class="settings-actions">
-          <button type="button" data-save-director-config>保存并启用</button>
-          <button type="button" data-clear-director-config>停用</button>
-        </div>
-        <small data-director-config-status>未配置时保留本地演出与确定性歌词搜索</small>
-      </details>
+      </dl>
+      <button type="button" data-open-settings>打开设置</button>
       <footer>音频不上传 · 导演会发送曲目元数据、歌词正文/时序与本地 MusicMap</footer>
     </main>
     <script type="module" src="/src/popup.ts"></script>

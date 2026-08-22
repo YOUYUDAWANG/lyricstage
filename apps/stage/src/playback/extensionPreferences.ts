@@ -13,19 +13,52 @@ interface StorageLocal {
   set(values: Record<string, unknown>): Promise<void>;
 }
 
-const extensionStorage = (): StorageLocal | undefined =>
-  (globalThis as typeof globalThis & {
-    chrome?: { storage?: { local?: StorageLocal } };
-  }).chrome?.storage?.local;
+interface StorageChange {
+  newValue?: unknown;
+}
 
-export const readExtensionPreferences = async (): Promise<ExtensionPreferencesV0> => {
-  const storage = extensionStorage();
-  if (!storage) return { lightweight: false, vjMode: false };
-  const stored = (await storage.get(storageKey))[storageKey] as Partial<ExtensionPreferencesV0> | undefined;
+interface ExtensionStorage {
+  local?: StorageLocal;
+  onChanged?: {
+    addListener(listener: (changes: Record<string, StorageChange>, areaName: string) => void): void;
+    removeListener(listener: (changes: Record<string, StorageChange>, areaName: string) => void): void;
+  };
+}
+
+const extensionChromeStorage = (): ExtensionStorage | undefined =>
+  (globalThis as typeof globalThis & {
+    chrome?: { storage?: ExtensionStorage };
+  }).chrome?.storage;
+
+const extensionStorage = (): StorageLocal | undefined => extensionChromeStorage()?.local;
+
+const sanitizePreferences = (value: unknown): ExtensionPreferencesV0 => {
+  const stored = value && typeof value === "object" && !Array.isArray(value)
+    ? value as Partial<ExtensionPreferencesV0>
+    : undefined;
   return {
     lightweight: stored?.lightweight === true,
     vjMode: stored?.vjMode === true,
   };
+};
+
+export const readExtensionPreferences = async (): Promise<ExtensionPreferencesV0> => {
+  const storage = extensionStorage();
+  if (!storage) return { lightweight: false, vjMode: false };
+  return sanitizePreferences((await storage.get(storageKey))[storageKey]);
+};
+
+export const subscribeExtensionPreferences = (
+  listener: (preferences: ExtensionPreferencesV0) => void,
+): (() => void) => {
+  const storage = extensionChromeStorage();
+  if (!storage?.onChanged) return () => undefined;
+  const handler = (changes: Record<string, StorageChange>, areaName: string) => {
+    if (areaName !== "local" || !(storageKey in changes)) return;
+    listener(sanitizePreferences(changes[storageKey]?.newValue));
+  };
+  storage.onChanged.addListener(handler);
+  return () => storage.onChanged?.removeListener(handler);
 };
 
 export const saveExtensionPreferences = async (

@@ -26,6 +26,7 @@ export default defineConfig({
       input: {
         stage: fromRoot("./apps/browser-extension/stage.html"),
         popup: fromRoot("./apps/browser-extension/popup.html"),
+        settings: fromRoot("./apps/browser-extension/settings.html"),
         offscreen: fromRoot("./apps/browser-extension/offscreen.html"),
         background: fromRoot("./apps/browser-extension/src/background.ts"),
       },
