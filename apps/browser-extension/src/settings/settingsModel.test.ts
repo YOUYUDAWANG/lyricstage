@@ -46,7 +46,7 @@ describe("extension settings model", () => {
     });
     expect(draft.apiKey).toBe("");
     expect(draft.model).toBe("gpt-5");
-    expect(apiKeyPlaceholder(true)).toBe("已保存；留空可继续使用");
+    expect(apiKeyPlaceholder(true)).toBe("同一接口已保存；留空可继续使用");
   });
 
   it("builds a BYOK save payload without inventing a fallback", () => {

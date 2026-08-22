@@ -104,7 +104,7 @@ export const uniqueOriginPatterns = (endpoints: string[]): string[] =>
   [...new Set(endpoints.map((endpoint) => originPatternFromEndpoint(endpoint)))];
 
 export const apiKeyPlaceholder = (hasApiKey: boolean, fallback = false): string => {
-  if (hasApiKey) return "已保存；留空可继续使用";
+  if (hasApiKey) return "同一接口已保存；留空可继续使用";
   if (fallback) return "本地模型可为空";
   return "只保存在本机扩展存储";
 };

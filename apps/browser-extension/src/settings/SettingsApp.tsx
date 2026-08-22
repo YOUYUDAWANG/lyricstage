@@ -317,7 +317,7 @@ export const SettingsApp = () => {
                   type="password"
                   value={lyricsToken}
                   disabled={busy === "lyrics"}
-                  placeholder="已配置时可留空"
+                  placeholder="原地址已配置时可留空"
                   autoComplete="new-password"
                   onChange={(event) => setLyricsToken(event.target.value)}
                 />

@@ -91,6 +91,7 @@ describe("YouTube Music background routing", () => {
   let tabCapture: ReturnType<typeof vi.fn>;
   let runtimeSendMessage: ReturnType<typeof vi.fn>;
   let offscreenCloseDocument: ReturnType<typeof vi.fn>;
+  let storage: Map<string, unknown>;
 
   beforeEach(async () => {
     vi.resetModules();
@@ -102,7 +103,7 @@ describe("YouTube Music background routing", () => {
       message.type === "lyricstage-audio-capture-status-request"
         ? { type: "lyricstage-audio-capture-status", active: false }
         : { ok: true });
-    const storage = new Map<string, unknown>();
+    storage = new Map<string, unknown>();
     Object.defineProperty(globalThis, "chrome", {
       configurable: true,
       value: {
@@ -202,6 +203,63 @@ describe("YouTube Music background routing", () => {
   const backgroundMessagesOfType = (type: string) => runtimeSendMessage.mock.calls
     .map(([message]) => message as Record<string, unknown>)
     .filter((message) => message.type === type);
+
+  it("does not reuse a private lyrics token for a different endpoint", async () => {
+    const first = await send({
+      type: "youtube-music-save-private-lyrics-config",
+      endpoint: "https://lyrics-one.example/api",
+      token: "secret-one",
+    }, sender(10));
+    expect(first.response).toEqual({ configured: true, endpoint: "https://lyrics-one.example/api" });
+
+    const changed = await send({
+      type: "youtube-music-save-private-lyrics-config",
+      endpoint: "https://lyrics-two.example/api",
+      token: "",
+    }, sender(10));
+    expect(changed.response).toMatchObject({
+      configured: false,
+      endpoint: "https://lyrics-two.example/api",
+      reason: "请输入歌词后端令牌",
+    });
+    expect(storage.get("lyricstage-private-lyrics-backend-v0")).toEqual({
+      endpoint: "https://lyrics-one.example/api",
+      token: "secret-one",
+    });
+  });
+
+  it("keeps a provider key when only the model changes on the same API", async () => {
+    const first = await send({
+      type: "youtube-music-save-director-config",
+      configuration: {
+        version: "lyricstage-director-byok-v1",
+        primary: {
+          protocol: "openai-responses",
+          endpoint: "https://api.openai.com/v1",
+          model: "gpt-5",
+          apiKey: "sk-secret",
+        },
+      },
+    }, sender(10));
+    expect(first.response).toMatchObject({ configured: true, primary: { model: "gpt-5", hasApiKey: true } });
+
+    const changed = await send({
+      type: "youtube-music-save-director-config",
+      configuration: {
+        version: "lyricstage-director-byok-v1",
+        primary: {
+          protocol: "openai-responses",
+          endpoint: "https://api.openai.com/v1",
+          model: "gpt-5.1",
+          apiKey: "",
+        },
+      },
+    }, sender(10));
+    expect(changed.response).toMatchObject({ configured: true, primary: { model: "gpt-5.1", hasApiKey: true } });
+    expect(storage.get("lyricstage-director-byok-v1")).toMatchObject({
+      primary: { model: "gpt-5.1", apiKey: "sk-secret" },
+    });
+  });
 
   it("keeps embedded ports bound to their own YTM tab while standalone follows the authoritative source", async () => {
     await send({ type: "youtube-music-source-snapshot", snapshot: snapshot("track-a", "playing") }, sender(10));

@@ -236,7 +236,8 @@ const savePrivateLyricsConfiguration = async (
     throw new Error("歌词后端地址无效");
   }
   const existing = await privateLyricsConfiguration();
-  const token = suppliedToken || existing?.token || "";
+  const sameEndpoint = existing?.endpoint.replace(/\/+$/u, "") === endpoint.replace(/\/+$/u, "");
+  const token = suppliedToken || (sameEndpoint ? existing?.token ?? "" : "");
   if (!token || token.length > 500) throw new Error("请输入歌词后端令牌");
   await chromeAPI.storage.local.set({
     [privateLyricsConfigurationStorageKey]: { endpoint, token },
@@ -257,8 +258,7 @@ const sameProviderTarget = (
   if (!existing) return false;
   return candidate.protocol === existing.protocol
     && typeof candidate.endpoint === "string"
-    && candidate.endpoint.trim().replace(/\/+$/u, "") === existing.endpoint
-    && candidate.model === existing.model;
+    && candidate.endpoint.trim().replace(/\/+$/u, "") === existing.endpoint;
 };
 
 const mergeStoredProviderKey = (
