@@ -30,6 +30,8 @@ import {
   directorStatusLabel,
   type DirectorLookupState,
 } from "./playback/performanceDirector";
+import { lyricsTimeForPlaybackMs } from "./playback/lyricsTimeOffset";
+import { canvasBackingStoreForV1 } from "./canvasBackingStore";
 
 interface StageCanvasProps {
   lyrics: LyricDocumentV0;
@@ -39,6 +41,7 @@ interface StageCanvasProps {
   clock: PlaybackClockV0;
   continuous: boolean;
   displayTimeMs: number;
+  lyricsOffsetMs: number;
   reduceMotion: boolean;
   vjMode: boolean;
   showGuides: boolean;
@@ -118,6 +121,7 @@ export function StageCanvas({
   clock,
   continuous,
   displayTimeMs,
+  lyricsOffsetMs,
   reduceMotion,
   vjMode,
   showGuides,
@@ -139,12 +143,15 @@ export function StageCanvas({
   const elapsedRef = useRef<HTMLSpanElement>(null);
   const remainingRef = useRef<HTMLSpanElement>(null);
   const scrubbingRef = useRef(false);
+  const renderFrameRef = useRef<(() => void) | null>(null);
   const preparedRef = useRef<PreparedDirectedStageV1 | null>(null);
   const samplerRef = useRef(new FrameSamplerV0(240));
   const displayTimeRef = useRef(displayTimeMs);
-  const frameTimeRef = useRef(displayTimeMs);
+  const frameTimeRef = useRef(lyricsTimeForPlaybackMs(displayTimeMs, lyricsOffsetMs, durationMs));
   const handoffRef = useRef<DirectorPlanHandoffV1>({ active: entryDirectorPlan });
+  const layoutTransitionIdentityRef = useRef<string | undefined>(undefined);
   const [activeDirectorPlan, setActiveDirectorPlan] = useState(entryDirectorPlan);
+  const [layoutTransitionPhase, setLayoutTransitionPhase] = useState<0 | 1>(0);
   const [palette, setPalette] = useState<DirectedStagePaletteV1>(() =>
     directedPaletteForIndexV1(localDirectorPlan.sections[0]?.paletteIndex ?? 0),
   );
@@ -152,7 +159,11 @@ export function StageCanvas({
   const [artworkPalette, setArtworkPalette] = useState<DirectedStagePaletteV1 | undefined>();
   const [artworkCandidateIndex, setArtworkCandidateIndex] = useState(0);
   const [artworkAspect, setArtworkAspect] = useState(1);
-  const [presentation, setPresentation] = useState(() => stagePresentationAtV1(localDirectorPlan.effects, displayTimeMs, lyrics));
+  const [presentation, setPresentation] = useState(() => stagePresentationAtV1(
+    entryDirectorPlan.effects,
+    lyricsTimeForPlaybackMs(displayTimeMs, lyricsOffsetMs, durationMs),
+    lyrics,
+  ));
   const presentationRef = useRef(presentation);
   displayTimeRef.current = displayTimeMs;
   const normalizedArtworkCandidates = useMemo(() => artworkCandidates(artworkURL), [artworkURL]);
@@ -216,15 +227,21 @@ export function StageCanvas({
   useEffect(() => {
     const entry = directorPlanForStageEntry(localDirectorPlan, remoteDirectorPlan);
     handoffRef.current = { active: entry };
+    layoutTransitionIdentityRef.current = undefined;
     setActiveDirectorPlan(entry);
+    const timeMs = lyricsTimeForPlaybackMs(displayTimeRef.current, lyricsOffsetMs, durationMs);
+    const nextPresentation = stagePresentationAtV1(entry.effects, timeMs, lyrics);
+    presentationRef.current = nextPresentation;
+    setPresentation(nextPresentation);
   }, [localDirectorPlan.planIdentity]);
 
   useEffect(() => {
     if (!remoteDirectorPlan) return;
     const sample = clock.sample();
-    const timeMs = sample.state === "unavailable" ? displayTimeRef.current : sample.timeMs;
+    const playbackTimeMs = sample.state === "unavailable" ? displayTimeRef.current : sample.timeMs;
+    const timeMs = lyricsTimeForPlaybackMs(playbackTimeMs, lyricsOffsetMs, durationMs);
     handoffRef.current = queueDirectorPlanV1(handoffRef.current, remoteDirectorPlan, timeMs);
-  }, [clock, remoteDirectorPlan?.planIdentity]);
+  }, [clock, durationMs, lyricsOffsetMs, remoteDirectorPlan?.planIdentity]);
 
   const rendererIdentity = useMemo(
     () => `${lyrics.recordingID}:${activeDirectorPlan.planIdentity}`,
@@ -244,11 +261,12 @@ export function StageCanvas({
       const rect = host.getBoundingClientRect();
       if (rect.width < 2 || rect.height < 2) return;
       const dpr = Math.min(window.devicePixelRatio || 1, 2);
-      canvas.width = Math.round(rect.width * dpr);
-      canvas.height = Math.round(rect.height * dpr);
+      const backing = canvasBackingStoreForV1(rect.width, rect.height, dpr);
+      canvas.width = backing.pixelWidth;
+      canvas.height = backing.pixelHeight;
       canvas.style.width = `${rect.width}px`;
       canvas.style.height = `${rect.height}px`;
-      context.setTransform(dpr, 0, 0, dpr, 0, 0);
+      context.setTransform(backing.scaleX, 0, 0, backing.scaleY, 0, 0);
       const prepared = prepareDirectedStageV1(
         lyrics,
         activeDirectorPlan,
@@ -264,11 +282,12 @@ export function StageCanvas({
       );
       preparedRef.current = prepared;
       samplerRef.current = new FrameSamplerV0(240);
-      const initialPalette = paletteForTime(displayTimeRef.current);
+      const initialTimeMs = lyricsTimeForPlaybackMs(displayTimeRef.current, lyricsOffsetMs, durationMs);
+      const initialPalette = paletteForTime(initialTimeMs);
       paletteRef.current = initialPalette;
       setPalette(initialPalette);
       drawDirectedStageV1(context, prepared, {
-        timeMs: displayTimeRef.current,
+        timeMs: initialTimeMs,
         reduceMotion,
         showGuides,
         palette: initialPalette,
@@ -283,7 +302,7 @@ export function StageCanvas({
       disposed = true;
       observer.disconnect();
     };
-  }, [activeDirectorPlan, lyrics, paletteForTime, reduceMotion, rendererIdentity, showGuides]);
+  }, [activeDirectorPlan, durationMs, lyrics, lyricsOffsetMs, paletteForTime, reduceMotion, rendererIdentity, showGuides]);
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -307,7 +326,10 @@ export function StageCanvas({
     const render = () => {
       frameID = 0;
       const sample = clock.sample();
-      const timeMs = sample.state === "unavailable" ? displayTimeRef.current : sample.timeMs;
+      const playbackTimeMs = !continuous || sample.state === "unavailable"
+        ? displayTimeRef.current
+        : sample.timeMs;
+      const timeMs = lyricsTimeForPlaybackMs(playbackTimeMs, lyricsOffsetMs, durationMs);
       frameTimeRef.current = timeMs;
       const handoff = sampleDirectorPlanHandoffV1(handoffRef.current, timeMs);
       if (handoff.active.planIdentity !== handoffRef.current.active.planIdentity) {
@@ -315,6 +337,17 @@ export function StageCanvas({
         setActiveDirectorPlan(handoff.active);
       }
       const activeSection = directorSectionAtV1(handoff.active, timeMs);
+      const layoutTransitionIdentity = [
+        handoff.active.source,
+        handoff.active.world.spatialMode,
+        activeSection.layout,
+      ].join(":");
+      if (layoutTransitionIdentityRef.current === undefined) {
+        layoutTransitionIdentityRef.current = layoutTransitionIdentity;
+      } else if (layoutTransitionIdentityRef.current !== layoutTransitionIdentity) {
+        layoutTransitionIdentityRef.current = layoutTransitionIdentity;
+        if (!reduceMotion) setLayoutTransitionPhase((phase) => phase === 0 ? 1 : 0);
+      }
       const activeEffect = effectRecipeAtV1(handoff.active.effects, timeMs);
       const activeLine = lyrics.lines.find((line) => timeMs >= line.fromMs && timeMs < line.toMs);
       const activeDirective = activeLine
@@ -348,7 +381,7 @@ export function StageCanvas({
         presentationRef.current = nextPresentation;
         setPresentation(nextPresentation);
       }
-      updateProgress(timeMs);
+      updateProgress(playbackTimeMs);
       const duration = drawDirectedStageV1(context, prepared, {
         timeMs,
         reduceMotion,
@@ -369,6 +402,7 @@ export function StageCanvas({
       }
       if (continuous && !document.hidden) frameID = requestAnimationFrame(render);
     };
+    renderFrameRef.current = render;
     const visibilityChanged = () => {
       if (document.hidden) {
         if (frameID) cancelAnimationFrame(frameID);
@@ -381,9 +415,14 @@ export function StageCanvas({
     document.addEventListener("visibilitychange", visibilityChanged);
     return () => {
       if (frameID) cancelAnimationFrame(frameID);
+      if (renderFrameRef.current === render) renderFrameRef.current = null;
       document.removeEventListener("visibilitychange", visibilityChanged);
     };
-  }, [clock, continuous, durationMs, onMetrics, paletteForTime, reduceMotion, remoteDirectorPlan?.planIdentity, showGuides]);
+  }, [clock, continuous, durationMs, lyricsOffsetMs, onMetrics, paletteForTime, reduceMotion, remoteDirectorPlan?.planIdentity, showGuides]);
+
+  useEffect(() => {
+    if (!continuous) renderFrameRef.current?.();
+  }, [continuous, displayTimeMs, lyricsOffsetMs]);
 
   const background = `
     radial-gradient(circle at 12% 78%, ${palette.signal}66, transparent 46%),
@@ -405,6 +444,11 @@ export function StageCanvas({
     void onSeek?.(Math.min(Math.max(0, durationMs), Math.max(0, timeMs)));
   };
 
+  const cancelScrub = () => {
+    scrubbingRef.current = false;
+    renderFrameRef.current?.();
+  };
+
   const isPlaying = playbackState === "playing" || playbackState === "buffering";
   const hasTransport = Boolean(controls?.playPause || controls?.previous || controls?.next);
   const paletteTone = paletteToneForV1(palette);
@@ -414,6 +458,7 @@ export function StageCanvas({
     activeDirectorPlan.source,
     Boolean(remoteDirectorPlan),
   );
+  const renderedPlaybackState = playbackState ?? (continuous ? "playing" : "paused");
 
   return (
     <div
@@ -447,9 +492,18 @@ export function StageCanvas({
       } as CSSProperties}
       data-director-source={activeDirectorPlan.source}
       data-director-state={directorLookupState.status}
+      data-director-version={activeDirectorPlan.directorVersion}
+      data-layout-change-count={activeDirectorPlan.blocking.transitions.length}
+      data-gesture-count={activeDirectorPlan.gestures.length}
+      data-dramatic-moment-count={activeDirectorPlan.dramaticScore.signatureMoments.length}
+      data-dramatic-motif={activeDirectorPlan.dramaticScore.motifActor.family}
+      data-playback-state={renderedPlaybackState}
+      data-shell-layout="lower-leading-dock"
       data-presentation={presentation}
       data-reduce-motion={reduceMotion || undefined}
-      data-palette-source={artworkPalette ? "artwork" : "fallback"}
+      data-palette-source={artworkPalette
+        ? activeDirectorPlan.source === "local" ? "artwork" : "artwork-directed"
+        : "fallback"}
       data-palette-tone={paletteTone}
       data-artwork-shape={artworkShape}
       data-world-spatial={activeDirectorPlan.world.spatialMode}
@@ -468,12 +522,12 @@ export function StageCanvas({
         plan={activeDirectorPlan}
         timeMsRef={frameTimeRef}
         continuous={continuous}
-        displayTimeMs={displayTimeMs}
+        displayTimeMs={lyricsTimeForPlaybackMs(displayTimeMs, lyricsOffsetMs, durationMs)}
         reduceMotion={reduceMotion}
         vjMode={vjMode}
         palette={palette}
       />
-      <div className="stage-now-playing-layout">
+      <div className="stage-now-playing-layout" data-layout-transition-phase={layoutTransitionPhase}>
         <aside className="stage-now-playing-info" aria-label="正在播放">
           <div className="stage-artwork-frame">
             {normalizedArtworkURL ? (
@@ -522,6 +576,7 @@ export function StageCanvas({
               onPointerDown={() => { scrubbingRef.current = true; }}
               onInput={(event) => previewScrub(event.currentTarget.valueAsNumber)}
               onPointerUp={(event) => commitScrub(event.currentTarget.valueAsNumber)}
+              onPointerCancel={cancelScrub}
               onKeyUp={(event) => commitScrub(event.currentTarget.valueAsNumber)}
               onBlur={(event) => {
                 if (scrubbingRef.current) commitScrub(event.currentTarget.valueAsNumber);

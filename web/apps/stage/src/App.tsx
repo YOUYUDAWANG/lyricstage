@@ -22,11 +22,13 @@ import {
 import { applyNonMusicSegments } from "@lyricstage/lyrics";
 import {
   compileLocalDirectorPlanV1,
+  estimateLyricsOffsetFromVocalTimingV1,
   type DirectorPlanV1,
 } from "@lyricstage/performance";
 import {
   canEnterEmbeddedFullscreen,
   embeddedFullscreenSurface,
+  fullscreenOwnershipConfirmed,
 } from "./column/embeddedFullscreen";
 import { ColumnStageView } from "./column/ColumnStageView";
 import { FullscreenTrackTransition } from "./column/FullscreenTrackTransition";
@@ -42,8 +44,23 @@ import {
 } from "./playback/youtubeMusicBridge";
 import {
   readExtensionPreferences,
+  readLyricsOffset,
   saveExtensionPreferences,
+  saveLyricsOffset,
 } from "./playback/extensionPreferences";
+import {
+  clampLyricsOffsetMs,
+  formatLyricsOffset,
+  lyricsOffsetForIdentity,
+  lyricsTimeForPlaybackMs,
+} from "./playback/lyricsTimeOffset";
+import {
+  createFullscreenCaptureLifecycle,
+  isFullscreenCapturePinnedForTrack,
+  pinnedTrackIDAfterCaptureStart,
+  type FullscreenCaptureLifecycle,
+  type FullscreenCaptureOwnership,
+} from "./playback/fullscreenCaptureLifecycle";
 import { lyricDocumentFromCandidate } from "./playback/lyricsCandidateDocument";
 import {
   directorStatusLabel,
@@ -149,6 +166,8 @@ export default function App({ embedded = embeddedStageFromLocation, onEmbeddedRe
   const [lightweight, setLightweight] = useState(false);
   const [vjMode, setVJMode] = useState(false);
   const [vocalTimingLocalError, setVocalTimingLocalError] = useState<string | undefined>();
+  const [lyricsOffsetMs, setLyricsOffsetMs] = useState(0);
+  const [autoAlignPending, setAutoAlignPending] = useState(false);
   const [installedYouTubeLyricsIdentity, setInstalledYouTubeLyricsIdentity] = useState<string | null>(null);
   const [remoteDirectorPlan, setRemoteDirectorPlan] = useState<DirectorPlanV1 | undefined>();
   const [directorLookupState, setDirectorLookupState] = useState<DirectorLookupState>({ status: "idle" });
@@ -157,11 +176,27 @@ export default function App({ embedded = embeddedStageFromLocation, onEmbeddedRe
   const directorLookupGenerationRef = useRef(0);
   const manualLyricsIdentityRef = useRef<string | null>(null);
   const currentYouTubeIdentityRef = useRef<string | null>(null);
-  const vocalTimingPinnedRef = useRef(false);
+  const vocalTimingPinnedTrackIDRef = useRef<string | null>(null);
+  const fullscreenCaptureOwnershipRef = useRef<FullscreenCaptureOwnership>({
+    embedded: embeddedStage,
+    pinned: false,
+  });
+  const fullscreenCaptureLifecycleRef = useRef<FullscreenCaptureLifecycle | null>(null);
+  const lyricsOffsetIdentityRef = useRef<string | null>(null);
   const everConnectedRef = useRef(false);
   const lastTrackRef = useRef<{ title: string; artist: string }>({ title: "", artist: "" });
 
   displayTimeRef.current = displayTimeMs;
+  const currentCaptureTrackID = youtubeMusic.snapshot?.track.trackID;
+  fullscreenCaptureOwnershipRef.current = {
+    embedded: embeddedStage,
+    pinned: isFullscreenCapturePinnedForTrack(
+      vocalTimingPinnedTrackIDRef.current,
+      currentCaptureTrackID,
+    ),
+    trackID: currentCaptureTrackID,
+    captureID: youtubeMusic.musicCaptureID,
+  };
 
   const localClockRef = useRef<PlaybackClockV0>({
     source: "localMedia",
@@ -212,6 +247,12 @@ export default function App({ embedded = embeddedStageFromLocation, onEmbeddedRe
   const youtubeLyricsIdentity = youtubeLyricsTrack
     ? lyricsTrackIdentity(youtubeLyricsTrack)
     : null;
+  const currentLyricsOffsetIdentity = source === "youtubeMusic" ? youtubeLyricsIdentity : null;
+  const effectiveLyricsOffsetMs = lyricsOffsetForIdentity(
+    lyricsOffsetIdentityRef.current,
+    currentLyricsOffsetIdentity,
+    lyricsOffsetMs,
+  );
   currentYouTubeIdentityRef.current = youtubeLyricsIdentity;
   const expectedRecordingID = source === "youtubeMusic" ? youtubeRecordingID : audioRecordingID;
   const hasMatchingLyrics =
@@ -234,6 +275,9 @@ export default function App({ embedded = embeddedStageFromLocation, onEmbeddedRe
       : playing
   );
   const stageDisplayTimeMs = stageReady ? displayTimeMs : demoTimeMs;
+  const stageLyricTimeMs = stageReady
+    ? lyricsTimeForPlaybackMs(stageDisplayTimeMs, effectiveLyricsOffsetMs, durationMs)
+    : demoTimeMs;
 
   const plan = useMemo(() => compilePerformancePlan(lyrics), [lyrics]);
   const localDirectorPlan = useMemo(() => {
@@ -337,9 +381,9 @@ export default function App({ embedded = embeddedStageFromLocation, onEmbeddedRe
     youtubeMusic.musicMap,
   ]);
   const activeLineText = useMemo(() => {
-    const active = sampleTimeline(timeline, stageDisplayTimeMs);
+    const active = sampleTimeline(timeline, stageLyricTimeMs);
     return active.map((index) => lyrics.lines[index]?.text).filter(Boolean).join(" / ") || "器乐段 / 等待下一句";
-  }, [lyrics.lines, stageDisplayTimeMs, timeline]);
+  }, [lyrics.lines, stageLyricTimeMs, timeline]);
 
   const handleMetrics = useCallback(
     (summary: { count: number; p95: number; p99: number; max: number }) => setMetrics(summary),
@@ -374,14 +418,34 @@ export default function App({ embedded = embeddedStageFromLocation, onEmbeddedRe
   }, [youtubeMusic.clock]);
 
   useEffect(() => {
-    const onFullscreenChange = () => {
-      const active = Boolean(document.fullscreenElement);
-      setIsFullscreen(active);
-      if (!active && embeddedStage) setPresentation("column");
-    };
-    document.addEventListener("fullscreenchange", onFullscreenChange);
-    return () => document.removeEventListener("fullscreenchange", onFullscreenChange);
+    if (!fullscreenCaptureLifecycleRef.current) {
+      fullscreenCaptureLifecycleRef.current = createFullscreenCaptureLifecycle({
+        document,
+        getOwnership: () => ({
+          ...fullscreenCaptureOwnershipRef.current,
+          pinned: isFullscreenCapturePinnedForTrack(
+            vocalTimingPinnedTrackIDRef.current,
+            fullscreenCaptureOwnershipRef.current.trackID,
+          ),
+        }),
+        onFullscreenState: (active, embedded) => {
+          setIsFullscreen(active);
+          if (!active && embedded) setPresentation("column");
+        },
+        stopAnalysis: (trackID, captureID) => {
+          void stopYouTubeMusicAudioAnalysis(trackID, captureID);
+        },
+      });
+    }
+    return fullscreenCaptureLifecycleRef.current.mount();
   }, []);
+
+  useEffect(() => {
+    const pinnedTrackID = vocalTimingPinnedTrackIDRef.current;
+    if (currentCaptureTrackID && pinnedTrackID && currentCaptureTrackID !== pinnedTrackID) {
+      vocalTimingPinnedTrackIDRef.current = null;
+    }
+  }, [currentCaptureTrackID]);
 
   useEffect(() => {
     if (
@@ -426,15 +490,51 @@ export default function App({ embedded = embeddedStageFromLocation, onEmbeddedRe
   }, [embeddedStage]);
 
   useEffect(() => {
+    const recordingIdentity = source === "youtubeMusic" ? youtubeLyricsIdentity : null;
+    lyricsOffsetIdentityRef.current = recordingIdentity;
+    setLyricsOffsetMs(0);
+    setAutoAlignPending(false);
+    if (!recordingIdentity) return undefined;
+    let cancelled = false;
+    void readLyricsOffset(recordingIdentity).then((storedOffset) => {
+      if (!cancelled && lyricsOffsetIdentityRef.current === recordingIdentity) {
+        setLyricsOffsetMs(clampLyricsOffsetMs(storedOffset));
+      }
+    }).catch(() => undefined);
+    return () => {
+      cancelled = true;
+    };
+  }, [source, youtubeLyricsIdentity]);
+
+  useEffect(() => {
     if (!embeddedStage || presentation !== "fullscreen" || !selectedPlaying) return undefined;
     let disposed = false;
+    let acquiring = false;
     let sentinel: WakeLockSentinel | null = null;
     const acquire = async () => {
-      if (disposed || document.visibilityState !== "visible" || !navigator.wakeLock) return;
+      if (
+        disposed
+        || acquiring
+        || sentinel
+        || document.visibilityState !== "visible"
+        || !navigator.wakeLock
+      ) return;
+      acquiring = true;
       try {
-        sentinel = await navigator.wakeLock.request("screen");
+        const acquired = await navigator.wakeLock.request("screen");
+        if (disposed) {
+          await acquired.release().catch(() => undefined);
+          return;
+        }
+        sentinel = acquired;
+        acquired.addEventListener("release", () => {
+          if (sentinel === acquired) sentinel = null;
+          if (!disposed && document.visibilityState === "visible") void acquire();
+        }, { once: true });
       } catch {
         // Fullscreen remains usable when the browser or OS denies wake lock.
+      } finally {
+        acquiring = false;
       }
     };
     const onVisibility = () => {
@@ -445,8 +545,9 @@ export default function App({ embedded = embeddedStageFromLocation, onEmbeddedRe
     return () => {
       disposed = true;
       document.removeEventListener("visibilitychange", onVisibility);
-      void sentinel?.release().catch(() => undefined);
+      const current = sentinel;
       sentinel = null;
+      void current?.release().catch(() => undefined);
     };
   }, [embeddedStage, presentation, selectedPlaying]);
 
@@ -600,6 +701,7 @@ export default function App({ embedded = embeddedStageFromLocation, onEmbeddedRe
     if (!file) return;
     const audio = audioRef.current;
     if (!audio) return;
+    lyricsLookupGenerationRef.current += 1;
     if (objectURLRef.current) URL.revokeObjectURL(objectURLRef.current);
     const url = URL.createObjectURL(file);
     objectURLRef.current = url;
@@ -619,13 +721,17 @@ export default function App({ embedded = embeddedStageFromLocation, onEmbeddedRe
       setMessage(source === "youtubeMusic" ? "请先在 YouTube Music 播放一首歌曲。" : "请先导入本地音频。");
       return;
     }
-    lyricsLookupGenerationRef.current += 1;
-    if (source === "youtubeMusic" && youtubeMusic.snapshot) {
-      const track = lyricsTrackFromSnapshot(youtubeMusic.snapshot);
-      manualLyricsIdentityRef.current = track ? lyricsTrackIdentity(track) : null;
-    }
+    const generation = ++lyricsLookupGenerationRef.current;
+    const sourceAtStart = source;
+    const recordingIDAtStart = expectedRecordingID;
+    const youtubeTrackAtStart = sourceAtStart === "youtubeMusic" && youtubeMusic.snapshot
+      ? lyricsTrackFromSnapshot(youtubeMusic.snapshot)
+      : null;
+    const manualIdentityAtStart = youtubeTrackAtStart ? lyricsTrackIdentity(youtubeTrackAtStart) : null;
+    manualLyricsIdentityRef.current = manualIdentityAtStart;
     const rawLyrics = await file.text();
-    const result = parseLyricSource(rawLyrics, file.name, expectedRecordingID, durationMs);
+    if (generation !== lyricsLookupGenerationRef.current) return;
+    const result = parseLyricSource(rawLyrics, file.name, recordingIDAtStart, durationMs);
     if (!result.ok) {
       setMessage(result.issues.map((issue) => issue.message).join("；"));
       return;
@@ -634,41 +740,39 @@ export default function App({ embedded = embeddedStageFromLocation, onEmbeddedRe
     setLyricsLabel(file.name);
     setHasUserLyrics(true);
     setInstalledYouTubeLyricsIdentity(
-      source === "youtubeMusic" && youtubeMusic.snapshot
-        ? manualLyricsIdentityRef.current
+      sourceAtStart === "youtubeMusic" && youtubeTrackAtStart
+        ? manualIdentityAtStart
         : null,
     );
     setAutomaticLyrics({
       status: "manual",
-      ...(source === "youtubeMusic" && youtubeMusic.snapshot
-        ? { trackID: youtubeMusic.snapshot.track.trackID }
+      ...(youtubeTrackAtStart
+        ? { trackID: youtubeTrackAtStart.trackID }
         : {}),
       candidates: [],
     });
     setDurationMs(Math.max(durationMs, result.value.durationMs));
-    const initialTime = source === "youtubeMusic"
+    const initialTime = sourceAtStart === "youtubeMusic"
       ? youtubeMusic.clock.sample().timeMs
       : result.value.lines[0]?.fromMs ?? 0;
     setDisplayTimeMs(initialTime);
     setMessage(
-      source === "youtubeMusic"
+      sourceAtStart === "youtubeMusic"
         ? "歌词已装入，正在保存到这首歌曲的本地歌词库。"
         : "歌词合同已通过，完整文本与时间轴已装入舞台。",
     );
-    if (source === "youtubeMusic" && youtubeMusic.snapshot) {
-      const track = lyricsTrackFromSnapshot(youtubeMusic.snapshot);
-      const identity = track ? lyricsTrackIdentity(track) : null;
-      if (track && identity) {
-        void rememberLocalLyrics(track, file.name, rawLyrics).then(() => {
+    if (youtubeTrackAtStart && manualIdentityAtStart) {
+      void rememberLocalLyrics(youtubeTrackAtStart, file.name, rawLyrics).then(() => {
+          const identity = manualIdentityAtStart;
           if (currentYouTubeIdentityRef.current === identity) {
             setMessage("歌词已装入并保存；下次播放这首歌时会优先恢复本地版本。");
           }
         }).catch(() => {
+          const identity = manualIdentityAtStart;
           if (currentYouTubeIdentityRef.current === identity) {
             setMessage("歌词已临时装入，但本地歌词库写入失败；刷新后可能需要重新导入。");
           }
         });
-      }
     }
   };
 
@@ -814,7 +918,10 @@ export default function App({ embedded = embeddedStageFromLocation, onEmbeddedRe
 
   const seekStage = async (nextMs: number) => {
     if (source === "youtubeMusic") {
-      const ok = await seekYouTubeMusic(nextMs);
+      const expectedTrackID = youtubeMusic.snapshot?.track.trackID;
+      const ok = expectedTrackID
+        ? await seekYouTubeMusic(nextMs, expectedTrackID)
+        : false;
       if (!ok) setMessage("跳转失败：YouTube Music 播放页暂时不可用。");
       return;
     }
@@ -823,7 +930,10 @@ export default function App({ embedded = embeddedStageFromLocation, onEmbeddedRe
 
   const controlStageTransport = async (action: YouTubeMusicTransportActionV0) => {
     if (source === "youtubeMusic") {
-      const ok = await controlYouTubeMusic(action);
+      const expectedTrackID = youtubeMusic.snapshot?.track.trackID;
+      const ok = expectedTrackID
+        ? await controlYouTubeMusic(action, expectedTrackID)
+        : false;
       if (!ok) setMessage("播放控制暂时不可用，请回到 YouTube Music。");
       return;
     }
@@ -831,8 +941,9 @@ export default function App({ embedded = embeddedStageFromLocation, onEmbeddedRe
   };
 
   const exitEmbeddedFullscreen = useCallback(async () => {
-    if (!vocalTimingPinnedRef.current) {
-      void stopYouTubeMusicAudioAnalysis(youtubeMusic.snapshot?.track.trackID);
+    const trackID = youtubeMusic.snapshot?.track.trackID;
+    if (trackID && !isFullscreenCapturePinnedForTrack(vocalTimingPinnedTrackIDRef.current, trackID)) {
+      void stopYouTubeMusicAudioAnalysis(trackID);
     }
     setPresentation("column");
     if (document.fullscreenElement) {
@@ -852,7 +963,7 @@ export default function App({ embedded = embeddedStageFromLocation, onEmbeddedRe
     }
     const active = youtubeMusic.musicMapStatus === "analyzing" || youtubeMusic.musicMapStatus === "ready";
     if (active) {
-      vocalTimingPinnedRef.current = false;
+      vocalTimingPinnedTrackIDRef.current = null;
       setVocalTimingLocalError(undefined);
       const stopped = await stopYouTubeMusicAudioAnalysis(snapshot.track.trackID);
       setMessage(stopped ? "已停止人声感知，恢复文本估算。" : "人声分析暂时无法停止，请重试。");
@@ -862,12 +973,107 @@ export default function App({ embedded = embeddedStageFromLocation, onEmbeddedRe
       snapshot.track.trackID,
       snapshot.playback.durationMs,
     );
-    vocalTimingPinnedRef.current = startResult.ok;
+    vocalTimingPinnedTrackIDRef.current = pinnedTrackIDAfterCaptureStart({
+      pinnedTrackID: vocalTimingPinnedTrackIDRef.current,
+      requestedTrackID: snapshot.track.trackID,
+      currentTrackID: fullscreenCaptureOwnershipRef.current.trackID,
+      started: startResult.ok,
+    });
     setVocalTimingLocalError(startResult.ok ? undefined : startResult.reason || "capture-failed");
     setMessage(startResult.ok
       ? "正在本机分析中置人声、起音和停顿；低置信片段会自动退回文本估算。"
       : `浏览器未能启动本地音频分析：${startResult.reason || "请再次点击人声按钮"}`);
   }, [youtubeMusic.musicMapStatus, youtubeMusic.snapshot]);
+
+  const setCurrentLyricsOffset = useCallback((nextOffsetMs: number) => {
+    const boundedOffset = clampLyricsOffsetMs(nextOffsetMs);
+    setLyricsOffsetMs(boundedOffset);
+    setMessage(boundedOffset === 0
+      ? "歌词时间轴已归零。"
+      : `歌词时间轴已${formatLyricsOffset(boundedOffset)}。`);
+    const recordingIdentity = source === "youtubeMusic" ? youtubeLyricsIdentity : null;
+    if (recordingIdentity) {
+      void saveLyricsOffset(recordingIdentity, boundedOffset).catch(() => {
+        if (lyricsOffsetIdentityRef.current === recordingIdentity) {
+          setMessage(`歌词已${formatLyricsOffset(boundedOffset)}，但本地偏移保存失败。`);
+        }
+      });
+    }
+  }, [source, youtubeLyricsIdentity]);
+
+  const autoAlignLyrics = useCallback(async () => {
+    const snapshot = youtubeMusic.snapshot;
+    if (!snapshot || !hasMatchingLyrics) {
+      setMessage("请先匹配当前歌曲的同步歌词。");
+      return;
+    }
+    const estimate = estimateLyricsOffsetFromVocalTimingV1(lyrics.lines, youtubeMusic.vocalTimingMap);
+    if (estimate) {
+      setCurrentLyricsOffset(estimate.offsetMs);
+      setMessage(`已按 ${estimate.matchedLineCount} 个本地人声起音自动${formatLyricsOffset(estimate.offsetMs)}。`);
+      setAutoAlignPending(false);
+      return;
+    }
+    setAutoAlignPending(true);
+    const active = youtubeMusic.musicMapStatus === "analyzing" || youtubeMusic.musicMapStatus === "ready";
+    if (!active) {
+      const startResult = await startYouTubeMusicAudioAnalysis(
+        snapshot.track.trackID,
+        snapshot.playback.durationMs,
+      );
+      if (!startResult.ok) {
+        const reason = startResult.reason || "capture-failed";
+        const awaitingInvocation = reason.includes("15 秒");
+        setVocalTimingLocalError(reason);
+        setAutoAlignPending(awaitingInvocation);
+        setMessage(awaitingInvocation
+          ? reason
+          : `自动对齐无法启动本地人声分析：${reason}`);
+        return;
+      }
+      vocalTimingPinnedTrackIDRef.current = pinnedTrackIDAfterCaptureStart({
+        pinnedTrackID: vocalTimingPinnedTrackIDRef.current,
+        requestedTrackID: snapshot.track.trackID,
+        currentTrackID: fullscreenCaptureOwnershipRef.current.trackID,
+        started: true,
+      });
+      setVocalTimingLocalError(undefined);
+    }
+    setMessage("正在收集本地人声起音；获得足够清晰的行首后会自动应用偏移。");
+  }, [
+    hasMatchingLyrics,
+    lyrics.lines,
+    setCurrentLyricsOffset,
+    youtubeMusic.musicMapStatus,
+    youtubeMusic.snapshot,
+    youtubeMusic.vocalTimingMap,
+  ]);
+
+  useEffect(() => {
+    if (!autoAlignPending || !youtubeMusic.vocalTimingMap || !hasMatchingLyrics) return;
+    if (youtubeMusic.musicMapStatus === "analyzing" || youtubeMusic.musicMapStatus === "ready") {
+      vocalTimingPinnedTrackIDRef.current = youtubeMusic.snapshot?.track.trackID ?? null;
+    }
+    const estimate = estimateLyricsOffsetFromVocalTimingV1(lyrics.lines, youtubeMusic.vocalTimingMap);
+    if (estimate) {
+      setCurrentLyricsOffset(estimate.offsetMs);
+      setAutoAlignPending(false);
+      setMessage(`已按 ${estimate.matchedLineCount} 个本地人声起音自动${formatLyricsOffset(estimate.offsetMs)}。`);
+      return;
+    }
+    if (youtubeMusic.vocalTimingMap.toMs - youtubeMusic.vocalTimingMap.fromMs >= 12_000) {
+      setAutoAlignPending(false);
+      setMessage("这段人声起音不够清晰，未改动现有偏移；可继续手动提前或延后。");
+    }
+  }, [
+    autoAlignPending,
+    hasMatchingLyrics,
+    lyrics.lines,
+    setCurrentLyricsOffset,
+    youtubeMusic.musicMapStatus,
+    youtubeMusic.snapshot?.track.trackID,
+    youtubeMusic.vocalTimingMap,
+  ]);
 
   useEffect(() => {
     if (!embeddedStage || presentation !== "fullscreen") return undefined;
@@ -883,19 +1089,6 @@ export default function App({ embedded = embeddedStageFromLocation, onEmbeddedRe
   }, [exitEmbeddedFullscreen, presentation]);
 
   const enterFullscreen = async () => {
-    if (
-      source === "youtubeMusic"
-      && youtubeMusic.snapshot
-      && youtubeMusic.musicMapStatus !== "analyzing"
-      && youtubeMusic.musicMapStatus !== "ready"
-    ) {
-      // tabCapture must begin from the same direct user gesture as fullscreen.
-      // It is intentionally fire-and-forget so requestFullscreen keeps its gesture token.
-      void startYouTubeMusicAudioAnalysis(
-        youtubeMusic.snapshot.track.trackID,
-        youtubeMusic.snapshot.playback.durationMs,
-      );
-    }
     if (embeddedStage) {
       if (!canEnterEmbeddedFullscreen(hasMatchingLyrics)) {
         setMessage("请先匹配或导入歌词后再进入全屏舞台。");
@@ -906,13 +1099,40 @@ export default function App({ embedded = embeddedStageFromLocation, onEmbeddedRe
         setMessage("全屏容器尚未就绪，请重试。");
         return;
       }
+      const captureTrackID = source === "youtubeMusic" ? youtubeMusic.snapshot?.track.trackID : undefined;
+      const captureStart = captureTrackID
+        && youtubeMusic.snapshot
+        && youtubeMusic.musicMapStatus !== "analyzing"
+        && youtubeMusic.musicMapStatus !== "ready"
+        // tabCapture must begin from the same direct user gesture as fullscreen.
+        ? startYouTubeMusicAudioAnalysis(captureTrackID, youtubeMusic.snapshot.playback.durationMs)
+        : undefined;
       // Must stay in the user-gesture stack: reveal host then requestFullscreen.
       host.hidden = false;
       host.setAttribute("aria-hidden", "false");
       try {
         await host.requestFullscreen();
+        const hostRoot = host.getRootNode();
+        const shadowFullscreenElement = hostRoot instanceof ShadowRoot
+          ? hostRoot.fullscreenElement
+          : null;
+        if (!fullscreenOwnershipConfirmed(
+          host,
+          document.fullscreenElement,
+          shadowFullscreenElement,
+          host.matches(":fullscreen"),
+        )) {
+          throw new Error("fullscreen-ownership-unconfirmed");
+        }
         setPresentation("fullscreen");
       } catch {
+        if (captureTrackID) {
+          // The start response may not have returned its captureID yet. This
+          // direct fullscreen failure owns the just-issued same-tab request,
+          // so cancel by gesture-time track identity immediately.
+          void stopYouTubeMusicAudioAnalysis(captureTrackID);
+          void captureStart?.catch(() => undefined);
+        }
         host.hidden = true;
         host.setAttribute("aria-hidden", "true");
         setPresentation("column");
@@ -1004,6 +1224,8 @@ export default function App({ embedded = embeddedStageFromLocation, onEmbeddedRe
             vocalTimingMap={youtubeMusic.vocalTimingMap}
             vocalTimingStatus={youtubeMusic.musicMapStatus}
             vocalTimingError={vocalTimingLocalError || youtubeMusic.musicMapError}
+            lyricsOffsetMs={effectiveLyricsOffsetMs}
+            autoAlignPending={autoAlignPending}
             onToggleLightweight={() => {
               setLightweight((value) => {
                 const next = !value;
@@ -1019,8 +1241,14 @@ export default function App({ embedded = embeddedStageFromLocation, onEmbeddedRe
               });
             }}
             onToggleVocalTiming={() => void toggleVocalTiming()}
+            onSetLyricsOffset={setCurrentLyricsOffset}
+            onAutoAlignLyrics={() => void autoAlignLyrics()}
             onSeekLine={(timeMs) => {
-              void seekYouTubeMusic(timeMs).then((ok) => {
+              const expectedTrackID = youtubeMusic.snapshot?.track.trackID;
+              const operation = expectedTrackID
+                ? seekYouTubeMusic(timeMs, expectedTrackID)
+                : Promise.resolve(false);
+              void operation.then((ok) => {
                 if (!ok) setMessage("跳转失败：YouTube Music 播放页暂时不可用。");
               });
             }}
@@ -1063,6 +1291,7 @@ export default function App({ embedded = embeddedStageFromLocation, onEmbeddedRe
                 clock={youtubeMusic.clock}
                 continuous={selectedPlaying || benchmarkStage}
                 displayTimeMs={displayTimeMs}
+                lyricsOffsetMs={effectiveLyricsOffsetMs}
                 reduceMotion={reduceMotion || lightweight}
                 vjMode={vjMode}
                 showGuides={false}
@@ -1258,6 +1487,7 @@ export default function App({ embedded = embeddedStageFromLocation, onEmbeddedRe
             clock={selectedClock}
             continuous={selectedPlaying || benchmarkStage}
             displayTimeMs={stageDisplayTimeMs}
+            lyricsOffsetMs={effectiveLyricsOffsetMs}
             reduceMotion={reduceMotion}
             vjMode={vjMode}
             showGuides={showGuides}

@@ -3,6 +3,8 @@ import type {
   DirectorLineDirectiveV1,
   DirectorPlanV1,
   DirectorSectionV1,
+  LyricGestureV1,
+  SignatureMomentV1,
   PerformancePaletteRoleV1,
 } from "@lyricstage/performance";
 import type { StagePaletteV0, TextMeasurerV0 } from "./types";
@@ -47,6 +49,28 @@ export interface PreparedDirectedLineV1 {
   repetitionCount: number;
 }
 
+export interface PreparedLyricGestureV1 {
+  gesture: LyricGestureV1;
+  lineIndex: number;
+  fromMs: number;
+  attackEndMs: number;
+  releaseStartMs: number;
+  toMs: number;
+  targetGlyphIndices: number[];
+  bounds: { x: number; y: number; width: number; height: number };
+}
+
+export interface PreparedDramaticMomentV1 {
+  moment: SignatureMomentV1;
+  fromMs: number;
+  anticipationEndMs: number;
+  eventEndMs: number;
+  consequenceEndMs: number;
+  toMs: number;
+  memoryToMs: number;
+  seed: number;
+}
+
 export interface PreparedDirectedStageV1 {
   version: "prepared-directed-stage-v1";
   identity: string;
@@ -55,6 +79,8 @@ export interface PreparedDirectedStageV1 {
   plan: DirectorPlanV1;
   lines: PreparedDirectedLineV1[];
   linesByIndex: Map<number, PreparedDirectedLineV1>;
+  gestures: PreparedLyricGestureV1[];
+  dramaticMoments: PreparedDramaticMomentV1[];
 }
 
 export interface DrawDirectedStageOptionsV1 {

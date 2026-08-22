@@ -7,10 +7,8 @@ import {
 } from "@lyricstage/companion";
 import { parseLyricDocumentV0, stableHash32, type LyricDocumentV0 } from "@lyricstage/contracts";
 import {
-  buildAIMusicIdentityRequest,
   buildLyricsLookupIdentity,
   isLyricsCandidateV0,
-  isAIMusicIdentityResultV1,
   isLyricsLookupResponseV0,
   isLyricsLookupTrackV0,
   lookupResponseContainsCandidate,
@@ -18,9 +16,7 @@ import {
   lookupLayeredLyrics,
   lyricsLookupVersion,
   manualLyricsLookupIdentity,
-  mergeGroundedLyricsIdentity,
   sanitizeManualLyricsSearchQuery,
-  type AIMusicIdentityResultV1,
   type LDDCLyricsConfigurationV0,
   type LyricsCandidateV0,
   type LyricsLookupResponseV0,
@@ -30,17 +26,27 @@ import {
 import {
   adaptFullscreenDirectorResponseV1,
   adaptFullscreenDirectorResponseV2,
+  adaptFullscreenDirectorResponseV3,
+  adaptFullscreenDirectorResponseV4,
   buildDirectorRequestPayloadV1,
+  directorBYOKCacheIdentityV1,
+  executeDirectorBYOKV1,
   isDirectorPlanV1ForLyrics,
+  publicDirectorBYOKConfigurationV1,
+  sanitizeDirectorBYOKConfigurationV1,
   sanitizeMusicMapV1,
   sanitizeVocalTimingMapV1,
+  type DirectorBYOKConfigurationV1,
   type DirectorPlanV1,
+  type DirectorProviderConfigurationV1,
   type DirectorResolutionResponseV1,
   type MusicMapV1,
+  type VocalTimingMapV1,
 } from "@lyricstage/performance";
 
 interface ExtensionPort {
   name: string;
+  sender?: { tab?: ExtensionTab; url?: string };
   postMessage(message: unknown): void;
   onMessage: { addListener(listener: (message: unknown) => void): void };
   onDisconnect: { addListener(listener: () => void): void };
@@ -69,6 +75,7 @@ interface ExtensionChrome {
   };
   offscreen: {
     createDocument(options: { url: string; reasons: string[]; justification: string }): Promise<void>;
+    closeDocument?(): Promise<void>;
   };
   tabCapture: {
     getMediaStreamId(options: { targetTabId: number }): Promise<string>;
@@ -92,15 +99,16 @@ interface ExtensionChrome {
 }
 
 const chromeAPI = (globalThis as typeof globalThis & { chrome: ExtensionChrome }).chrome;
-const stagePorts = new Set<ExtensionPort>();
+const stagePorts = new Map<ExtensionPort, number | undefined>();
 const sourceRegistry = new YouTubeMusicSourceRegistryV0();
-const lyricsCacheStorageKey = "lyricstage-youtube-music-lyrics-v8";
+const lyricsCacheStorageKey = "lyricstage-youtube-music-lyrics-v9";
 const localLyricsStorageKey = "lyricstage-local-lyrics-v0";
 const privateLyricsConfigurationStorageKey = "lyricstage-private-lyrics-backend-v0";
-const directorConfigurationStorageKey = "lyricstage-director-backend-v1";
-const directorCacheStorageKey = "lyricstage-director-cache-v3";
-const directorEndpoint = "https://director.hachi-mi.uk/v1/fullscreen/direct";
-const musicIdentityEndpoint = "https://director.hachi-mi.uk/v1/music/identity";
+const legacyDirectorConfigurationStorageKey = "lyricstage-director-backend-v1";
+const directorConfigurationStorageKey = "lyricstage-director-byok-v1";
+const legacyDirectorCacheStorageKey = "lyricstage-director-cache-v4";
+const directorCacheStorageKey = "lyricstage-director-cache-v5";
+const directorCacheEpoch = "fullscreen-director-v4-client-contract-v8.6-byok-v1";
 const lyricsCacheLimit = 100;
 const directorCacheLimit = 100;
 const lyricsLookupTasks = new Map<string, Promise<LyricsLookupResponseV0>>();
@@ -111,8 +119,55 @@ let localLyricsWrite = Promise.resolve();
 let directorCacheWrite = Promise.resolve();
 let sourceLeaseTimer: ReturnType<typeof setInterval> | undefined;
 let offscreenCreation: Promise<void> | undefined;
-let audioCapture: { trackID: string; tabID: number; durationMs: number; mapForwarded: boolean } | undefined;
-let pendingAudioCapture: { trackID: string; durationMs: number; expiresAtUnixMs: number } | undefined;
+type AudioAnalysisStatus = "analyzing" | "ready" | "error";
+type AudioCaptureOwnerScope = "boundTab" | "followAuthority";
+
+interface AudioCaptureState {
+  captureID: string;
+  trackID: string;
+  tabID: number;
+  durationMs: number;
+  generation: number;
+  ownerScope: AudioCaptureOwnerScope;
+  status: AudioAnalysisStatus;
+  reason?: string;
+  latestMusicMap?: MusicMapV1;
+  latestVocalMap?: VocalTimingMapV1;
+  mapForwarded: boolean;
+  expiresAtUnixMs?: number;
+  startTask?: Promise<void>;
+}
+
+interface AudioCaptureOperation {
+  capture: AudioCaptureState;
+  task: Promise<void>;
+}
+
+interface OffscreenAudioCaptureStatus {
+  captureID: string;
+  trackID: string;
+  tabID: number;
+  generation: number;
+  durationMs: number;
+  status: AudioAnalysisStatus;
+  ownerScope: AudioCaptureOwnerScope;
+  latestMusicMap?: MusicMapV1;
+  latestVocalMap?: VocalTimingMapV1;
+}
+
+type AudioAnalysisReplayState = Omit<AudioCaptureState, "status" | "startTask"> & {
+  status: AudioAnalysisStatus | "idle";
+};
+
+let audioCapture: AudioCaptureState | undefined;
+let pendingAudioCapture: AudioCaptureState | undefined;
+let recoveringAudioCapture: AudioCaptureState | undefined;
+let audioCaptureGeneration = 0;
+let audioCaptureSequence = 0;
+let audioCaptureRehydrated = false;
+let audioCaptureRehydrationTask: Promise<void> | undefined;
+const audioAnalysisReplayByTab = new Map<number, AudioAnalysisReplayState>();
+let lastBroadcastAuthoritativeTabID: number | undefined;
 const sponsorBlockCategories = [
   "sponsor",
   "selfpromo",
@@ -190,62 +245,62 @@ const savePrivateLyricsConfiguration = async (
   return { configured: true, endpoint };
 };
 
-const directorConfiguration = async (): Promise<{ token: string } | undefined> => {
-  const value = (await chromeAPI.storage.local.get(directorConfigurationStorageKey))[directorConfigurationStorageKey] as
-    { token?: unknown } | undefined;
-  const token = typeof value?.token === "string" ? value.token.trim() : "";
-  return token && token.length <= 500 ? { token } : undefined;
+const directorConfiguration = async (): Promise<DirectorBYOKConfigurationV1 | undefined> => {
+  const value = (await chromeAPI.storage.local.get(directorConfigurationStorageKey))[directorConfigurationStorageKey];
+  return sanitizeDirectorBYOKConfigurationV1(value);
 };
 
-const resolveAIMusicIdentity = async (
-  track: LyricsLookupTrackV0,
-): Promise<AIMusicIdentityResultV1 | undefined> => {
-  let configuration: { token: string } | undefined;
-  try {
-    configuration = await directorConfiguration();
-  } catch {
-    return undefined;
-  }
-  if (!configuration) return undefined;
-  const localIdentity = buildLyricsLookupIdentity(track);
-  const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), 30_000);
-  try {
-    const response = await fetch(musicIdentityEndpoint, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${configuration.token}`,
-      },
-      body: JSON.stringify(buildAIMusicIdentityRequest(track, localIdentity)),
-      signal: controller.signal,
-    });
-    if (!response.ok) return undefined;
-    const value = await response.json() as unknown;
-    if (!isAIMusicIdentityResultV1(value) || value.trackID !== track.trackID) return undefined;
-    return value;
-  } catch {
-    return undefined;
-  } finally {
-    clearTimeout(timeout);
-  }
+const sameProviderTarget = (
+  candidate: Record<string, unknown>,
+  existing: DirectorProviderConfigurationV1 | undefined,
+): boolean => {
+  if (!existing) return false;
+  return candidate.protocol === existing.protocol
+    && typeof candidate.endpoint === "string"
+    && candidate.endpoint.trim().replace(/\/+$/u, "") === existing.endpoint
+    && candidate.model === existing.model;
 };
 
-const saveDirectorConfiguration = async (tokenValue: unknown): Promise<{ configured: boolean }> => {
-  const suppliedToken = typeof tokenValue === "string" ? tokenValue.trim() : "";
-  if (!suppliedToken) {
+const mergeStoredProviderKey = (
+  value: unknown,
+  existing: DirectorProviderConfigurationV1 | undefined,
+): unknown => {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return value;
+  const candidate = value as Record<string, unknown>;
+  const suppliedKey = typeof candidate.apiKey === "string" ? candidate.apiKey.trim() : "";
+  return {
+    ...candidate,
+    apiKey: suppliedKey || (sameProviderTarget(candidate, existing) ? existing?.apiKey ?? "" : ""),
+  };
+};
+
+const saveDirectorConfiguration = async (value: unknown): Promise<{ configured: boolean }> => {
+  if (!value) {
     await chromeAPI.storage.local.set({
       [directorConfigurationStorageKey]: null,
+      [legacyDirectorConfigurationStorageKey]: null,
       [directorCacheStorageKey]: {},
-      [lyricsCacheStorageKey]: {},
+      [legacyDirectorCacheStorageKey]: {},
     });
     return { configured: false };
   }
-  if (suppliedToken.length > 500) throw new Error("导演令牌过长");
+  if (typeof value !== "object" || Array.isArray(value)) throw new Error("导演配置格式无效");
+  const existing = await directorConfiguration();
+  const candidate = value as Record<string, unknown>;
+  const merged = {
+    ...candidate,
+    primary: mergeStoredProviderKey(candidate.primary, existing?.primary),
+    ...(candidate.fallback ? { fallback: mergeStoredProviderKey(candidate.fallback, existing?.fallback) } : {}),
+  };
+  const configuration = sanitizeDirectorBYOKConfigurationV1(merged);
+  if (!configuration) {
+    throw new Error("请检查协议、地址、模型与 API Key；HTTP 仅允许本机或私有网络模型");
+  }
   await chromeAPI.storage.local.set({
-    [directorConfigurationStorageKey]: { token: suppliedToken },
+    [directorConfigurationStorageKey]: configuration,
+    [legacyDirectorConfigurationStorageKey]: null,
     [directorCacheStorageKey]: {},
-    [lyricsCacheStorageKey]: {},
+    [legacyDirectorCacheStorageKey]: {},
   });
   return { configured: true };
 };
@@ -452,39 +507,13 @@ const resolveAutomaticLyrics = async (track: LyricsLookupTrackV0): Promise<Lyric
         : track;
       const lddc = await privateLyricsConfiguration();
       const localIdentity = buildLyricsLookupIdentity(lookupTrack);
-      const earlyAIIdentity = localIdentity.isCover && localIdentity.originalArtists.length === 0
-        ? resolveAIMusicIdentity(lookupTrack)
-        : undefined;
-      let found = await lookupLayeredLyrics(lookupTrack, { lddc, identity: localIdentity });
-      let aiIdentity: AIMusicIdentityResultV1 | undefined;
-      if (found.matchKind !== "sameRecording") {
-        aiIdentity = await (earlyAIIdentity ?? resolveAIMusicIdentity(lookupTrack));
-        if (aiIdentity) {
-          const groundedIdentity = mergeGroundedLyricsIdentity(lookupTrack, localIdentity, aiIdentity);
-          if (groundedIdentity) {
-            found = await lookupLayeredLyrics(lookupTrack, { lddc, identity: groundedIdentity });
-          }
-        }
-      }
+      const found = await lookupLayeredLyrics(lookupTrack, { lddc, identity: localIdentity });
       const decorate = (candidate: LyricsCandidateV0): LyricsCandidateV0 =>
         nonMusicSegmentsMs.length > 0 ? { ...candidate, nonMusicSegmentsMs } : candidate;
-      const identityResolution = aiIdentity?.status === "grounded"
-        ? {
-            method: "gemma4GoogleSearch" as const,
-            canonicalTitle: aiIdentity.canonicalTitle,
-            originalArtists: aiIdentity.originalArtists,
-            confidence: aiIdentity.confidence,
-            sources: aiIdentity.sources,
-          }
-        : undefined;
       const response: LyricsLookupResponseV0 = {
         ...found,
         trackID: track.trackID,
         ...(found.match ? { match: decorate(found.match) } : {}),
-        ...(identityResolution ? { identityResolution } : {}),
-        ...(identityResolution && found.matchKind === "originalFallback"
-          ? { message: `Gemma 4 联网确认原唱：${identityResolution.originalArtists.join("、")}` }
-          : {}),
         candidates: found.candidates.map(decorate),
       };
       const ttl = response.status === "match"
@@ -573,8 +602,14 @@ const acceptLyricsCandidate = async (
   await saveLyricsCache(track, response, 30 * 24 * 60 * 60 * 1000);
 };
 
-const directorFingerprint = (track: LyricsLookupTrackV0, lyrics: LyricDocumentV0): string => stableHash32({
-  version: "director-cache-fingerprint-v1",
+const directorFingerprint = (
+  track: LyricsLookupTrackV0,
+  lyrics: LyricDocumentV0,
+  configuration: DirectorBYOKConfigurationV1,
+): string => stableHash32({
+  version: "director-cache-fingerprint-v2",
+  epoch: directorCacheEpoch,
+  provider: directorBYOKCacheIdentityV1(configuration),
   track: lyricsFingerprint(track),
   lyrics,
 });
@@ -589,11 +624,12 @@ const readDirectorCache = async (): Promise<StoredDirectorCache> => {
 const cachedDirectorPlan = async (
   track: LyricsLookupTrackV0,
   lyrics: LyricDocumentV0,
+  configuration: DirectorBYOKConfigurationV1,
 ): Promise<DirectorPlanV1 | undefined> => {
   const entry = (await readDirectorCache())[track.trackID];
   if (
     !entry
-    || entry.fingerprint !== directorFingerprint(track, lyrics)
+    || entry.fingerprint !== directorFingerprint(track, lyrics, configuration)
     || entry.expiresAtUnixMs <= Date.now()
     || !isDirectorPlanV1ForLyrics(entry.plan, lyrics)
   ) return undefined;
@@ -604,6 +640,7 @@ const saveDirectorPlanCache = (
   track: LyricsLookupTrackV0,
   lyrics: LyricDocumentV0,
   plan: DirectorPlanV1,
+  configuration: DirectorBYOKConfigurationV1,
 ): Promise<void> => {
   directorCacheWrite = directorCacheWrite.catch(() => undefined).then(async () => {
     const now = Date.now();
@@ -613,7 +650,7 @@ const saveDirectorPlanCache = (
       && entry.expiresAtUnixMs > now
     );
     entries.push([track.trackID, {
-      fingerprint: directorFingerprint(track, lyrics),
+      fingerprint: directorFingerprint(track, lyrics, configuration),
       expiresAtUnixMs: now + 30 * 24 * 60 * 60 * 1000,
       plan,
     }]);
@@ -639,12 +676,6 @@ const resolveAutomaticDirector = async (
   lyrics: LyricDocumentV0,
   musicMap?: MusicMapV1,
 ): Promise<DirectorResolutionResponseV1> => {
-  if (!musicMap) {
-    const cached = await cachedDirectorPlan(track, lyrics);
-    if (cached) {
-      return { type: "director-resolution-v1", status: "ready", source: "cache", plan: cached };
-    }
-  }
   const configuration = await directorConfiguration();
   if (!configuration) {
     return {
@@ -654,49 +685,82 @@ const resolveAutomaticDirector = async (
       reason: "director-not-configured",
     };
   }
+  if (!musicMap) {
+    const cached = await cachedDirectorPlan(track, lyrics, configuration);
+    if (cached) {
+      return { type: "director-resolution-v1", status: "ready", source: "cache", plan: cached };
+    }
+  }
   const fingerprint = musicMap
-    ? stableHash32({ fingerprint: directorFingerprint(track, lyrics), musicMap })
-    : directorFingerprint(track, lyrics);
+    ? stableHash32({ fingerprint: directorFingerprint(track, lyrics, configuration), musicMap })
+    : directorFingerprint(track, lyrics, configuration);
   const existing = directorLookupTasks.get(fingerprint);
   if (existing) return existing;
 
   const task = (async (): Promise<DirectorResolutionResponseV1> => {
-    const payload = await buildDirectorRequestPayloadV1(track, lyrics, musicMap);
+    let payload = await buildDirectorRequestPayloadV1(track, lyrics, musicMap);
     if (!payload) return directorError("歌曲过长，使用本地演出");
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 110_000);
     try {
-      const response = await fetch(directorEndpoint, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${configuration.token}`,
-        },
-        body: payload.body,
-        signal: controller.signal,
-      });
-      if (!response.ok) return directorError(`导演服务 HTTP ${response.status}`);
-      const raw = await response.json() as unknown;
-      const plan = adaptFullscreenDirectorResponseV2(
+      let execution;
+      try {
+        execution = await executeDirectorBYOKV1(configuration, JSON.parse(payload.body) as unknown);
+      } catch (firstError) {
+        const lineTimingPayload = await buildDirectorRequestPayloadV1(
+          track,
+          lyrics,
+          musicMap,
+          { lineTimingOnly: true },
+        );
+        if (lineTimingPayload && lineTimingPayload.body !== payload.body) {
+          payload = lineTimingPayload;
+          execution = await executeDirectorBYOKV1(configuration, JSON.parse(payload.body) as unknown);
+        } else {
+          throw firstError;
+        }
+      }
+      const plan = adaptFullscreenDirectorResponseV4(
         lyrics,
         track.trackID,
         payload.lyricsHash,
-        raw,
+        execution.response,
+        "ai",
+      ) ?? adaptFullscreenDirectorResponseV3(
+        lyrics,
+        track.trackID,
+        payload.lyricsHash,
+        execution.response,
+        "ai",
+      ) ?? adaptFullscreenDirectorResponseV2(
+        lyrics,
+        track.trackID,
+        payload.lyricsHash,
+        execution.response,
         "ai",
       ) ?? adaptFullscreenDirectorResponseV1(
         lyrics,
         track.trackID,
         payload.lyricsHash,
-        raw,
+        execution.response,
         "ai",
       );
-      if (!plan) return directorError("导演响应未通过本地合同");
-      await saveDirectorPlanCache(track, lyrics, plan);
+      if (!plan) {
+        const degradedReason = execution.response && typeof execution.response === "object" && !Array.isArray(execution.response)
+          && typeof (execution.response as { degradedReason?: unknown }).degradedReason === "string"
+          ? (execution.response as { degradedReason: string }).degradedReason.slice(0, 120)
+          : "";
+        return directorError(degradedReason
+          ? `导演降级：${degradedReason}`
+          : "导演响应未通过本地合同");
+      }
+      await saveDirectorPlanCache(track, lyrics, plan, configuration);
       return { type: "director-resolution-v1", status: "ready", source: "network", plan };
     } catch (error) {
-      return directorError(error instanceof Error ? error.message : "导演服务不可用");
+      let reason = error instanceof Error ? error.message : "AI 导演请求失败";
+      for (const provider of [configuration.primary, configuration.fallback]) {
+        if (provider?.apiKey) reason = reason.replaceAll(provider.apiKey, "[redacted]");
+      }
+      return directorError(reason);
     } finally {
-      clearTimeout(timeout);
       directorLookupTasks.delete(fingerprint);
     }
   })();
@@ -706,18 +770,156 @@ const resolveAutomaticDirector = async (
 
 const bridgeState = (): YouTubeMusicBridgeStateV0 => sourceRegistry.state();
 
-const broadcast = (message: unknown) => {
-  stagePorts.forEach((port) => {
-    try {
-      port.postMessage(message);
-    } catch {
-      stagePorts.delete(port);
+const sourceTabIDForSender = (sender?: { tab?: ExtensionTab; url?: string }): number | undefined =>
+  (
+    sender?.tab?.url?.startsWith("https://music.youtube.com/")
+    || sender?.url?.startsWith("https://music.youtube.com/")
+  )
+    ? sender.tab?.id
+    : undefined;
+
+const bridgeStateForPort = (port: ExtensionPort): YouTubeMusicBridgeStateV0 => {
+  const tabID = stagePorts.get(port);
+  return tabID === undefined ? bridgeState() : sourceRegistry.stateForTab(tabID);
+};
+
+const postToPort = (port: ExtensionPort, message: unknown) => {
+  try {
+    port.postMessage(message);
+  } catch {
+    stagePorts.delete(port);
+  }
+};
+
+const audioAnalysisOwnershipResetMessage = (trackID: string) => ({
+  type: "youtube-music-audio-analysis-status",
+  status: "idle",
+  trackID,
+});
+
+const broadcastBridgeState = () => {
+  const previousAuthoritativeTabID = lastBroadcastAuthoritativeTabID;
+  const authoritativeTabID = sourceRegistry.sourceTabID;
+  const authorityChanged = previousAuthoritativeTabID !== authoritativeTabID;
+  if (authorityChanged) {
+    const currentCapture = audioCapture ?? pendingAudioCapture ?? recoveringAudioCapture;
+    if (
+      currentCapture?.ownerScope === "followAuthority"
+      && currentCapture.tabID !== authoritativeTabID
+    ) {
+      void stopAudioAnalysis(
+        currentCapture.trackID,
+        currentCapture.tabID,
+        currentCapture.captureID,
+      );
+    }
+    stagePorts.forEach((boundTabID, port) => {
+      if (boundTabID === undefined) {
+        // Reset the standalone clock before it sees the promoted tab's
+        // snapshot. Two tabs playing the same recording have independent
+        // sequence/timestamp domains, so the old clock cannot rank them.
+        postToPort(port, { type: "youtube-music-source-ownership-reset" });
+      }
+    });
+  }
+  stagePorts.forEach((_tabID, port) => postToPort(port, bridgeStateForPort(port)));
+  lastBroadcastAuthoritativeTabID = authoritativeTabID;
+  if (authorityChanged && authoritativeTabID !== undefined) {
+    stagePorts.forEach((boundTabID, port) => {
+      if (boundTabID !== undefined) return;
+      const snapshot = sourceRegistry.snapshotForTab(authoritativeTabID);
+      if (snapshot) {
+        // A standalone Stage can move between two tabs that happen to play the
+        // same recording. Reset the prior tab's capture ownership before
+        // replaying the new tab, otherwise track identity alone cannot
+        // distinguish their capture epochs.
+        postToPort(port, audioAnalysisOwnershipResetMessage(snapshot.track.trackID));
+      }
+      replayAudioAnalysisToPort(port);
+    });
+  }
+};
+
+const broadcastForSource = (tabID: number | undefined, message: unknown) => {
+  if (tabID === undefined) return;
+  stagePorts.forEach((boundTabID, port) => {
+    if (boundTabID === tabID || (boundTabID === undefined && sourceRegistry.sourceTabID === tabID)) {
+      postToPort(port, message);
     }
   });
 };
 
+const audioAnalysisStatusMessage = (capture: AudioAnalysisReplayState) => ({
+  type: "youtube-music-audio-analysis-status",
+  status: capture.status,
+  trackID: capture.trackID,
+  captureID: capture.captureID,
+  ...(capture.status === "error" && capture.reason ? { reason: capture.reason } : {}),
+});
+
+const audioAnalysisMessages = (capture: AudioAnalysisReplayState): unknown[] => [
+  ...(capture.mapForwarded && capture.latestMusicMap ? [{
+    type: "youtube-music-music-map-update",
+    trackID: capture.trackID,
+    captureID: capture.captureID,
+    musicMap: capture.latestMusicMap,
+  }] : []),
+  ...(capture.latestVocalMap ? [{
+    type: "youtube-music-vocal-timing-update",
+    trackID: capture.trackID,
+    captureID: capture.captureID,
+    vocalTimingMap: capture.latestVocalMap,
+  }] : []),
+  audioAnalysisStatusMessage(capture),
+];
+
+const rememberAudioAnalysis = (capture: AudioCaptureState) => {
+  const { startTask: _startTask, ...replay } = capture;
+  audioAnalysisReplayByTab.set(capture.tabID, replay);
+};
+
+const rememberIdleAudioAnalysis = (capture: AudioCaptureState) => {
+  const idle: AudioAnalysisReplayState = {
+    captureID: capture.captureID,
+    trackID: capture.trackID,
+    tabID: capture.tabID,
+    durationMs: capture.durationMs,
+    generation: capture.generation,
+    ownerScope: capture.ownerScope,
+    status: "idle",
+    mapForwarded: false,
+  };
+  audioAnalysisReplayByTab.set(capture.tabID, idle);
+  broadcastForSource(capture.tabID, audioAnalysisStatusMessage(idle));
+};
+
+const replayAudioAnalysisToPort = (port: ExtensionPort) => {
+  const boundTabID = stagePorts.get(port);
+  const sourceTabID = boundTabID ?? sourceRegistry.sourceTabID;
+  if (sourceTabID === undefined) return;
+  const capture = audioAnalysisReplayByTab.get(sourceTabID);
+  const snapshot = sourceRegistry.snapshotForTab(sourceTabID);
+  if (!capture) return;
+  if (!snapshot || snapshot.track.trackID !== capture.trackID) {
+    audioAnalysisReplayByTab.delete(sourceTabID);
+    return;
+  }
+  audioAnalysisMessages(capture).forEach((message) => postToPort(port, message));
+};
+
+const replayAudioAnalysisForSource = (tabID: number) => {
+  const capture = audioAnalysisReplayByTab.get(tabID);
+  const snapshot = sourceRegistry.snapshotForTab(tabID);
+  if (!capture) return;
+  if (!snapshot || snapshot.track.trackID !== capture.trackID) {
+    audioAnalysisReplayByTab.delete(tabID);
+    return;
+  }
+  audioAnalysisMessages(capture).forEach((message) => broadcastForSource(tabID, message));
+};
+
 const clearSource = () => {
-  broadcast(bridgeState());
+  broadcastBridgeState();
 };
 
 const ensureOffscreenDocument = async (): Promise<void> => {
@@ -739,8 +941,8 @@ const ensureOffscreenDocument = async (): Promise<void> => {
   await offscreenCreation;
 };
 
-const captureClock = () => {
-  const snapshot = sourceRegistry.snapshot;
+const captureClock = (tabID: number) => {
+  const snapshot = sourceRegistry.snapshotForTab(tabID);
   if (!snapshot) return undefined;
   return {
     currentTimeMs: snapshot.playback.currentTimeMs,
@@ -749,42 +951,489 @@ const captureClock = () => {
   };
 };
 
-const stopAudioAnalysis = async (trackID?: string): Promise<void> => {
-  if (trackID && audioCapture?.trackID !== trackID) return;
-  audioCapture = undefined;
-  await chromeAPI.runtime.sendMessage({ type: "lyricstage-audio-capture-stop" }).catch(() => undefined);
-  broadcast({ type: "youtube-music-audio-analysis-status", status: "idle" });
+const captureSourceStillOwned = (capture: AudioCaptureState): boolean => {
+  const snapshot = sourceRegistry.snapshotForTab(capture.tabID);
+  return snapshot?.track.trackID === capture.trackID
+    && (
+      capture.ownerScope === "boundTab"
+      || sourceRegistry.sourceTabID === capture.tabID
+    );
 };
 
-const startAudioAnalysis = async (trackID: string, durationMs: number): Promise<void> => {
-  const snapshot = sourceRegistry.snapshot;
-  const tabID = sourceRegistry.sourceTabID;
-  if (!snapshot || tabID === undefined || snapshot.track.trackID !== trackID) throw new Error("source-not-ready");
-  const boundedDuration = Math.round(Math.min(7_200_000, Math.max(1, durationMs)));
+const isCurrentPendingCapture = (capture: AudioCaptureState): boolean =>
+  pendingAudioCapture === capture && capture.generation === audioCaptureGeneration;
+
+const isCurrentActiveCapture = (capture: AudioCaptureState): boolean =>
+  audioCapture === capture && capture.generation === audioCaptureGeneration;
+
+const isCurrentCapture = (capture: AudioCaptureState): boolean =>
+  isCurrentPendingCapture(capture) || isCurrentActiveCapture(capture);
+
+const captureMatches = (
+  capture: AudioCaptureState | undefined,
+  trackID?: string,
+  tabID?: number,
+  captureID?: string,
+): capture is AudioCaptureState => Boolean(
+  capture
+  && (!trackID || capture.trackID === trackID)
+  && (tabID === undefined || capture.tabID === tabID)
+  && (!captureID || capture.captureID === captureID),
+);
+
+const captureForOffscreenTerminalTuple = (request: {
+  captureID?: unknown;
+  trackID?: unknown;
+  tabID?: unknown;
+  generation?: unknown;
+  ownerScope?: unknown;
+}): AudioCaptureState | undefined => [audioCapture, recoveringAudioCapture]
+  .find((capture) => capture !== undefined
+    && request.captureID === capture.captureID
+    && request.trackID === capture.trackID
+    && request.tabID === capture.tabID
+    && request.generation === capture.generation
+    && request.ownerScope === capture.ownerScope);
+
+const sendOffscreenCaptureStop = (capture: AudioCaptureState): Promise<unknown> =>
+  chromeAPI.runtime.sendMessage({
+    type: "lyricstage-audio-capture-stop",
+    trackID: capture.trackID,
+    captureID: capture.captureID,
+    tabID: capture.tabID,
+    generation: capture.generation,
+    ownerScope: capture.ownerScope,
+  }).catch(() => undefined);
+
+const sanitizeOffscreenAudioCaptureStatus = (value: unknown): OffscreenAudioCaptureStatus | null | undefined => {
+  if (!value || typeof value !== "object") return undefined;
+  const status = value as Record<string, unknown>;
+  if (status.type !== "lyricstage-audio-capture-status") return undefined;
+  if (status.active === false) return null;
+  if (
+    status.active !== true
+    || typeof status.captureID !== "string"
+    || status.captureID.length === 0
+    || typeof status.trackID !== "string"
+    || status.trackID.length === 0
+    || typeof status.tabID !== "number"
+    || !Number.isInteger(status.tabID)
+    || status.tabID < 0
+    || typeof status.generation !== "number"
+    || !Number.isInteger(status.generation)
+    || status.generation < 1
+    || typeof status.durationMs !== "number"
+    || !Number.isFinite(status.durationMs)
+    || status.durationMs <= 0
+    || (status.status !== "analyzing" && status.status !== "ready" && status.status !== "error")
+    || (status.ownerScope !== "boundTab" && status.ownerScope !== "followAuthority")
+  ) return undefined;
+  const latestMusicMap = sanitizeMusicMapV1(status.latestMusicMap);
+  const latestVocalMap = sanitizeVocalTimingMapV1(status.latestVocalMap);
+  return {
+    captureID: status.captureID,
+    trackID: status.trackID,
+    tabID: status.tabID,
+    generation: status.generation,
+    durationMs: Math.round(Math.min(7_200_000, status.durationMs)),
+    status: status.status,
+    ownerScope: status.ownerScope,
+    ...(latestMusicMap ? { latestMusicMap } : {}),
+    ...(latestVocalMap ? { latestVocalMap } : {}),
+  };
+};
+
+const queryOffscreenAudioCapture = async (): Promise<OffscreenAudioCaptureStatus | null | undefined> => {
+  try {
+    const url = chromeAPI.runtime.getURL("offscreen.html");
+    if (chromeAPI.runtime.getContexts) {
+      const contexts = await chromeAPI.runtime.getContexts({
+        contextTypes: ["OFFSCREEN_DOCUMENT"],
+        documentUrls: [url],
+      });
+      if (contexts.length === 0) return null;
+    }
+    const response = await chromeAPI.runtime.sendMessage({
+      type: "lyricstage-audio-capture-status-request",
+    });
+    return sanitizeOffscreenAudioCaptureStatus(response);
+  } catch {
+    return undefined;
+  }
+};
+
+const queryOffscreenAudioCaptureWithRetry = async (): Promise<OffscreenAudioCaptureStatus | null> => {
+  const retryDelays = [0, 100, 300];
+  for (let attempt = 0; attempt < retryDelays.length; attempt += 1) {
+    const delay = retryDelays[attempt] ?? 0;
+    if (delay > 0) await new Promise<void>((resolve) => setTimeout(resolve, delay));
+    const status = await queryOffscreenAudioCapture();
+    if (status !== undefined) return status;
+  }
+  const stopped = await chromeAPI.runtime.sendMessage({
+    type: "lyricstage-audio-capture-stop-all",
+  }).then(
+    (response) => (response as { ok?: unknown } | undefined)?.ok === true,
+    () => false,
+  );
+  if (!stopped) await chromeAPI.offscreen.closeDocument?.().catch(() => undefined);
+  return null;
+};
+
+interface SourceSnapshotWaiter {
+  tabID: number;
+  trackID: string;
+  resolve(matched: boolean): void;
+  timeout: ReturnType<typeof setTimeout>;
+}
+
+const sourceSnapshotWaiters = new Set<SourceSnapshotWaiter>();
+
+const settleSourceSnapshotWaiters = (tabID: number, forceMismatch = false) => {
+  const snapshot = sourceRegistry.snapshotForTab(tabID);
+  for (const waiter of sourceSnapshotWaiters) {
+    if (waiter.tabID !== tabID) continue;
+    if (!forceMismatch && !snapshot) continue;
+    clearTimeout(waiter.timeout);
+    sourceSnapshotWaiters.delete(waiter);
+    waiter.resolve(!forceMismatch && snapshot?.track.trackID === waiter.trackID);
+  }
+};
+
+const waitForMatchingSourceSnapshot = (tabID: number, trackID: string): Promise<boolean> => {
+  const current = sourceRegistry.snapshotForTab(tabID);
+  if (current) return Promise.resolve(current.track.trackID === trackID);
+  return new Promise((resolve) => {
+    const waiter: SourceSnapshotWaiter = {
+      tabID,
+      trackID,
+      resolve,
+      timeout: setTimeout(() => {
+        sourceSnapshotWaiters.delete(waiter);
+        resolve(false);
+      }, 3_000),
+    };
+    sourceSnapshotWaiters.add(waiter);
+  });
+};
+
+const captureFromOffscreenStatus = (status: OffscreenAudioCaptureStatus): AudioCaptureState => {
+  const mapForwarded = status.status === "ready" && status.latestMusicMap !== undefined;
+  return {
+    captureID: status.captureID,
+    trackID: status.trackID,
+    tabID: status.tabID,
+    generation: status.generation,
+    durationMs: status.durationMs,
+    status: mapForwarded ? "ready" : status.status,
+    ownerScope: status.ownerScope,
+    latestMusicMap: status.latestMusicMap,
+    latestVocalMap: status.latestVocalMap,
+    mapForwarded,
+  };
+};
+
+const sameOffscreenCapture = (
+  left: OffscreenAudioCaptureStatus,
+  right: OffscreenAudioCaptureStatus,
+): boolean => left.captureID === right.captureID
+  && left.trackID === right.trackID
+  && left.tabID === right.tabID
+  && left.generation === right.generation
+  && left.ownerScope === right.ownerScope;
+
+const rehydrateAudioCapture = async (): Promise<void> => {
+  const initial = await queryOffscreenAudioCaptureWithRetry();
+  if (!initial) return;
+  audioCaptureGeneration = Math.max(audioCaptureGeneration, initial.generation);
+  const recovering = captureFromOffscreenStatus(initial);
+  recoveringAudioCapture = recovering;
+  const sourceMatched = await waitForMatchingSourceSnapshot(initial.tabID, initial.trackID);
+  if (recoveringAudioCapture !== recovering) return;
+  if (!sourceMatched) {
+    recoveringAudioCapture = undefined;
+    await sendOffscreenCaptureStop(recovering);
+    return;
+  }
+
+  const latest = await queryOffscreenAudioCaptureWithRetry();
+  if (recoveringAudioCapture !== recovering) return;
+  if (!latest) {
+    recoveringAudioCapture = undefined;
+    return;
+  }
+  if (!sameOffscreenCapture(initial, latest)) {
+    recoveringAudioCapture = undefined;
+    await Promise.all([sendOffscreenCaptureStop(recovering), sendOffscreenCaptureStop(captureFromOffscreenStatus(latest))]);
+    return;
+  }
+  const snapshot = sourceRegistry.snapshotForTab(latest.tabID);
+  if (
+    !snapshot
+    || snapshot.track.trackID !== latest.trackID
+    || (latest.ownerScope === "followAuthority" && sourceRegistry.sourceTabID !== latest.tabID)
+  ) {
+    recoveringAudioCapture = undefined;
+    await sendOffscreenCaptureStop(captureFromOffscreenStatus(latest));
+    return;
+  }
+
+  const restored = captureFromOffscreenStatus(latest);
+  recoveringAudioCapture = undefined;
+  audioCaptureGeneration = Math.max(audioCaptureGeneration, restored.generation);
+  audioCapture = restored;
+  rememberAudioAnalysis(restored);
+  startSourceLeaseMonitor();
+  replayAudioAnalysisForSource(restored.tabID);
+  const clock = captureClock(restored.tabID);
+  if (clock) void chromeAPI.runtime.sendMessage({
+    type: "lyricstage-audio-clock",
+    captureID: restored.captureID,
+    trackID: restored.trackID,
+    tabID: restored.tabID,
+    generation: restored.generation,
+    ownerScope: restored.ownerScope,
+    clock,
+  }).catch(() => undefined);
+};
+
+const ensureAudioCaptureRehydrated = (): Promise<void> => {
+  if (audioCaptureRehydrated) return Promise.resolve();
+  if (!audioCaptureRehydrationTask) {
+    audioCaptureRehydrationTask = rehydrateAudioCapture()
+      .catch(() => undefined)
+      .finally(() => {
+        audioCaptureRehydrated = true;
+        audioCaptureRehydrationTask = undefined;
+      });
+  }
+  return audioCaptureRehydrationTask;
+};
+
+const stopAudioAnalysis = (
+  trackID?: string,
+  tabID?: number,
+  captureID?: string,
+): Promise<void> => {
+  const pending = pendingAudioCapture;
+  const active = audioCapture;
+  const recovering = recoveringAudioCapture;
+  const stopped = [pendingAudioCapture, audioCapture, recoveringAudioCapture]
+    .filter((capture, index, captures): capture is AudioCaptureState =>
+      captureMatches(capture, trackID, tabID, captureID)
+      && captures.indexOf(capture) === index);
+  if (stopped.length === 0) return Promise.resolve();
+
+  audioCaptureGeneration = Math.max(
+    audioCaptureGeneration,
+    ...stopped.map((capture) => capture.generation),
+  ) + 1;
+  if (pending && stopped.includes(pending)) pendingAudioCapture = undefined;
+  if (active && stopped.includes(active)) audioCapture = undefined;
+  if (recovering && stopped.includes(recovering)) recoveringAudioCapture = undefined;
+  stopped.forEach(rememberIdleAudioAnalysis);
+  stopSourceLeaseMonitorIfIdle();
+  return Promise.all(stopped.map(sendOffscreenCaptureStop)).then(() => undefined);
+};
+
+const startReservedAudioCapture = async (
+  capture: AudioCaptureState,
+  superseded: AudioCaptureState[],
+): Promise<void> => {
+  await Promise.all(superseded.map(sendOffscreenCaptureStop));
+  if (!isCurrentPendingCapture(capture) || !captureSourceStillOwned(capture)) {
+    throw new Error("capture-superseded");
+  }
   await ensureOffscreenDocument();
-  const streamID = await chromeAPI.tabCapture.getMediaStreamId({ targetTabId: tabID });
-  const clock = captureClock();
+  if (!isCurrentPendingCapture(capture) || !captureSourceStillOwned(capture)) {
+    throw new Error("capture-superseded");
+  }
+  const streamID = await chromeAPI.tabCapture.getMediaStreamId({ targetTabId: capture.tabID });
+  if (!isCurrentPendingCapture(capture) || !captureSourceStillOwned(capture)) {
+    throw new Error("capture-superseded");
+  }
+  const snapshot = sourceRegistry.snapshotForTab(capture.tabID);
+  const clock = snapshot?.track.trackID === capture.trackID ? captureClock(capture.tabID) : undefined;
   if (!clock) throw new Error("clock-not-ready");
-  audioCapture = { trackID, tabID, durationMs: boundedDuration, mapForwarded: false };
+
+  pendingAudioCapture = undefined;
+  audioCapture = capture;
+  rememberAudioAnalysis(capture);
   await chromeAPI.runtime.sendMessage({
     type: "lyricstage-audio-capture-start",
     streamID,
-    trackID,
-    durationMs: boundedDuration,
+    captureID: capture.captureID,
+    trackID: capture.trackID,
+    tabID: capture.tabID,
+    generation: capture.generation,
+    ownerScope: capture.ownerScope,
+    durationMs: capture.durationMs,
     clock,
   });
-  broadcast({ type: "youtube-music-audio-analysis-status", status: "analyzing", trackID });
+  if (!isCurrentActiveCapture(capture)) {
+    await sendOffscreenCaptureStop(capture);
+    throw new Error("capture-superseded");
+  }
+};
+
+const requestAudioAnalysis = (
+  trackID: string,
+  durationMs: number,
+  preferredTabID?: number,
+  ownerScope: AudioCaptureOwnerScope = "followAuthority",
+): AudioCaptureOperation => {
+  const tabID = preferredTabID ?? sourceRegistry.sourceTabID;
+  const snapshot = tabID === undefined ? undefined : sourceRegistry.snapshotForTab(tabID);
+  if (
+    !snapshot
+    || tabID === undefined
+    || snapshot.track.trackID !== trackID
+    || (ownerScope === "followAuthority" && sourceRegistry.sourceTabID !== tabID)
+  ) throw new Error("source-not-ready");
+  const authorizationPending = pendingAudioCapture?.tabID === tabID
+    && pendingAudioCapture.trackID === trackID
+    && pendingAudioCapture.expiresAtUnixMs !== undefined
+    ? pendingAudioCapture
+    : undefined;
+  const upgradingPendingScope = authorizationPending?.ownerScope === "followAuthority"
+    && ownerScope === "boundTab";
+  if (authorizationPending && !upgradingPendingScope) {
+    const expiresAtUnixMs = authorizationPending.expiresAtUnixMs;
+    if (expiresAtUnixMs !== undefined && expiresAtUnixMs < Date.now()) {
+      void stopAudioAnalysis(trackID, tabID, authorizationPending.captureID);
+    } else {
+      replayAudioAnalysisForSource(tabID);
+      throw new Error(authorizationPending.reason ?? "capture-authorization-pending");
+    }
+  }
+  const sameOwner = [pendingAudioCapture, audioCapture]
+    .find((capture) => capture?.tabID === tabID && capture.trackID === trackID);
+  const requiresBoundRestart = sameOwner?.ownerScope === "followAuthority"
+    && ownerScope === "boundTab";
+  if (sameOwner && !requiresBoundRestart) {
+    replayAudioAnalysisForSource(tabID);
+    return { capture: sameOwner, task: sameOwner.startTask ?? Promise.resolve() };
+  }
+
+  const superseded = [pendingAudioCapture, audioCapture]
+    .filter((capture, index, captures): capture is AudioCaptureState =>
+      capture !== undefined && captures.indexOf(capture) === index);
+  const generation = ++audioCaptureGeneration;
+  const boundedDuration = Math.round(Math.min(7_200_000, Math.max(1, durationMs)));
+  const capture: AudioCaptureState = {
+    captureID: `capture-${Date.now().toString(36)}-${++audioCaptureSequence}`,
+    trackID,
+    tabID,
+    durationMs: boundedDuration,
+    generation,
+    ownerScope,
+    status: "analyzing",
+    mapForwarded: false,
+  };
+
+  pendingAudioCapture = capture;
+  audioCapture = undefined;
+  superseded.forEach(rememberIdleAudioAnalysis);
+  rememberAudioAnalysis(capture);
+  broadcastForSource(tabID, audioAnalysisStatusMessage(audioAnalysisReplayByTab.get(tabID)!));
+  startSourceLeaseMonitor();
+  const task = startReservedAudioCapture(capture, superseded);
+  capture.startTask = task;
+  return { capture, task };
+};
+
+const captureStartFailure = (
+  capture: AudioCaptureState,
+  error: unknown,
+  allowPendingAuthorization: boolean,
+): { reason: string; needsInvocation: boolean; current: boolean } => {
+  const rawReason = error instanceof Error ? error.message.slice(0, 160) : "capture-failed";
+  const needsInvocation = allowPendingAuthorization
+    && (rawReason.includes("has not been invoked") || rawReason.includes("activeTab"));
+  if (!isCurrentCapture(capture)) return { reason: rawReason, needsInvocation, current: false };
+
+  const reason = needsInvocation
+    ? "请在 15 秒内点击浏览器工具栏的 LyricStage 图标完成一次音频授权"
+    : rawReason;
+  capture.status = "error";
+  capture.reason = reason;
+  capture.startTask = undefined;
+  if (needsInvocation && isCurrentPendingCapture(capture)) {
+    capture.expiresAtUnixMs = Date.now() + 15_000;
+  } else {
+    capture.expiresAtUnixMs = undefined;
+    if (isCurrentPendingCapture(capture)) pendingAudioCapture = undefined;
+    if (isCurrentActiveCapture(capture)) audioCapture = undefined;
+    audioCaptureGeneration += 1;
+    void sendOffscreenCaptureStop(capture);
+    stopSourceLeaseMonitorIfIdle();
+  }
+  rememberAudioAnalysis(capture);
+  broadcastForSource(capture.tabID, audioAnalysisStatusMessage(audioAnalysisReplayByTab.get(capture.tabID)!));
+  return { reason, needsInvocation, current: true };
+};
+
+const resumePendingAudioAnalysis = (): AudioCaptureOperation | undefined => {
+  const capture = pendingAudioCapture;
+  if (!capture || capture.expiresAtUnixMs === undefined) return undefined;
+  if (capture.expiresAtUnixMs < Date.now()) {
+    void stopAudioAnalysis(capture.trackID, capture.tabID, capture.captureID);
+    return undefined;
+  }
+  capture.status = "analyzing";
+  capture.reason = undefined;
+  capture.expiresAtUnixMs = undefined;
+  rememberAudioAnalysis(capture);
+  broadcastForSource(capture.tabID, audioAnalysisStatusMessage(audioAnalysisReplayByTab.get(capture.tabID)!));
+  const task = startReservedAudioCapture(capture, []);
+  capture.startTask = task;
+  return { capture, task };
 };
 
 const startSourceLeaseMonitor = () => {
   if (sourceLeaseTimer !== undefined) return;
   sourceLeaseTimer = setInterval(() => {
-    if (sourceRegistry.expire()) clearSource();
+    sourceRegistry.expire();
+    const currentCapture = audioCapture ?? pendingAudioCapture;
+    const currentSnapshot = currentCapture
+      ? sourceRegistry.snapshotForTab(currentCapture.tabID)
+      : undefined;
+    if (
+      currentCapture
+      && (
+        !currentSnapshot
+        || currentSnapshot.track.trackID !== currentCapture.trackID
+        || (
+          currentCapture.ownerScope === "followAuthority"
+          && sourceRegistry.sourceTabID !== currentCapture.tabID
+        )
+        || (
+          currentCapture.expiresAtUnixMs !== undefined
+          && currentCapture.expiresAtUnixMs < Date.now()
+        )
+      )
+    ) {
+      void stopAudioAnalysis(currentCapture.trackID, currentCapture.tabID, currentCapture.captureID);
+      audioAnalysisReplayByTab.delete(currentCapture.tabID);
+    }
+    for (const [tabID, replay] of audioAnalysisReplayByTab) {
+      const snapshot = sourceRegistry.snapshotForTab(tabID);
+      if (!snapshot || snapshot.track.trackID !== replay.trackID) {
+        audioAnalysisReplayByTab.delete(tabID);
+      }
+    }
+    broadcastBridgeState();
   }, 1000);
 };
 
 const stopSourceLeaseMonitorIfIdle = () => {
-  if (stagePorts.size > 0 || sourceLeaseTimer === undefined) return;
+  if (
+    stagePorts.size > 0
+    || pendingAudioCapture !== undefined
+    || audioCapture !== undefined
+    || recoveringAudioCapture !== undefined
+    || sourceLeaseTimer === undefined
+  ) return;
   clearInterval(sourceLeaseTimer);
   sourceLeaseTimer = undefined;
 };
@@ -825,17 +1474,24 @@ const showInPageStage = async (): Promise<StageActivationResponse> => {
   }
 };
 
-const seekInYouTubeMusic = async (timeMs: number): Promise<StageActivationResponse> => {
-  if (!Number.isFinite(timeMs) || timeMs < 0) {
+const seekInYouTubeMusic = async (
+  timeMs: number,
+  expectedTrackID: string,
+  preferredTabID?: number,
+): Promise<StageActivationResponse> => {
+  if (!Number.isFinite(timeMs) || timeMs < 0 || !expectedTrackID) {
     return { ok: false, reason: "invalid-seek" };
   }
-  if (sourceRegistry.expire()) clearSource();
-  const tabID = sourceRegistry.sourceTabID;
-  if (tabID === undefined) return { ok: false, reason: "source-not-ready" };
+  sourceRegistry.expire();
+  const tabID = preferredTabID ?? sourceRegistry.sourceTabID;
+  const snapshot = tabID === undefined ? undefined : sourceRegistry.snapshotForTab(tabID);
+  if (tabID === undefined || !snapshot) return { ok: false, reason: "source-not-ready" };
+  if (snapshot.track.trackID !== expectedTrackID) return { ok: false, reason: "track-changed" };
   try {
     const response = await chromeAPI.tabs.sendMessage(tabID, {
       type: "youtube-music-seek-to",
       timeMs,
+      expectedTrackID,
     });
     const result = response as StageActivationResponse | undefined;
     return result?.ok === true
@@ -851,14 +1507,20 @@ const seekInYouTubeMusic = async (timeMs: number): Promise<StageActivationRespon
 
 const transportInYouTubeMusic = async (
   action: YouTubeMusicTransportActionV0,
+  expectedTrackID: string,
+  preferredTabID?: number,
 ): Promise<StageActivationResponse> => {
-  if (sourceRegistry.expire()) clearSource();
-  const tabID = sourceRegistry.sourceTabID;
-  if (tabID === undefined) return { ok: false, reason: "source-not-ready" };
+  if (!expectedTrackID) return { ok: false, reason: "invalid-track" };
+  sourceRegistry.expire();
+  const tabID = preferredTabID ?? sourceRegistry.sourceTabID;
+  const snapshot = tabID === undefined ? undefined : sourceRegistry.snapshotForTab(tabID);
+  if (tabID === undefined || !snapshot) return { ok: false, reason: "source-not-ready" };
+  if (snapshot.track.trackID !== expectedTrackID) return { ok: false, reason: "track-changed" };
   try {
     const response = await chromeAPI.tabs.sendMessage(tabID, {
       type: "youtube-music-transport-command",
       action,
+      expectedTrackID,
     });
     const result = response as StageActivationResponse | undefined;
     return result?.ok === true
@@ -874,12 +1536,14 @@ const transportInYouTubeMusic = async (
 
 chromeAPI.runtime.onConnect.addListener((port) => {
   if (port.name !== "lyricstage-stage") return;
-  stagePorts.add(port);
+  stagePorts.set(port, sourceTabIDForSender(port.sender));
   startSourceLeaseMonitor();
-  port.postMessage(bridgeState());
+  postToPort(port, bridgeStateForPort(port));
+  replayAudioAnalysisToPort(port);
   port.onMessage.addListener((message) => {
     if ((message as { type?: string })?.type === "youtube-music-request-status") {
-      port.postMessage(bridgeState());
+      postToPort(port, bridgeStateForPort(port));
+      replayAudioAnalysisToPort(port);
     }
   });
   port.onDisconnect.addListener(() => {
@@ -901,30 +1565,57 @@ chromeAPI.runtime.onMessage.addListener((message, sender, sendResponse) => {
     action?: unknown;
     endpoint?: unknown;
     token?: unknown;
+    configuration?: unknown;
     query?: unknown;
     musicMap?: unknown;
     vocalTimingMap?: unknown;
     trackID?: unknown;
+    captureID?: unknown;
+    tabID?: unknown;
+    generation?: unknown;
+    ownerScope?: unknown;
+    expectedTrackID?: unknown;
     durationMs?: unknown;
     reason?: unknown;
   };
   const fromOffscreen = sender.url === chromeAPI.runtime.getURL("offscreen.html");
   if (request.type === "youtube-music-source-snapshot") {
-    if (!sourceRegistry.accept(sender.tab?.id, request.snapshot)) {
+    const tabID = sender.tab?.id;
+    if (!sourceRegistry.accept(tabID, request.snapshot) || tabID === undefined) {
       sendResponse({ ok: false });
       return;
     }
-    broadcast({ type: "youtube-music-bridge-update", snapshot: sourceRegistry.snapshot! });
-    const activeCapture = audioCapture;
-    if (activeCapture && activeCapture.trackID === sourceRegistry.snapshot?.track.trackID) {
-      const clock = captureClock();
-      if (clock) void chromeAPI.runtime.sendMessage({
-        type: "lyricstage-audio-clock",
-        trackID: activeCapture.trackID,
-        clock,
-      }).catch(() => undefined);
-    } else if (audioCapture) {
-      void stopAudioAnalysis();
+    settleSourceSnapshotWaiters(tabID);
+    broadcastBridgeState();
+    const currentCapture = audioCapture ?? pendingAudioCapture;
+    if (currentCapture?.tabID === tabID) {
+      const snapshot = sourceRegistry.snapshotForTab(tabID);
+      if (snapshot?.track.trackID === currentCapture.trackID) {
+        if (snapshot.playback.state === "ended") {
+          void stopAudioAnalysis(
+            currentCapture.trackID,
+            currentCapture.tabID,
+            currentCapture.captureID,
+          );
+        } else if (audioCapture === currentCapture) {
+          const clock = captureClock(tabID);
+          if (clock) void chromeAPI.runtime.sendMessage({
+            type: "lyricstage-audio-clock",
+            captureID: currentCapture.captureID,
+            trackID: currentCapture.trackID,
+            tabID: currentCapture.tabID,
+            generation: currentCapture.generation,
+            ownerScope: currentCapture.ownerScope,
+            clock,
+          }).catch(() => undefined);
+        }
+      } else if (snapshot?.track.trackID !== currentCapture.trackID) {
+        void stopAudioAnalysis(currentCapture.trackID, currentCapture.tabID, currentCapture.captureID);
+      }
+    }
+    const currentSnapshot = sourceRegistry.snapshotForTab(tabID);
+    if (audioAnalysisReplayByTab.get(tabID)?.trackID !== currentSnapshot?.track.trackID) {
+      audioAnalysisReplayByTab.delete(tabID);
     }
     sendResponse({ ok: true });
     return;
@@ -932,13 +1623,25 @@ chromeAPI.runtime.onMessage.addListener((message, sender, sendResponse) => {
 
   if (request.type === "youtube-music-source-disconnect") {
     const tabID = sender.tab?.id;
-    sendResponse({ ok: tabID !== undefined && sourceRegistry.remove(tabID) });
-    if (tabID !== undefined) clearSource();
+    const removedAuthoritative = tabID !== undefined && sourceRegistry.remove(tabID);
+    sendResponse({ ok: tabID !== undefined, authoritativeChanged: removedAuthoritative });
+    if (tabID !== undefined) {
+      settleSourceSnapshotWaiters(tabID, true);
+      const currentCapture = audioCapture?.tabID === tabID
+        ? audioCapture
+        : pendingAudioCapture?.tabID === tabID
+          ? pendingAudioCapture
+          : recoveringAudioCapture?.tabID === tabID ? recoveringAudioCapture : undefined;
+      if (currentCapture) void stopAudioAnalysis(currentCapture.trackID, tabID, currentCapture.captureID);
+      audioAnalysisReplayByTab.delete(tabID);
+      clearSource();
+    }
     return;
   }
 
   if (request.type === "youtube-music-request-status") {
-    sendResponse(bridgeState());
+    const tabID = sourceTabIDForSender(sender);
+    sendResponse(tabID === undefined ? bridgeState() : sourceRegistry.stateForTab(tabID));
     return;
   }
 
@@ -947,48 +1650,67 @@ chromeAPI.runtime.onMessage.addListener((message, sender, sendResponse) => {
       sendResponse({ ok: false, reason: "invalid-audio-analysis-request" });
       return;
     }
-    void startAudioAnalysis(request.trackID, request.durationMs).then(
-      () => sendResponse({ ok: true }),
-      (error) => {
-        const rawReason = error instanceof Error ? error.message.slice(0, 160) : "capture-failed";
-        const needsInvocation = rawReason.includes("has not been invoked") || rawReason.includes("activeTab");
-        const reason = needsInvocation
-          ? "请在 15 秒内点击浏览器工具栏的 LyricStage 图标完成一次音频授权"
-          : rawReason;
-        if (needsInvocation && typeof request.trackID === "string" && typeof request.durationMs === "number") {
-          pendingAudioCapture = {
-            trackID: request.trackID,
-            durationMs: request.durationMs,
-            expiresAtUnixMs: Date.now() + 15_000,
-          };
-        }
-        broadcast({ type: "youtube-music-audio-analysis-status", status: "error", trackID: request.trackID, reason });
-        sendResponse({ ok: false, reason });
-      },
-    );
+    const trackID = request.trackID;
+    const durationMs = request.durationMs;
+    const senderTabID = sourceTabIDForSender(sender);
+    void ensureAudioCaptureRehydrated().then(() => {
+      // An embedded Stage remains bound to its sender tab. A standalone Stage
+      // must resolve the authoritative source after rehydration, because the
+      // authority may have changed while it awaited the offscreen handshake.
+      const sourceTabID = senderTabID ?? sourceRegistry.sourceTabID;
+      const ownerScope: AudioCaptureOwnerScope = senderTabID === undefined
+        ? "followAuthority"
+        : "boundTab";
+      let operation: AudioCaptureOperation;
+      try {
+        operation = requestAudioAnalysis(trackID, durationMs, sourceTabID, ownerScope);
+      } catch (error) {
+        sendResponse({
+          ok: false,
+          reason: error instanceof Error ? error.message.slice(0, 160) : "capture-failed",
+        });
+        return;
+      }
+      void operation.task.then(
+        () => sendResponse({ ok: true, captureID: operation.capture.captureID }),
+        (error) => {
+          const failure = captureStartFailure(operation.capture, error, true);
+          sendResponse({ ok: false, captureID: operation.capture.captureID, reason: failure.reason });
+        },
+      );
+    });
     return true;
   }
 
   if (request.type === "youtube-music-resume-pending-audio-analysis") {
-    const pending = pendingAudioCapture;
-    pendingAudioCapture = undefined;
-    if (!pending || pending.expiresAtUnixMs < Date.now()) {
-      sendResponse({ ok: false, pending: false });
-      return;
-    }
-    void startAudioAnalysis(pending.trackID, pending.durationMs).then(
-      () => sendResponse({ ok: true, pending: true }),
-      (error) => {
-        const reason = error instanceof Error ? error.message.slice(0, 160) : "capture-failed";
-        broadcast({ type: "youtube-music-audio-analysis-status", status: "error", trackID: pending.trackID, reason });
-        sendResponse({ ok: false, pending: true, reason });
-      },
-    );
+    void ensureAudioCaptureRehydrated().then(() => {
+      const operation = resumePendingAudioAnalysis();
+      if (!operation) {
+        sendResponse({ ok: false, pending: false });
+        return;
+      }
+      void operation.task.then(
+        () => sendResponse({ ok: true, pending: true, captureID: operation.capture.captureID }),
+        (error) => {
+          const failure = captureStartFailure(operation.capture, error, false);
+          sendResponse({
+            ok: false,
+            pending: true,
+            captureID: operation.capture.captureID,
+            reason: failure.reason,
+          });
+        },
+      );
+    });
     return true;
   }
 
   if (request.type === "youtube-music-stop-audio-analysis") {
-    void stopAudioAnalysis(typeof request.trackID === "string" ? request.trackID : undefined).then(
+    void ensureAudioCaptureRehydrated().then(() => stopAudioAnalysis(
+      typeof request.trackID === "string" ? request.trackID : undefined,
+      sourceTabIDForSender(sender),
+      typeof request.captureID === "string" ? request.captureID : undefined,
+    )).then(
       () => sendResponse({ ok: true }),
       () => sendResponse({ ok: false }),
     );
@@ -996,34 +1718,91 @@ chromeAPI.runtime.onMessage.addListener((message, sender, sendResponse) => {
   }
 
   if (request.type === "lyricstage-audio-capture-ready") {
-    if (!fromOffscreen || typeof request.trackID !== "string" || request.trackID !== audioCapture?.trackID) return;
-    broadcast({ type: "youtube-music-audio-analysis-status", status: "analyzing", trackID: request.trackID });
+    if (
+      !fromOffscreen
+      || typeof request.captureID !== "string"
+      || typeof request.trackID !== "string"
+      || typeof request.tabID !== "number"
+      || typeof request.generation !== "number"
+      || request.captureID !== audioCapture?.captureID
+      || request.trackID !== audioCapture.trackID
+      || request.tabID !== audioCapture.tabID
+      || request.generation !== audioCapture.generation
+      || request.ownerScope !== audioCapture.ownerScope
+    ) return;
+    if (audioCapture.status !== "ready") audioCapture.status = "analyzing";
+    audioCapture.reason = undefined;
+    rememberAudioAnalysis(audioCapture);
+    broadcastForSource(audioCapture.tabID, audioAnalysisStatusMessage(audioAnalysisReplayByTab.get(audioCapture.tabID)!));
     sendResponse({ ok: true });
     return;
   }
 
   if (request.type === "lyricstage-audio-capture-error") {
-    if (!fromOffscreen || typeof request.trackID !== "string" || request.trackID !== audioCapture?.trackID) return;
-    audioCapture = undefined;
-    broadcast({
-      type: "youtube-music-audio-analysis-status",
-      status: "error",
-      trackID: request.trackID,
-      reason: typeof request.reason === "string" ? request.reason.slice(0, 160) : "capture-failed",
-    });
+    const failed = fromOffscreen ? captureForOffscreenTerminalTuple(request) : undefined;
+    if (!failed) return;
+    failed.status = "error";
+    failed.reason = typeof request.reason === "string"
+      ? request.reason.slice(0, 160)
+      : "capture-failed";
+    rememberAudioAnalysis(failed);
+    broadcastForSource(failed.tabID, audioAnalysisStatusMessage(audioAnalysisReplayByTab.get(failed.tabID)!));
+    if (audioCapture === failed) audioCapture = undefined;
+    if (recoveringAudioCapture === failed) {
+      recoveringAudioCapture = undefined;
+      settleSourceSnapshotWaiters(failed.tabID, true);
+    }
+    audioCaptureGeneration = Math.max(audioCaptureGeneration, failed.generation) + 1;
+    stopSourceLeaseMonitorIfIdle();
+    sendResponse({ ok: true });
+    return;
+  }
+
+  if (request.type === "lyricstage-audio-capture-ended") {
+    const ended = fromOffscreen ? captureForOffscreenTerminalTuple(request) : undefined;
+    if (!ended) return;
+    if (audioCapture === ended) audioCapture = undefined;
+    if (recoveringAudioCapture === ended) {
+      recoveringAudioCapture = undefined;
+      settleSourceSnapshotWaiters(ended.tabID, true);
+    }
+    audioCaptureGeneration = Math.max(audioCaptureGeneration, ended.generation) + 1;
+    rememberIdleAudioAnalysis(ended);
+    stopSourceLeaseMonitorIfIdle();
     sendResponse({ ok: true });
     return;
   }
 
   if (request.type === "lyricstage-audio-map-update") {
     const musicMap = sanitizeMusicMapV1(request.musicMap);
-    if (!fromOffscreen || !musicMap || typeof request.trackID !== "string" || request.trackID !== audioCapture?.trackID) return;
+    if (
+      !fromOffscreen
+      || !musicMap
+      || typeof request.captureID !== "string"
+      || typeof request.trackID !== "string"
+      || typeof request.tabID !== "number"
+      || typeof request.generation !== "number"
+      || request.captureID !== audioCapture?.captureID
+      || request.trackID !== audioCapture.trackID
+      || request.tabID !== audioCapture.tabID
+      || request.generation !== audioCapture.generation
+      || request.ownerScope !== audioCapture.ownerScope
+    ) return;
+    audioCapture.latestMusicMap = musicMap;
     const coverageReady = musicMap.analyzedMs >= Math.min(28_000, Math.max(8_000, musicMap.durationMs * 0.08));
-    if (coverageReady && audioCapture && !audioCapture.mapForwarded) {
+    if (coverageReady && !audioCapture.mapForwarded) {
       audioCapture.mapForwarded = true;
-      broadcast({ type: "youtube-music-music-map-update", trackID: request.trackID, musicMap });
-      broadcast({ type: "youtube-music-audio-analysis-status", status: "ready", trackID: request.trackID });
+      audioCapture.status = "ready";
+      audioCapture.reason = undefined;
+      broadcastForSource(audioCapture.tabID, {
+        type: "youtube-music-music-map-update",
+        trackID: audioCapture.trackID,
+        captureID: audioCapture.captureID,
+        musicMap,
+      });
+      broadcastForSource(audioCapture.tabID, audioAnalysisStatusMessage({ ...audioCapture, status: "ready" }));
     }
+    rememberAudioAnalysis(audioCapture);
     sendResponse({ ok: true });
     return;
   }
@@ -1033,10 +1812,24 @@ chromeAPI.runtime.onMessage.addListener((message, sender, sendResponse) => {
     if (
       !fromOffscreen
       || !vocalTimingMap
+      || typeof request.captureID !== "string"
       || typeof request.trackID !== "string"
+      || typeof request.tabID !== "number"
+      || typeof request.generation !== "number"
+      || request.captureID !== audioCapture?.captureID
       || request.trackID !== audioCapture?.trackID
+      || request.tabID !== audioCapture.tabID
+      || request.generation !== audioCapture.generation
+      || request.ownerScope !== audioCapture.ownerScope
     ) return;
-    broadcast({ type: "youtube-music-vocal-timing-update", trackID: request.trackID, vocalTimingMap });
+    audioCapture.latestVocalMap = vocalTimingMap;
+    rememberAudioAnalysis(audioCapture);
+    broadcastForSource(audioCapture.tabID, {
+      type: "youtube-music-vocal-timing-update",
+      trackID: audioCapture.trackID,
+      captureID: audioCapture.captureID,
+      vocalTimingMap,
+    });
     sendResponse({ ok: true });
     return;
   }
@@ -1062,19 +1855,21 @@ chromeAPI.runtime.onMessage.addListener((message, sender, sendResponse) => {
   }
 
   if (request.type === "youtube-music-director-config") {
-    void directorConfiguration().then((configuration) => sendResponse({
-      configured: configuration !== undefined,
-      endpoint: directorEndpoint,
-    }), () => sendResponse({ configured: false, endpoint: directorEndpoint }));
+    void directorConfiguration().then((configuration) => sendResponse(configuration
+      ? publicDirectorBYOKConfigurationV1(configuration)
+      : { version: "lyricstage-director-byok-v1", configured: false }),
+    () => sendResponse({ version: "lyricstage-director-byok-v1", configured: false }));
     return true;
   }
 
   if (request.type === "youtube-music-save-director-config") {
-    void saveDirectorConfiguration(request.token).then(
-      (result) => sendResponse({ ...result, endpoint: directorEndpoint }),
+    void saveDirectorConfiguration(request.configuration).then(
+      async (result) => {
+        const configuration = await directorConfiguration();
+        sendResponse(configuration ? publicDirectorBYOKConfigurationV1(configuration) : result);
+      },
       (error) => sendResponse({
         configured: false,
-        endpoint: directorEndpoint,
         reason: error instanceof Error ? error.message.slice(0, 120) : "导演配置失败",
       }),
     );
@@ -1187,11 +1982,15 @@ chromeAPI.runtime.onMessage.addListener((message, sender, sendResponse) => {
   }
 
   if (request.type === "youtube-music-seek") {
-    if (typeof request.timeMs !== "number") {
+    if (typeof request.timeMs !== "number" || typeof request.expectedTrackID !== "string") {
       sendResponse({ ok: false, reason: "invalid-seek" });
       return;
     }
-    void seekInYouTubeMusic(request.timeMs).then(sendResponse, () => sendResponse({
+    void seekInYouTubeMusic(
+      request.timeMs,
+      request.expectedTrackID,
+      sourceTabIDForSender(sender),
+    ).then(sendResponse, () => sendResponse({
       ok: false,
       reason: "seek-failed",
     }));
@@ -1199,11 +1998,18 @@ chromeAPI.runtime.onMessage.addListener((message, sender, sendResponse) => {
   }
 
   if (request.type === "youtube-music-transport") {
-    if (!["play", "pause", "previous", "next"].includes(String(request.action))) {
+    if (
+      !["play", "pause", "previous", "next"].includes(String(request.action))
+      || typeof request.expectedTrackID !== "string"
+    ) {
       sendResponse({ ok: false, reason: "invalid-transport" });
       return;
     }
-    void transportInYouTubeMusic(request.action as YouTubeMusicTransportActionV0).then(
+    void transportInYouTubeMusic(
+      request.action as YouTubeMusicTransportActionV0,
+      request.expectedTrackID,
+      sourceTabIDForSender(sender),
+    ).then(
       sendResponse,
       () => sendResponse({ ok: false, reason: "transport-failed" }),
     );
@@ -1223,16 +2029,44 @@ chromeAPI.runtime.onMessage.addListener((message, sender, sendResponse) => {
 });
 
 chromeAPI.tabs.onRemoved.addListener((tabID) => {
-  if (sourceRegistry.remove(tabID)) clearSource();
+  sourceRegistry.remove(tabID);
+  settleSourceSnapshotWaiters(tabID, true);
+  const currentCapture = audioCapture?.tabID === tabID
+    ? audioCapture
+    : pendingAudioCapture?.tabID === tabID
+      ? pendingAudioCapture
+      : recoveringAudioCapture?.tabID === tabID ? recoveringAudioCapture : undefined;
+  if (currentCapture) void stopAudioAnalysis(currentCapture.trackID, tabID, currentCapture.captureID);
+  void ensureAudioCaptureRehydrated().then(() => {
+    const recovered = audioCapture?.tabID === tabID ? audioCapture : undefined;
+    if (recovered) void stopAudioAnalysis(recovered.trackID, tabID, recovered.captureID);
+  });
+  audioAnalysisReplayByTab.delete(tabID);
+  clearSource();
 });
 
 chromeAPI.tabs.onUpdated.addListener((tabID, change) => {
   if (
-    tabID === sourceRegistry.sourceTabID &&
     change.url !== undefined &&
     !change.url.startsWith("https://music.youtube.com/")
   ) {
     sourceRegistry.remove(tabID);
+    settleSourceSnapshotWaiters(tabID, true);
+    const currentCapture = audioCapture?.tabID === tabID
+      ? audioCapture
+      : pendingAudioCapture?.tabID === tabID
+        ? pendingAudioCapture
+        : recoveringAudioCapture?.tabID === tabID ? recoveringAudioCapture : undefined;
+    if (currentCapture) void stopAudioAnalysis(currentCapture.trackID, tabID, currentCapture.captureID);
+    void ensureAudioCaptureRehydrated().then(() => {
+      const recovered = audioCapture?.tabID === tabID ? audioCapture : undefined;
+      if (recovered) void stopAudioAnalysis(recovered.trackID, tabID, recovered.captureID);
+    });
+    audioAnalysisReplayByTab.delete(tabID);
     clearSource();
   }
 });
+
+// MV3 workers are disposable. Reconcile the durable offscreen document on
+// every worker start instead of relying on a keepalive to preserve JS state.
+void ensureAudioCaptureRehydrated();

@@ -1,5 +1,6 @@
 import {
   directorSectionAtV1,
+  effectPrimitiveRegistryV1,
   effectRecipeAtV1,
   stagePresentationAtV1,
   type EffectPrimitiveUseV1,
@@ -11,9 +12,11 @@ import type {
   PreparedDirectedGlyphV1,
   PreparedDirectedLineV1,
   PreparedDirectedStageV1,
+  PreparedLyricGestureV1,
 } from "./directedTypes";
 import { paletteColorForRoleV1 } from "./directedTypes";
 import { directedPaletteForIndexV1 } from "./prepareDirected";
+import { drawDramaticScenesV1 } from "./drawDramatic";
 
 const clamp01 = (value: number): number => Math.min(1, Math.max(0, value));
 const easeOutCubic = (value: number): number => 1 - (1 - value) ** 3;
@@ -31,6 +34,30 @@ const withAlpha = (hex: string, alpha: number): string => {
     return `rgba(${red},${green},${blue},${alpha})`;
   }
   return hex;
+};
+
+export const dissolveEnvelopeAtV1 = (
+  fromMs: number,
+  toMs: number,
+  timeMs: number,
+  reduceMotion: boolean,
+): number => {
+  if (timeMs < fromMs || timeMs >= toMs) return 0;
+  if (reduceMotion) return 0.28;
+  const enter = easeOutCubic(clamp01((timeMs - fromMs) / 1_200));
+  const leave = easeOutCubic(clamp01((toMs - timeMs) / 1_800));
+  return enter * leave;
+};
+
+export const reducedMotionPrimitiveUseV1 = (
+  use: EffectPrimitiveUseV1,
+): EffectPrimitiveUseV1 => {
+  const fallback = effectPrimitiveRegistryV1[use.primitive].reduceMotionFallback;
+  if (!fallback) return use;
+  return {
+    primitive: fallback,
+    intensity: use.intensity,
+  };
 };
 
 const activeLinesAt = (stage: PreparedDirectedStageV1, timeMs: number): PreparedDirectedLineV1[] =>
@@ -351,10 +378,36 @@ const drawPrimitiveField = (
     context.fillStyle = gradient;
     context.fillRect(0, 0, width, height);
   } else if (use.primitive === "transition.dissolve") {
-    const sectionProgress = clamp01((timeMs - (effectRecipeAtV1(stage.plan.effects, timeMs)?.fromMs ?? timeMs)) / 900);
-    context.fillStyle = withAlpha(palette.ground, 0.18 + sectionProgress * 0.34 * intensity);
-    for (let row = 0; row < 9; row += 1) {
-      context.fillRect(0, height * (row / 9), width * clamp01(sectionProgress - row * 0.035), height / 10);
+    const recipe = effectRecipeAtV1(stage.plan.effects, timeMs);
+    const envelope = recipe ? dissolveEnvelopeAtV1(recipe.fromMs, recipe.toMs, timeMs, reduceMotion) : 0;
+    if (envelope > 0) {
+      const direction = use.direction ?? 1;
+      const veil = context.createLinearGradient(
+        width * (direction > 0 ? 0.08 : 0.92),
+        height * 0.12,
+        width * (direction > 0 ? 0.92 : 0.08),
+        height * 0.88,
+      );
+      veil.addColorStop(0, withAlpha(palette.ground, 0));
+      veil.addColorStop(0.44, withAlpha(palette.ground, envelope * (0.025 + intensity * 0.035)));
+      veil.addColorStop(0.76, withAlpha(palette.signalAlt, envelope * (0.018 + intensity * 0.028)));
+      veil.addColorStop(1, withAlpha(palette.ground, 0));
+      context.fillStyle = veil;
+      context.fillRect(0, 0, width, height);
+
+      const absence = context.createRadialGradient(
+        width * 0.54,
+        height * 0.48,
+        Math.min(width, height) * 0.08,
+        width * 0.54,
+        height * 0.48,
+        Math.max(width, height) * 0.68,
+      );
+      absence.addColorStop(0, withAlpha(palette.ground, 0));
+      absence.addColorStop(0.58, withAlpha(palette.ground, envelope * 0.018));
+      absence.addColorStop(1, withAlpha(palette.ground, envelope * (0.08 + intensity * 0.09)));
+      context.fillStyle = absence;
+      context.fillRect(0, 0, width, height);
     }
   }
   context.restore();
@@ -369,9 +422,13 @@ const drawEffectField = (
 ): void => {
   const recipe = effectRecipeAtV1(stage.plan.effects, timeMs);
   if (!recipe) return;
-  drawPrimitiveField(context, stage, recipe.primary, timeMs, reduceMotion, palette);
-  recipe.support.forEach((use) => {
-    if (use.primitive !== "cover.island") drawPrimitiveField(context, stage, use, timeMs, reduceMotion, palette, true);
+  const resolvedUses = [recipe.primary, ...recipe.support]
+    .map((use) => reduceMotion ? reducedMotionPrimitiveUseV1(use) : use);
+  const drawn = new Set<string>();
+  resolvedUses.forEach((use, index) => {
+    if (use.primitive === "cover.island" || drawn.has(use.primitive)) return;
+    drawn.add(use.primitive);
+    drawPrimitiveField(context, stage, use, timeMs, reduceMotion, palette, index > 0);
   });
 };
 
@@ -582,6 +639,7 @@ export const fitAnchoredLineV1 = (
 
 export interface ReadingCompositionV1 {
   axisX: number;
+  horizontalAnchor: "center" | "leading" | "trailing";
   currentX: number;
   currentY: number;
   currentWidth: number;
@@ -593,20 +651,43 @@ export interface ReadingCompositionV1 {
 }
 
 export const readingCompositionForV1 = (
-  _line: PreparedDirectedLineV1,
+  line: PreparedDirectedLineV1,
   viewport: { width: number; height: number },
+  directorSource: "local" | "ai" | "cache" = "local",
 ): ReadingCompositionV1 => {
   const { width, height } = viewport;
-  const axisX = width * 0.09;
+  const layout = line.section.layout;
+  const directed = directorSource === "ai" || directorSource === "cache";
+  const trailing = directed && (layout === "railTrailing"
+    || ((layout === "duetDivide" || layout === "editorialSplit")
+      && (line.voiceRole === "duetB" || line.directive.alignment === "trailing")));
+  const horizontalAnchor = !directed
+    ? "leading"
+    : layout === "monument"
+    ? "center"
+    : trailing
+      ? "trailing"
+      : "leading";
+  const axisX = width * (horizontalAnchor === "center" ? 0.50 : horizontalAnchor === "trailing" ? 0.91 : 0.09);
+  const currentY = !directed
+    ? height * 0.50
+    : layout === "duetDivide"
+    ? height * (trailing ? 0.62 : 0.43)
+    : layout === "editorialSplit"
+      ? height * (trailing ? 0.59 : 0.45)
+      : layout.startsWith("rail")
+        ? height * 0.56
+        : height * 0.52;
   return {
     axisX,
+    horizontalAnchor,
     currentX: axisX,
-    currentY: height * 0.50,
+    currentY,
     currentWidth: width * 0.80,
     previousX: axisX,
-    previousY: height * 0.235,
+    previousY: Math.max(height * 0.20, currentY - height * 0.285),
     nextX: axisX,
-    nextY: height * 0.775,
+    nextY: Math.min(height * 0.82, currentY + height * 0.275),
     adjacentWidth: width * 0.84,
   };
 };
@@ -637,9 +718,9 @@ export const readingStackStateAtV1 = (
     previousY: mix(composition.currentY, composition.previousY),
     currentY: mix(composition.nextY, composition.currentY),
     nextY: mix(composition.nextY + (composition.nextY - composition.currentY) * 0.22, composition.nextY),
-    previousScale: mix(0.84, 0.50),
-    currentScale: mix(0.60, 0.84),
-    nextScale: 0.60,
+    previousScale: mix(0.88, 0.48),
+    currentScale: mix(0.68, 1.02),
+    nextScale: 0.54,
     previousOpacity: mix(0.92, 0.23),
     currentOpacity: mix(0.34, 1),
     nextOpacity: mix(0.08, 0.35),
@@ -659,13 +740,13 @@ const drawReading = (
     ?? [...stage.lines].reverse().find((line) => line.fromMs <= timeMs)
     ?? stage.lines[0];
   if (!current) return;
-  const composition = readingCompositionForV1(current, stage.viewport);
+  const composition = readingCompositionForV1(current, stage.viewport, stage.plan.source);
   const currentPosition = stage.lines.findIndex((line) => line.lineIndex === current.lineIndex);
   const previous = currentPosition > 0 ? stage.lines[currentPosition - 1] : undefined;
   const next = currentPosition >= 0 ? stage.lines[currentPosition + 1] : undefined;
   const stack = readingStackStateAtV1(current, composition, timeMs, Boolean(previous), reduceMotion);
-  if (previous) drawAnchoredLine(context, stage, previous, Number.POSITIVE_INFINITY, palette, true, composition.previousX, stack.previousY, composition.adjacentWidth, height * 0.25, stack.previousScale, stack.previousOpacity, palette.ink, "settle", "leading");
-  drawAnchoredLine(context, stage, current, Number.POSITIVE_INFINITY, palette, true, composition.currentX, stack.currentY, composition.currentWidth, height * 0.46, stack.currentScale, 0.14 * stack.currentOpacity, palette.ink, "settle", "leading");
+  if (previous) drawAnchoredLine(context, stage, previous, Number.POSITIVE_INFINITY, palette, true, composition.previousX, stack.previousY, composition.adjacentWidth, height * 0.25, stack.previousScale, stack.previousOpacity, palette.ink, "settle", composition.horizontalAnchor);
+  drawAnchoredLine(context, stage, current, Number.POSITIVE_INFINITY, palette, true, composition.currentX, stack.currentY, composition.currentWidth, height * 0.46, stack.currentScale, 0.12 * stack.currentOpacity, palette.ink, "settle", composition.horizontalAnchor);
   drawAnchoredLine(
     context,
     stage,
@@ -680,12 +761,212 @@ const drawReading = (
     stack.currentScale,
     stack.currentOpacity,
     palette.ink,
-    "settle",
-    "leading",
+    undefined,
+    composition.horizontalAnchor,
   );
-  if (next) drawAnchoredLine(context, stage, next, Number.POSITIVE_INFINITY, palette, true, composition.nextX, stack.nextY, composition.adjacentWidth, height * 0.29, stack.nextScale, stack.nextOpacity, palette.ink, "settle", "leading");
+  if (next) drawAnchoredLine(context, stage, next, Number.POSITIVE_INFINITY, palette, true, composition.nextX, stack.nextY, composition.adjacentWidth, height * 0.29, stack.nextScale, stack.nextOpacity, palette.ink, "settle", composition.horizontalAnchor);
   active.slice(1).forEach((line, index) => {
     drawAnchoredLine(context, stage, line, timeMs, palette, reduceMotion, width * (index % 2 ? 0.68 : 0.32), height * 0.62, width * 0.43, height * 0.30, 0.64, 0.84, palette.secondary);
+  });
+};
+
+interface GestureDisplayTransformV1 {
+  scale: number;
+  offsetX: number;
+  offsetY: number;
+}
+
+const gestureDisplayTransform = (
+  stage: PreparedDirectedStageV1,
+  line: PreparedDirectedLineV1,
+  timeMs: number,
+  presentation: ReturnType<typeof stagePresentationAtV1>,
+  reduceMotion: boolean,
+): GestureDisplayTransformV1 => {
+  const { width, height } = stage.viewport;
+  if (presentation === "hero") {
+    return fitAnchoredLineV1(stage.viewport, line.bounds, width * 0.5, height * 0.52, width * 0.80, height * 0.52, 1.22, "center");
+  }
+  if (presentation === "duet") return { scale: 1, offsetX: 0, offsetY: 0 };
+  const composition = readingCompositionForV1(line, stage.viewport, stage.plan.source);
+  const position = stage.lines.findIndex((candidate) => candidate.lineIndex === line.lineIndex);
+  const stack = readingStackStateAtV1(line, composition, timeMs, position > 0, reduceMotion);
+  return fitAnchoredLineV1(
+    stage.viewport,
+    line.bounds,
+    composition.currentX,
+    stack.currentY,
+    composition.currentWidth,
+    height * 0.48,
+    stack.currentScale,
+    composition.horizontalAnchor,
+  );
+};
+
+const gestureEnvelope = (
+  gesture: PreparedLyricGestureV1,
+  timeMs: number,
+  reduceMotion: boolean,
+): { alpha: number; attack: number; release: number } => {
+  if (timeMs < gesture.fromMs || timeMs >= gesture.toMs) return { alpha: 0, attack: 0, release: 0 };
+  const attack = reduceMotion || gesture.attackEndMs <= gesture.fromMs
+    ? 1
+    : easeOutCubic(clamp01((timeMs - gesture.fromMs) / (gesture.attackEndMs - gesture.fromMs)));
+  const release = reduceMotion || timeMs <= gesture.releaseStartMs || gesture.toMs <= gesture.releaseStartMs
+    ? 1
+    : 1 - easeOutCubic(clamp01((timeMs - gesture.releaseStartMs) / (gesture.toMs - gesture.releaseStartMs)));
+  return { alpha: attack * release, attack, release };
+};
+
+const transformedGestureBounds = (
+  prepared: PreparedLyricGestureV1,
+  transform: GestureDisplayTransformV1,
+): { x: number; y: number; width: number; height: number } => ({
+  x: transform.offsetX + prepared.bounds.x * transform.scale,
+  y: transform.offsetY + prepared.bounds.y * transform.scale,
+  width: prepared.bounds.width * transform.scale,
+  height: prepared.bounds.height * transform.scale,
+});
+
+const drawGestureTextCopy = (
+  context: CanvasRenderingContext2D,
+  line: PreparedDirectedLineV1,
+  prepared: PreparedLyricGestureV1,
+  transform: GestureDisplayTransformV1,
+  color: string,
+  alpha: number,
+  offsetX = 0,
+  offsetY = 0,
+  stroke = false,
+): void => {
+  context.save();
+  context.globalAlpha = alpha;
+  context.font = line.font;
+  context.textBaseline = "alphabetic";
+  context.fillStyle = color;
+  context.strokeStyle = color;
+  context.lineWidth = Math.max(0.8, line.fontSize * 0.018);
+  context.translate(transform.offsetX + offsetX, transform.offsetY + offsetY);
+  context.scale(transform.scale, transform.scale);
+  line.glyphs.forEach((glyph) => {
+    if (!prepared.targetGlyphIndices.includes(glyph.index)) return;
+    if (stroke) context.strokeText(glyph.text, glyph.x, glyph.y);
+    else context.fillText(glyph.text, glyph.x, glyph.y);
+  });
+  context.restore();
+};
+
+const drawLyricGesture = (
+  context: CanvasRenderingContext2D,
+  stage: PreparedDirectedStageV1,
+  prepared: PreparedLyricGestureV1,
+  timeMs: number,
+  reduceMotion: boolean,
+  palette: DirectedStagePaletteV1,
+  presentation: ReturnType<typeof stagePresentationAtV1>,
+): void => {
+  const line = stage.linesByIndex.get(prepared.lineIndex);
+  if (!line) return;
+  const phase = gestureEnvelope(prepared, timeMs, reduceMotion);
+  if (phase.alpha <= 0) return;
+  const transform = gestureDisplayTransform(stage, line, timeMs, presentation, reduceMotion);
+  const bounds = transformedGestureBounds(prepared, transform);
+  const gesture = prepared.gesture;
+  const color = paletteColorForRoleV1(palette, gesture.paletteRole);
+  const strength = gesture.intensity * phase.alpha;
+  const { width, height } = stage.viewport;
+  const motion = reduceMotion ? 0 : (1 - phase.attack) * gesture.direction;
+  context.save();
+  context.beginPath();
+  context.rect(width * 0.055, height * 0.055, width * 0.89, height * 0.89);
+  context.clip();
+  context.strokeStyle = color;
+  context.fillStyle = color;
+  context.lineCap = "round";
+  context.lineJoin = "round";
+  context.globalAlpha = Math.min(0.82, 0.18 + strength * 0.58);
+  context.lineWidth = Math.max(1, height * (0.0012 + gesture.intensity * 0.0018));
+
+  if (gesture.primitive === "glyph.weightPulse") {
+    drawGestureTextCopy(context, line, prepared, transform, color, 0.22 + strength * 0.42, motion * line.fontSize * 0.025, 0, true);
+  } else if (gesture.primitive === "glyph.strokeTrace") {
+    const inset = Math.max(2, line.fontSize * transform.scale * 0.04);
+    context.beginPath();
+    context.moveTo(bounds.x - inset, bounds.y + bounds.height);
+    context.lineTo(bounds.x - inset, bounds.y + bounds.height * (1 - phase.attack));
+    context.quadraticCurveTo(bounds.x + bounds.width * 0.5, bounds.y - inset, bounds.x + bounds.width * phase.attack + inset, bounds.y + bounds.height * 0.08);
+    context.stroke();
+  } else if (gesture.primitive === "glyph.offsetSnap") {
+    drawGestureTextCopy(context, line, prepared, transform, color, 0.12 + strength * 0.30, motion * line.fontSize * 0.11, -Math.abs(motion) * line.fontSize * 0.04);
+  } else if (gesture.primitive === "token.underlinePath") {
+    const startX = bounds.x;
+    const localEnd = bounds.x + bounds.width * phase.attack;
+    const stageEnd = gesture.space === "lyricLocal"
+      ? localEnd
+      : gesture.space === "lyricToArtwork"
+        ? width * 0.24
+        : gesture.direction > 0 ? width * 0.93 : width * 0.07;
+    const endX = phase.attack < 1 ? localEnd : startX + (stageEnd - startX) * (1 - phase.release * 0.12);
+    const y = bounds.y + bounds.height + Math.max(3, line.fontSize * transform.scale * 0.08);
+    context.beginPath();
+    context.moveTo(startX, y);
+    context.bezierCurveTo(startX + (endX - startX) * 0.34, y, startX + (endX - startX) * 0.70, y + height * 0.035 * gesture.direction, endX, y);
+    context.stroke();
+  } else if (gesture.primitive === "token.halo") {
+    context.beginPath();
+    context.ellipse(bounds.x + bounds.width / 2, bounds.y + bounds.height / 2, Math.max(8, bounds.width * (0.52 + motion * 0.04)), Math.max(8, bounds.height * 0.62), -0.08 * gesture.direction, 0, Math.PI * 2);
+    context.stroke();
+  } else if (gesture.primitive === "token.echo") {
+    drawGestureTextCopy(context, line, prepared, transform, color, 0.10 + strength * 0.24, gesture.direction * line.fontSize * transform.scale * 0.12, -line.fontSize * transform.scale * 0.06);
+  } else if (gesture.primitive === "token.elasticFocus") {
+    context.beginPath();
+    context.ellipse(bounds.x + bounds.width / 2, bounds.y + bounds.height / 2, bounds.width * (0.48 + phase.attack * 0.06), bounds.height * 0.58, 0, 0, Math.PI * 2);
+    context.stroke();
+  } else if (gesture.primitive === "phrase.arc") {
+    context.beginPath();
+    context.moveTo(bounds.x, bounds.y + bounds.height * 0.70);
+    context.quadraticCurveTo(bounds.x + bounds.width * 0.5, bounds.y - bounds.height * (0.45 + phase.attack * 0.18), bounds.x + bounds.width, bounds.y + bounds.height * 0.70);
+    context.stroke();
+  } else if (gesture.primitive === "phrase.breakReform") {
+    const centerX = bounds.x + bounds.width / 2;
+    const gap = reduceMotion ? 0 : (1 - phase.attack) * width * 0.025;
+    context.beginPath();
+    context.moveTo(bounds.x - gap, bounds.y + bounds.height);
+    context.lineTo(centerX - gap, bounds.y - bounds.height * 0.08);
+    context.moveTo(centerX + gap, bounds.y - bounds.height * 0.08);
+    context.lineTo(bounds.x + bounds.width + gap, bounds.y + bounds.height);
+    context.stroke();
+  } else if (gesture.primitive === "phrase.handoff") {
+    const fromX = gesture.direction > 0 ? bounds.x : bounds.x + bounds.width;
+    const toX = gesture.space === "lyricLocal" ? (gesture.direction > 0 ? bounds.x + bounds.width : bounds.x) : gesture.direction > 0 ? width * 0.94 : width * 0.06;
+    const y = bounds.y + bounds.height * 0.72;
+    context.beginPath();
+    context.moveTo(fromX, y);
+    context.bezierCurveTo(fromX + (toX - fromX) * 0.3, y - height * 0.045, fromX + (toX - fromX) * 0.72, y + height * 0.035, fromX + (toX - fromX) * phase.attack, y);
+    context.stroke();
+  } else if (gesture.primitive === "phrase.contour" || gesture.primitive === "phrase.breathe") {
+    const expansion = gesture.primitive === "phrase.breathe" && !reduceMotion ? (1 - phase.attack) * height * 0.012 : 0;
+    context.strokeRect(bounds.x - expansion, bounds.y - expansion, bounds.width + expansion * 2, bounds.height + expansion * 2);
+  }
+  context.restore();
+};
+
+const drawLyricGestures = (
+  context: CanvasRenderingContext2D,
+  stage: PreparedDirectedStageV1,
+  timeMs: number,
+  reduceMotion: boolean,
+  palette: DirectedStagePaletteV1,
+  presentation: ReturnType<typeof stagePresentationAtV1>,
+  layer: "scenic" | "accent",
+): void => {
+  const active = stage.gestures
+    .filter((gesture) => timeMs >= gesture.fromMs && timeMs < gesture.toMs)
+    .sort((left, right) => right.gesture.intensity - left.gesture.intensity)
+    .slice(0, 2);
+  active.forEach((gesture) => {
+    const scenic = gesture.gesture.space !== "lyricLocal" || gesture.gesture.scope === "phrase" || gesture.gesture.primitive === "token.underlinePath";
+    if ((layer === "scenic") === scenic) drawLyricGesture(context, stage, gesture, timeMs, reduceMotion, palette, presentation);
   });
 };
 
@@ -806,6 +1087,13 @@ export const directedPaletteAtV1 = (
   timeMs: number,
 ): DirectedStagePaletteV1 => directedPaletteForIndexV1(directorSectionAtV1(stage.plan, timeMs).paletteIndex);
 
+export const clearCanvasBackingStoreV1 = (context: CanvasRenderingContext2D): void => {
+  context.save();
+  context.setTransform(1, 0, 0, 1, 0, 0);
+  context.clearRect(0, 0, context.canvas.width, context.canvas.height);
+  context.restore();
+};
+
 export const drawDirectedStageV1 = (
   context: CanvasRenderingContext2D,
   stage: PreparedDirectedStageV1,
@@ -816,7 +1104,7 @@ export const drawDirectedStageV1 = (
   const palette = options.palette ?? directedPaletteAtV1(stage, options.timeMs);
   const active = activeLinesAt(stage, options.timeMs);
   const presentation = stagePresentationAtV1(stage.plan.effects, options.timeMs, stage.lyrics);
-  context.clearRect(0, 0, width, height);
+  clearCanvasBackingStoreV1(context);
   context.save();
   context.globalAlpha = presentation === "hero"
     ? 0.72
@@ -830,6 +1118,8 @@ export const drawDirectedStageV1 = (
   drawStructuralField(context, stage, options.timeMs, options.reduceMotion, palette);
   drawEffectField(context, stage, options.timeMs, options.reduceMotion, palette);
   context.restore();
+  drawDramaticScenesV1(context, stage, options.timeMs, options.reduceMotion, palette, "scenic");
+  drawLyricGestures(context, stage, options.timeMs, options.reduceMotion, palette, presentation, "scenic");
   if (presentation === "hero") {
     drawCounterpoint(context, stage, active, options.timeMs, palette, options.reduceMotion);
     drawHero(context, stage, active, options.timeMs, palette, options.reduceMotion);
@@ -839,6 +1129,8 @@ export const drawDirectedStageV1 = (
   } else {
     drawReading(context, stage, active, options.timeMs, palette, options.reduceMotion);
   }
+  drawLyricGestures(context, stage, options.timeMs, options.reduceMotion, palette, presentation, "accent");
+  drawDramaticScenesV1(context, stage, options.timeMs, options.reduceMotion, palette, "accent");
   drawTransitionVeil(context, stage, options.timeMs, options.reduceMotion, palette);
   if (options.showGuides) drawGuides(context, stage, active, palette);
   return performance.now() - startedAt;

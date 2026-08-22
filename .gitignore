@@ -35,6 +35,8 @@ cairn/Reference/
 **/__pycache__/
 **/node_modules/
 **/dist/
+web/extension-dist/
+web/performance-dist/
 **/.vite/
 *.pyc
 .pytest_cache/

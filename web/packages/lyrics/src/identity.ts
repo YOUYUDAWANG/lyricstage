@@ -8,9 +8,10 @@ export interface LyricsLookupIdentityV0 {
   isCover: boolean;
 }
 
-const packaging = /(?:official\s*(?:music\s*)?video|official\s*audio|music\s*video|lyric\s*video|lyrics?|歌ってみた|歌ってみました|歌いました|歌唱|弾き語り|カバー|翻唱|唱见|cover(?:ed)?|live|acoustic|arrange(?:d)?|mv|pv|4k|字幕|中字|完整版|full\s*version|remaster(?:ed)?)/iu;
+const packaging = /(?:official\s*(?:music\s*)?video|official\s*audio|music\s*video|lyric\s*video|lyrics?|歌ってみた|歌ってみました|歌いました|歌唱|弾き語り|カバー|翻唱|唱见|cover(?:ed)?|live|acoustic|arrange(?:d)?|remix(?:ed)?|game\s*version|mv|pv|4k|字幕|中字|完整版|full\s*(?:version|ver\.?)|remaster(?:ed)?)/iu;
 const coverMarker = /(?:歌ってみた|歌ってみました|歌いました|弾き語り|カバー|翻唱|唱见|\bcover(?:ed)?\b)/iu;
 const topicSuffix = /(?:\s*[-–—]\s*topic)$/iu;
+const featureMarker = /\b(?:feat(?:uring)?|ft)\.?\s*[:：]?\s*/iu;
 
 export const comparableLyricsText = (value: string): string =>
   value
@@ -41,66 +42,211 @@ const quotedTitles = (title: string): string[] => {
   return values;
 };
 
-const trailingPerformerCredit = /(?:\s*[-–—|｜:：\/／]\s*)?(?:(?:cover(?:ed)?|sung)\s*(?:by\s+|[:：]\s*)(.+?)|\bby\s+(.+?)|(?:歌(?:唱)?|vocal|vo\.?)\s*[:：]\s*(.+?))[\s.。]*$/iu;
-const coverSourceSeparator = /(?:\s+[-–—]\s+|\s+[|｜]\s+|\s+[\/／]\s+|\s*／\s*)/gu;
-const boundarySeparators = /^[\-–—|｜:：\/／\s]+|[\-–—|｜:：\/／\s]+$/gu;
+const leadingSeparators = /^[\-–—|:：\/\s]+/gu;
+const trailingSeparators = /[|:：\/\s]+$/gu;
+const roleSeparator = /\s*(?:\/|\|)\s*/gu;
+const spacedDash = /\s+[-–—]\s+/gu;
 
-const parentheticalSourceCredit = (
-  value: string,
-  isCover: boolean,
-): { title: string; originalArtist?: string } => {
-  if (!isCover) return { title: value };
-  const match = value.match(/[（(]([^()（）]{1,80})[）)](?=\s*(?:[\/／|｜]\s*)?(?:(?:acoustic|piano)\s+)?(?:cover(?:ed)?|カバー|歌ってみた))/iu);
-  const originalArtist = match?.[1]?.trim();
-  if (!match || match.index === undefined || !originalArtist || packaging.test(originalArtist)) {
-    return { title: value };
-  }
-  return {
-    title: `${value.slice(0, match.index)} ${value.slice(match.index + match[0].length)}`.trim(),
-    originalArtist,
-  };
-};
+const normalizeTitle = (title: string): string =>
+  title.normalize("NFKC").replace(topicSuffix, "").trim();
 
-const cleanTitle = (title: string, performers: string[], isCover: boolean): string => {
-  let value = title.normalize("NFKC").replace(topicSuffix, "").trim();
-  value = value.replace(/[\[(（【〖〘〚][^\])）】〗〙〛]*[\])）】〗〙〛]/gu, (group) => packaging.test(group) ? " " : group);
-  value = value.replace(/(?:\s*[-–—|｜:：\/／]\s*)?(?:(?:acoustic|piano)\s+)?(?:official\s*(?:music\s*)?video|official\s*audio|music\s*video|lyric\s*video|lyrics?|歌ってみた|翻唱|cover(?:ed)?|mv|pv|4k|字幕|中字|full\s*version|remaster(?:ed)?)[\s.。]*$/iu, "");
-  const credit = value.match(trailingPerformerCredit);
-  const creditedArtistName = credit?.[1] ?? credit?.[2] ?? credit?.[3];
-  if (creditedArtistName && credit) {
-    const creditedArtist = comparableLyricsText(creditedArtistName);
-    const creditsKnownPerformer = performers.some((performer) =>
-      comparableLyricsText(performer) === creditedArtist
-    );
-    if (isCover || creditsKnownPerformer) value = value.slice(0, credit.index).trim();
-  }
-  return value.replace(/\s{2,}/gu, " ").trim().replace(boundarySeparators, "");
-};
+const trimBoundaries = (value: string): string => value
+  .replace(/\s{2,}/gu, " ")
+  .trim()
+  .replace(leadingSeparators, "")
+  .replace(trailingSeparators, "")
+  .trim();
 
-const coverSourceCredit = (
-  value: string,
-  performers: string[],
-  isCover: boolean,
-): { title: string; originalArtist?: string } => {
-  if (!isCover) return { title: value };
-  const separators = [...value.matchAll(coverSourceSeparator)];
-  const separator = separators.at(-1);
-  if (!separator || separator.index === undefined) return { title: value };
-  const title = value.slice(0, separator.index).trim();
-  const originalArtist = value.slice(separator.index + separator[0].length).trim();
-  if (!title || !originalArtist || originalArtist.length > 160) return { title: value };
-  if (performers.some((performer) => comparableLyricsText(performer) === comparableLyricsText(originalArtist))) {
-    return { title: value };
-  }
-  return { title, originalArtist };
+const stripPackaging = (title: string): string => {
+  let value = normalizeTitle(title)
+    .replace(/\s*[|]\s*from\s+[^|]+$/iu, "")
+    .replace(/\s*[([]\s*\d{4}\s*[)\]]\s*$/u, "");
+  value = value.replace(/[\[(【〖〘〚][^\])】〗〙〛]*[\])】〗〙〛]/gu, (group) =>
+    packaging.test(group) ? " " : group
+  );
+  value = value.replace(
+    /(?:\s*[-–—|:：\/]\s*)?(?:(?:acoustic|piano)\s+)?(?:official\s*(?:music\s*)?video|official\s*audio|music\s*video|lyric\s*video|lyrics?|歌ってみた|翻唱|cover(?:ed)?|mv|pv|4k|字幕|中字|full\s*version|remaster(?:ed)?)[\s.。]*$/iu,
+    "",
+  );
+  return trimBoundaries(value);
 };
 
 const artistNames = (artist: string): string[] => {
   const cleaned = artist.normalize("NFKC").replace(topicSuffix, "").trim();
-  return unique([
-    cleaned,
-    ...cleaned.split(/\s*(?:\/|／|、|,|，|·|・| feat\.? | featuring )\s*/iu),
+  const split = cleaned.split(/\s*(?:\/|／|、|,|，|·|・| feat\.? | featuring )\s*/iu);
+  return unique(split.length > 1 ? [...split, cleaned] : [cleaned]);
+};
+
+const artistsMatch = (left: string, right: string): boolean => {
+  const a = comparableLyricsText(left);
+  const b = comparableLyricsText(right);
+  return a === b || (a.length >= 3 && b.includes(a)) || (b.length >= 3 && a.includes(b));
+};
+
+const splitFeaturing = (value: string): { title: string; artists: string[] } => {
+  const parenthetical = value.match(/^(.*?)[(]\s*(?:feat(?:uring)?|ft)\.?\s*[:：]?\s*([^()]{1,160})[)]\s*$/iu);
+  const inline = parenthetical ?? value.match(/^(.*?)\s+\b(?:feat(?:uring)?|ft)\.?\s*[:：]?\s*(.{1,160})$/iu);
+  if (!inline?.[1] || !inline[2]) return { title: trimBoundaries(value), artists: [] };
+  return {
+    title: trimBoundaries(inline[1]),
+    artists: artistNames(inline[2]),
+  };
+};
+
+const extractExplicitPerformer = (
+  value: string,
+  isCover: boolean,
+): { value: string; performers: string[] } => {
+  const patterns = [
+    /(?:\s*[-–—|:：\/]\s*)?(?:cover(?:ed)?|sung)\s+by\s+(.+?)\s*$/iu,
+    /(?:\s*[-–—|:：\/]\s*)?cover\s*[:：]\s*(.+?)\s*$/iu,
+    /(?:\s*[-–—|:：\/]\s*)?cover\s+(.+?)\s*$/iu,
+    ...(isCover ? [
+      /(?:\s*[-–—|:：\/]\s*)?(?:歌(?:唱)?|vocal|vo\.?)\s*[:：]\s*(.+?)\s*$/iu,
+      /(?:\s*[-–—|:：\/]\s*)?\bby\s+(.+?)\s*$/iu,
+    ] : []),
+  ];
+  for (const pattern of patterns) {
+    const match = value.match(pattern);
+    const credit = match?.[1]?.trim();
+    if (!match || match.index === undefined || !credit || packaging.test(credit)) continue;
+    return {
+      value: trimBoundaries(value.slice(0, match.index)),
+      performers: artistNames(credit),
+    };
+  }
+  return { value, performers: [] };
+};
+
+const extractKnownPerformerSuffix = (
+  value: string,
+  knownPerformers: string[],
+): { value: string; performers: string[] } => {
+  const separators = [
+    ...value.matchAll(roleSeparator),
+    ...value.matchAll(spacedDash),
+  ].sort((left, right) => (left.index ?? 0) - (right.index ?? 0));
+  const separator = separators.at(-1);
+  if (!separator || separator.index === undefined) return { value, performers: [] };
+  const suffix = trimBoundaries(value.slice(separator.index + separator[0].length));
+  if (!suffix || !knownPerformers.some((known) => artistsMatch(known, suffix))) {
+    return { value, performers: [] };
+  }
+  return {
+    value: trimBoundaries(value.slice(0, separator.index)),
+    performers: artistNames(suffix),
+  };
+};
+
+const extractTrailingOriginal = (
+  value: string,
+  isCover: boolean,
+): { value: string; originals: string[] } => {
+  if (!isCover) return { value, originals: [] };
+  const match = value.match(/^(.*?)[(]([^()]{1,80})[)]\s*$/u);
+  const credit = match?.[2]?.trim();
+  if (!match?.[1] || !credit || packaging.test(credit) || featureMarker.test(credit) || /^cv\s*[:：]/iu.test(credit)) {
+    return { value, originals: [] };
+  }
+  return { value: trimBoundaries(match[1]), originals: artistNames(credit) };
+};
+
+interface ParsedTitleRoles {
+  title: string;
+  originalArtists: string[];
+  coverPerformers: string[];
+  hasEmbeddedOriginal: boolean;
+}
+
+const parseTitleRoles = (
+  rawTitle: string,
+  trackPerformers: string[],
+  isCover: boolean,
+): ParsedTitleRoles => {
+  const withoutSource = normalizeTitle(rawTitle)
+    .replace(/\s*[|]\s*from\s+[^|]+$/iu, "")
+    .replace(/\s*[([]\s*\d{4}\s*[)\]]\s*$/u, "");
+  if (!isCover) {
+    const versionSeparatedArtists = withoutSource.match(
+      /^(.*?)[(]\s*(?:full\s*(?:version|ver\.?)|game\s*version)\s*[)]\s+(.+?)\s*$/iu,
+    );
+    if (versionSeparatedArtists?.[1] && versionSeparatedArtists[2]) {
+      const creditedArtists = stripPackaging(versionSeparatedArtists[2]);
+      if (creditedArtists) {
+        return {
+          title: stripPackaging(versionSeparatedArtists[1]),
+          originalArtists: artistNames(creditedArtists),
+          coverPerformers: [],
+          hasEmbeddedOriginal: true,
+        };
+      }
+    }
+  }
+  const explicitPerformer = extractExplicitPerformer(withoutSource, isCover);
+  let value = stripPackaging(explicitPerformer.value);
+  const suffixPerformer = isCover
+    ? extractKnownPerformerSuffix(value, unique([...explicitPerformer.performers, ...trackPerformers]))
+    : { value, performers: [] };
+  value = suffixPerformer.value;
+  const trailingOriginal = extractTrailingOriginal(value, isCover);
+  value = trailingOriginal.value;
+  const coverPerformers = unique([
+    ...explicitPerformer.performers,
+    ...suffixPerformer.performers,
+    ...(explicitPerformer.performers.length === 0 && suffixPerformer.performers.length === 0 ? trackPerformers : []),
   ]);
+  const originals = [...trailingOriginal.originals];
+  let hasEmbeddedOriginal = originals.length > 0;
+
+  if (!isCover) {
+    const vocal = value.match(/^(.*?)\s*[\/|]\s*歌(?:唱)?\s*[:：]\s*([^()]+?)(?:\s*[(]\s*cv\s*[:：]\s*(.+?)\s*[)])?\s*$/iu);
+    if (vocal?.[1] && vocal[2]) {
+      return {
+        title: trimBoundaries(vocal[1]),
+        originalArtists: unique([...artistNames(vocal[2]), ...(vocal[3] ? artistNames(vocal[3]) : [])]),
+        coverPerformers: [],
+        hasEmbeddedOriginal: true,
+      };
+    }
+  }
+
+  const dashes = [...value.matchAll(spacedDash)];
+  const dash = dashes[0];
+  if (dash?.index !== undefined) {
+    const left = trimBoundaries(value.slice(0, dash.index));
+    const right = trimBoundaries(value.slice(dash.index + dash[0].length));
+    if (left && right) {
+      if (!isCover || featureMarker.test(right)) {
+        const featured = splitFeaturing(right);
+        value = featured.title;
+        originals.push(...artistNames(left), ...featured.artists);
+      } else {
+        value = left;
+        originals.push(...artistNames(right));
+      }
+      hasEmbeddedOriginal = true;
+    }
+  } else if (isCover) {
+    const separators = [...value.matchAll(roleSeparator)];
+    const separator = separators.at(-1);
+    if (separator?.index !== undefined) {
+      const left = trimBoundaries(value.slice(0, separator.index));
+      const right = trimBoundaries(value.slice(separator.index + separator[0].length));
+      if (left && right) {
+        value = left;
+        originals.push(...artistNames(right));
+        hasEmbeddedOriginal = true;
+      }
+    }
+  }
+
+  const featured = splitFeaturing(value);
+  return {
+    title: featured.title,
+    originalArtists: unique([...originals, ...featured.artists]),
+    coverPerformers,
+    hasEmbeddedOriginal,
+  };
 };
 
 const explicitOriginalArtists = (title: string): string[] => {
@@ -122,25 +268,24 @@ export const buildLyricsLookupIdentity = (track: LyricsLookupTrackV0): LyricsLoo
   const isCover = coverMarker.test(rawTitle);
   const performers = artistNames(track.artist);
   const quoted = quotedTitles(rawTitle);
-  const parentheticalCredit = parentheticalSourceCredit(rawTitle, isCover);
-  const cleaned = cleanTitle(parentheticalCredit.title, performers, isCover);
-  const sourceCredit = coverSourceCredit(cleaned, performers, isCover);
+  const roles = parseTitleRoles(rawTitle, performers, isCover);
+  const cleaned = stripPackaging(rawTitle);
   const titles = unique([
     ...quoted,
-    sourceCredit.title,
-    ...(sourceCredit.title === cleaned ? [] : [cleaned]),
+    roles.title,
+    ...(roles.title === cleaned ? [] : [cleaned]),
     rawTitle.replace(topicSuffix, "").trim(),
   ]);
   const originals = unique([
     ...explicitOriginalArtists(rawTitle),
-    ...(parentheticalCredit.originalArtist ? [parentheticalCredit.originalArtist] : []),
-    ...(sourceCredit.originalArtist ? [sourceCredit.originalArtist] : []),
+    ...roles.originalArtists,
+    ...(!isCover && !roles.hasEmbeddedOriginal ? performers : []),
   ]);
   return {
     canonicalTitle: titles[0] ?? rawTitle,
     titles,
-    originalArtists: isCover ? originals : performers,
-    coverPerformers: isCover ? performers : [],
+    originalArtists: originals,
+    coverPerformers: isCover ? roles.coverPerformers : [],
     isCover,
   };
 };
@@ -149,19 +294,15 @@ export const titleMatchesIdentity = (
   identity: LyricsLookupIdentityV0,
   candidate: LyricsCandidateV0,
 ): boolean => {
-  const candidatePerformers = artistNames(candidate.artist);
-  const candidateIsCover = identity.isCover || coverMarker.test(candidate.title);
-  const cleaned = cleanTitle(
-    candidate.title,
-    candidatePerformers,
-    candidateIsCover,
-  );
-  const actual = comparableLyricsText(coverSourceCredit(
-    cleaned,
-    candidatePerformers,
-    candidateIsCover,
-  ).title);
-  return identity.titles.some((title) => comparableLyricsText(title) === actual);
+  const candidateIdentity = buildLyricsLookupIdentity({
+    provider: "youtubeMusic",
+    trackID: `candidate:${candidate.provider}:${candidate.id}`,
+    title: candidate.title,
+    artist: candidate.artist,
+    durationMs: candidate.durationMs,
+  });
+  const actualTitles = new Set(candidateIdentity.titles.map(comparableLyricsText));
+  return identity.titles.some((title) => actualTitles.has(comparableLyricsText(title)));
 };
 
 export const artistMatchesAny = (expected: string[], actual: string): boolean => {

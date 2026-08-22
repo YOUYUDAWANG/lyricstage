@@ -8,6 +8,8 @@ import {
 import {
   adaptFullscreenDirectorResponseV1,
   adaptFullscreenDirectorResponseV2,
+  adaptFullscreenDirectorResponseV3,
+  adaptFullscreenDirectorResponseV4,
   adaptLegacyDirectorResponseV1,
   compileLocalDirectorPlanV1,
   directorSectionAtV1,
@@ -16,6 +18,7 @@ import {
   queueDirectorPlanV1,
   sampleDirectorPlanHandoffV1,
 } from "./directorPlan";
+import { lyricGraphemesV1 } from "./lyricChoreography";
 import { buildDirectorRequestPayloadV1 } from "./directorRequest";
 import { motionClipsV1, sampleMotionClipV1 } from "./motionClip";
 import { compileMusicMapV1, sanitizeMusicMapV1, type MusicMapV1 } from "./musicMap";
@@ -23,6 +26,7 @@ import { TimedTextIndexV1 } from "./timedText";
 import {
   compileVocalTimingMapV1,
   compileVocalTimingSampleV1,
+  estimateLyricsOffsetFromVocalTimingV1,
   sanitizeVocalTimingMapV1,
   vocalAwareVirtualTimeMs,
 } from "./vocalTiming";
@@ -152,6 +156,8 @@ describe("DirectorPlanV1", () => {
     expect(first).toEqual(second);
     expect(first.source).toBe("local");
     expect(first.sections.length).toBeGreaterThan(1);
+    expect(first.blocking.transitions.length).toBeLessThanOrEqual(2);
+    expect(first.sections.slice(1).filter((section, index) => section.layout !== first.sections[index]!.layout).length).toBeLessThanOrEqual(2);
     expect(first.directives.map((directive) => directive.lineIndex)).toEqual(
       lyrics.lines.map((line) => line.lineIndex),
     );
@@ -330,6 +336,86 @@ describe("DirectorPlanV1", () => {
     })).toBeNull();
   });
 
+  it("adapts V3 blocking and exact phrase choreography without trusting rewritten text", () => {
+    const lyrics = lyricFixtures.wordTimedMixed;
+    const local = compileLocalDirectorPlanV1(lyrics);
+    const line = lyrics.lines[0]!;
+    const base = {
+      version: "lyricstage-fullscreen-director-v3",
+      directorVersion: "fullscreen-choreography-test-v3",
+      trackID: "track-v3",
+      recordingID: lyrics.recordingID,
+      lyricsHash: "d".repeat(64),
+      lyricsIdentity: local.lyricsIdentity,
+      degraded: false,
+      concept: "one lyric trace crosses a stable editorial stage",
+      motif: "a fine underline becomes a remembered path",
+      intensityArc: "quiet inscription, open center, resolved trace",
+      world: local.world,
+      blocking: { version: "song-blocking-v1", baseLayout: "monument", transitions: [] },
+      sections: local.sections.map((section) => ({
+        fromLineIndex: section.fromLineIndex,
+        toLineIndex: section.toLineIndex,
+        artDirection: "editorialKinetic",
+        layout: "monument",
+        typography: "jpGothic",
+        paletteIndex: 2,
+        intensity: 0.62,
+      })),
+      directives: local.directives,
+      effects: [{
+        version: "effect-recipe-v1",
+        id: "ai-effect:v3",
+        cardID: "field-release",
+        sectionID: `ai:0:${local.sections[0]!.fromLineIndex}-${local.sections[0]!.toLineIndex}`,
+        fromMs: -1,
+        toMs: -1,
+        presentation: "section",
+        primary: { primitive: "density.release", intensity: 0.52 },
+        support: [],
+        evidence: {
+          songMotif: "a fine underline becomes a remembered path",
+          sectionTriggers: ["density_release"],
+          lineIndices: [local.sections[0]!.fromLineIndex],
+          rationale: "The quiet section releases the established trace.",
+          confidence: 0.82,
+        },
+      }],
+      gestures: [{
+        version: "lyric-gesture-v1",
+        id: "gesture:phrase:0",
+        lineIndex: line.lineIndex,
+        scope: "phrase",
+        target: { fromGrapheme: 0, toGrapheme: lyricGraphemesV1(line.text).length, expectedText: line.text },
+        primitive: "phrase.contour",
+        driver: "lineEnter",
+        space: "lyricLocal",
+        envelope: { attackMs: 320, holdMs: 240, releaseMs: 480 },
+        intensity: 0.58,
+        direction: 1,
+        paletteRole: "accent",
+        evidence: { semanticRole: "identity", rationale: "The opening phrase establishes the song trace.", confidence: 0.78 },
+      }],
+    };
+    const plan = adaptFullscreenDirectorResponseV3(lyrics, "track-v3", "d".repeat(64), base);
+    expect(plan?.blocking.transitions).toHaveLength(0);
+    expect(plan?.gestures[0]?.primitive).toBe("phrase.contour");
+    expect(plan && isDirectorPlanV1ForLyrics(plan, lyrics)).toBe(true);
+    expect(adaptFullscreenDirectorResponseV3(lyrics, "track-v3", "d".repeat(64), {
+      ...base,
+      gestures: [{ ...base.gestures[0], target: { ...base.gestures[0].target, expectedText: "rewritten" } }],
+    })).toBeNull();
+
+    const v4 = adaptFullscreenDirectorResponseV4(lyrics, "track-v3", "d".repeat(64), {
+      ...base,
+      version: "lyricstage-fullscreen-director-v4",
+      dramaticScore: local.dramaticScore,
+    });
+    expect(v4?.dramaticScore.signatureMoments.length).toBeGreaterThanOrEqual(2);
+    expect(v4?.dramaticScore.motifActor.states.map((state) => state.state)).toEqual(expect.arrayContaining(["seed", "return"]));
+    expect(v4 && isDirectorPlanV1ForLyrics(v4, lyrics)).toBe(true);
+  });
+
   it("queues an AI plan at the next section boundary and never swaps mid-section", () => {
     const lyrics = lyricFixtures.longSongStructure;
     const local = compileLocalDirectorPlanV1(lyrics);
@@ -488,6 +574,46 @@ describe("DirectorRequestPayloadV1", () => {
     expect(estimated[0]!.estimatedWords.map((word) => word.text).join("")).toBe(estimated[0]!.text);
   });
 
+  it("can retry a rejected request with line-only timing while preserving the lyric text", async () => {
+    const lyrics = lyricFixtures.wordTimedMixed;
+    const payload = await buildDirectorRequestPayloadV1({
+      trackID: "line-only-retry",
+      title: "Line-only Retry",
+      artist: "Fixture Artist",
+      durationMs: lyrics.durationMs,
+    }, lyrics, undefined, { lineTimingOnly: true });
+    const body = JSON.parse(payload!.body) as {
+      lines: Array<{ text: string; timingPrecision: string; words: unknown[]; estimatedWords: unknown[] }>;
+    };
+    expect(body.lines.map((line) => line.text)).toEqual(lyrics.lines.map((line) => line.text));
+    expect(body.lines.every((line) => line.timingPrecision === "line")).toBe(true);
+    expect(body.lines.every((line) => line.words.length === 0 && line.estimatedWords.length === 0)).toBe(true);
+  });
+
+  it("clips a trailing lyric sentinel to the authoritative media duration", async () => {
+    const fixture = lyricFixtures.lineOnlyJA;
+    const lyrics = {
+      ...fixture,
+      lines: fixture.lines.map((line, index) => index === fixture.lines.length - 1
+        ? { ...line, toMs: fixture.durationMs + 60_000 }
+        : line),
+    };
+    const payload = await buildDirectorRequestPayloadV1({
+      trackID: "trailing-sentinel",
+      title: "Trailing Sentinel",
+      artist: "Fixture Artist",
+      durationMs: fixture.durationMs,
+    }, lyrics);
+    const body = JSON.parse(payload!.body) as {
+      duration: number;
+      lines: Array<{ from: number; to: number; estimatedWords: Array<{ from: number; to: number }> }>;
+    };
+    const last = body.lines.at(-1)!;
+    expect(last.to).toBe(body.duration);
+    expect(last.to).toBeGreaterThan(last.from);
+    expect(last.estimatedWords.every((word) => word.from >= last.from && word.to <= last.to)).toBe(true);
+  });
+
   it("adds the exact public YouTube video as whole-song context", async () => {
     const lyrics = lyricFixtures.wordTimedMixed;
     const payload = await buildDirectorRequestPayloadV1({
@@ -632,5 +758,45 @@ describe("VocalTimingMapV1", () => {
     const times = Array.from({ length: 45 }, (_, index) => 1_300 + index * 100);
     const warped = times.map((time) => vocalAwareVirtualTimeMs(1_000, 7_000, time, map));
     expect(warped.every((time, index) => index === 0 || time >= warped[index - 1]!)).toBe(true);
+  });
+
+  it("estimates a shared lyric offset from several irregular vocal attacks", () => {
+    const lineStarts = [4_000, 9_300, 15_800, 22_400];
+    const trueOffsetMs = 1_300;
+    const acousticSamples = Array.from({ length: 480 }, (_, index) => {
+      const atMs = 2_000 + index * 50;
+      const distance = Math.min(...lineStarts.map((start) => Math.abs(atMs - (start + trueOffsetMs))));
+      const attack = distance <= 100 ? 0.92 : distance <= 250 ? 0.48 : 0.025;
+      const afterOnset = lineStarts.some((start) => atMs >= start + trueOffsetMs && atMs <= start + trueOffsetMs + 1_800);
+      return {
+        atMs,
+        presence: afterOnset ? 0.82 : 0.08,
+        attack,
+        confidence: 0.86,
+      };
+    });
+    const map = compileVocalTimingMapV1(30_000, acousticSamples, 25_000);
+    const estimate = estimateLyricsOffsetFromVocalTimingV1(
+      lineStarts.map((fromMs) => ({ fromMs, toMs: fromMs + 2_600 })),
+      map,
+    );
+    expect(estimate).toBeDefined();
+    expect(Math.abs(estimate!.offsetMs - trueOffsetMs)).toBeLessThanOrEqual(200);
+    expect(estimate!.matchedLineCount).toBeGreaterThanOrEqual(3);
+    expect(estimate!.confidence).toBeGreaterThanOrEqual(0.45);
+  });
+
+  it("does not auto-shift from a flat or ambiguous vocal window", () => {
+    const flat = compileVocalTimingMapV1(20_000, Array.from({ length: 300 }, (_, index) => ({
+      atMs: 1_000 + index * 50,
+      presence: 0.45,
+      attack: 0.04,
+      confidence: 0.8,
+    })), 15_000);
+    expect(estimateLyricsOffsetFromVocalTimingV1([
+      { fromMs: 4_000, toMs: 6_000 },
+      { fromMs: 9_000, toMs: 11_000 },
+      { fromMs: 14_000, toMs: 16_000 },
+    ], flat)).toBeUndefined();
   });
 });

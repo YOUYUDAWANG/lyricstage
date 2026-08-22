@@ -1,0 +1,21 @@
+{
+  "version": "dramatic-grammar-v1",
+  "actRoles": ["setup", "development", "reversal", "climax", "coda"],
+  "motifFamilies": ["thread", "window", "silhouette", "horizon", "fold", "firework", "fish", "petal", "snow"],
+  "motifStates": ["seed", "emerge", "transform", "fracture", "return", "resolve"],
+  "origins": ["lyric", "artwork", "silence", "voice", "structure"],
+  "purposes": ["reveal", "connection", "rupture", "release", "distance", "collective", "resolution"],
+  "stageActions": ["thread.connect", "thread.snap", "window.reveal", "silhouette.trace", "sentence.horizon", "phrase.cascade", "memory.imprint", "duet.tension", "stage.fold", "motif.recall", "silence.vacuum"],
+  "coverRoles": ["anchor", "origin", "destination", "boundary", "memory", "portal", "absent"],
+  "consequences": ["trace", "afterimage", "accumulation", "absence", "reframe", "return"],
+  "budgets": {
+    "minimumActs": 2,
+    "maximumActs": 5,
+    "minimumSignatureMoments": 2,
+    "maximumSignatureMoments": 4,
+    "maximumQuietWindows": 8,
+    "minimumQuietSongShare": 0.4,
+    "maximumLayoutTransitions": 2,
+    "maximumExceptionalLayoutTransitions": 3
+  }
+}

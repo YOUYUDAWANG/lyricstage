@@ -147,6 +147,62 @@
   flex: 0 0 auto;
 }
 
+.column-timing-adjust {
+  position: absolute;
+  z-index: 6;
+  top: 48px;
+  right: 10px;
+  display: grid;
+  grid-template-columns: auto auto minmax(72px, auto) auto auto;
+  align-items: center;
+  gap: 4px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 10px;
+  padding: 5px;
+  color: rgba(255, 255, 255, 0.78);
+  background: rgba(20, 18, 20, 0.88);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.28);
+  backdrop-filter: blur(14px) saturate(1.15);
+  -webkit-backdrop-filter: blur(14px) saturate(1.15);
+}
+
+.column-timing-adjust button {
+  min-height: 27px;
+  border: 0;
+  border-radius: 7px;
+  padding: 0 8px;
+  color: rgba(255, 255, 255, 0.72);
+  background: rgba(255, 255, 255, 0.065);
+  font: inherit;
+  font-size: 9px;
+  font-weight: 650;
+  cursor: pointer;
+}
+
+.column-timing-adjust button:hover {
+  color: #fff;
+  background: rgba(255, 255, 255, 0.14);
+}
+
+.column-timing-adjust button:disabled {
+  opacity: 0.34;
+  cursor: default;
+}
+
+.column-timing-adjust strong {
+  text-align: center;
+  font-size: 9px;
+  font-variant-numeric: tabular-nums;
+}
+
+.column-timing-adjust .column-timing-reset {
+  color: rgba(255, 255, 255, 0.48);
+}
+
+.column-timing-adjust .column-timing-auto {
+  color: rgba(194, 246, 220, 0.82);
+}
+
 .column-banner {
   position: relative;
   z-index: 3;

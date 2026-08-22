@@ -3,9 +3,19 @@
   const LYRICS_PAGE_TYPE = "MUSIC_PAGE_TYPE_TRACK_LYRICS";
   const CONFIRMED_TAB_ATTR = "data-lyricstage-confirmed-lyrics-tab";
   const CONTENT_SCRIPT_STOP_EVENT = "lyricstage-content-script-stop-v2";
+  const CONTENT_SCRIPT_MARKER_ATTR = "data-lyricstage-content-script";
+  const CONTENT_SCRIPT_MARKER = "isolated-v3";
   const STAGE_HOST_ID = "lyricstage-enhanced-lyrics-v2";
   const LEGACY_STAGE_HOST_ID = "lyricstage-enhanced-lyrics";
+  const STAGE_FAILURE_ATTR = "data-lyricstage-last-mount-failure";
+  const STAGE_FAILURE_COUNT_ATTR = "data-lyricstage-mount-failure-count";
+  const SOURCE_LEASE_MS = 3000;
+  const TRACK_CHANGE_STABILITY_MS = 250;
+  const TRACK_CHANGE_MAX_HOLD_MS = 1500;
+  const STAGE_MOUNT_MAX_FAILURES = 3;
+  const STAGE_MOUNT_RETRY_DELAYS_MS = [250, 750];
   document.documentElement.dispatchEvent(new Event(CONTENT_SCRIPT_STOP_EVENT));
+  document.documentElement.setAttribute(CONTENT_SCRIPT_MARKER_ATTR, CONTENT_SCRIPT_MARKER);
   const mediaEvents = [
     "play",
     "pause",
@@ -33,10 +43,15 @@
   let stageMountGeneration = 0;
   let stageMountState = "idle";
   let stageMountFailure = "";
+  let stageMountFailureCount = 0;
+  let stageMountRetryAt = 0;
   let sourceWasAvailable = false;
+  let sourceMissingSince = null;
   let sponsorBlockControlHost = null;
   let sponsorBlockTitleCompat = null;
   let lastKnownVideoID = "";
+  let acceptedTrackTuple = null;
+  let pendingTrackTuple = null;
   const savedNativeRenderers = new Map();
 
   const clean = (value) => (typeof value === "string" ? value.trim() : "");
@@ -90,22 +105,65 @@
     return highResolutionArtworkURL(preferred?.src);
   };
 
+  const videoArtworkURL = (trackID) => {
+    const safeTrackID = clean(trackID);
+    if (!/^[A-Za-z0-9_-]{11}$/u.test(safeTrackID)) return "";
+
+    const image = document.querySelector?.(
+      `img[src*="/vi/${safeTrackID}/"], img[src*="/vi_webp/${safeTrackID}/"]`,
+    );
+    const imageURL = clean(image?.currentSrc || image?.src);
+    if (imageURL) return imageURL;
+
+    const thumbnail = document.querySelector?.(
+      ".html5-video-player .ytp-cued-thumbnail-overlay-image, .ytp-cued-thumbnail-overlay-image",
+    );
+    const backgroundImage = thumbnail
+      ? typeof getComputedStyle === "function"
+        ? clean(getComputedStyle(thumbnail).backgroundImage)
+        : clean(thumbnail.style?.backgroundImage)
+      : "";
+    const backgroundMatch = backgroundImage.match(/^url\((['"]?)(https:\/\/[^'"]+)\1\)$/u);
+    if (backgroundMatch?.[2]) {
+      try {
+        const candidate = new URL(backgroundMatch[2]);
+        const match = candidate.pathname.match(/^\/vi(?:_webp)?\/([^/]+)\//u);
+        if (match?.[1] === safeTrackID) return candidate.href;
+      } catch {
+        // Fall through to the public video thumbnail below.
+      }
+    }
+
+    return `https://i.ytimg.com/vi/${safeTrackID}/hqdefault.jpg`;
+  };
+
   const currentVideoID = (playerBar) => {
+    const href = playerBar?.querySelector?.('a[href*="watch?v="]')?.getAttribute?.("href");
+    if (href) {
+      try {
+        const fromBar = new URL(href, location.origin).searchParams.get("v") ?? "";
+        if (fromBar) {
+          lastKnownVideoID = fromBar;
+          return fromBar;
+        }
+      } catch {
+        // Keep the last recording identity across YouTube Music SPA routes.
+      }
+    }
     const fromLocation = new URL(location.href).searchParams.get("v");
     if (fromLocation) {
       lastKnownVideoID = fromLocation;
       return fromLocation;
     }
-    const href = playerBar?.querySelector?.('a[href*="watch?v="]')?.getAttribute?.("href");
-    if (href) {
-      try {
-        const fromBar = new URL(href, location.origin).searchParams.get("v") ?? "";
-        if (fromBar) lastKnownVideoID = fromBar;
-      } catch {
-        // Keep the last recording identity across YouTube Music SPA routes.
-      }
-    }
     return lastKnownVideoID;
+  };
+
+  const isYouTubeMusicLocation = () => {
+    try {
+      return new URL(location.href).hostname === "music.youtube.com";
+    } catch {
+      return false;
+    }
   };
 
   const rememberClickedVideo = (event) => {
@@ -236,6 +294,58 @@
     !control.hasAttribute?.("disabled")
   );
 
+  const trackTupleKey = (tuple) => JSON.stringify([
+    tuple.trackID,
+    tuple.title,
+    tuple.artist,
+    Math.round(tuple.durationMs / 1000),
+  ]);
+
+  const trackIdentityMetadataKey = (tuple) => JSON.stringify([
+    tuple.title,
+    tuple.artist,
+  ]);
+
+  const acceptsTrackTuple = (tuple, nowUnixMs = Date.now()) => {
+    if (!acceptedTrackTuple) {
+      acceptedTrackTuple = tuple;
+      pendingTrackTuple = null;
+      return true;
+    }
+    if (acceptedTrackTuple.trackID === tuple.trackID) {
+      acceptedTrackTuple = tuple;
+      pendingTrackTuple = null;
+      return true;
+    }
+
+    const key = trackTupleKey(tuple);
+    if (pendingTrackTuple?.key !== key) {
+      pendingTrackTuple = {
+        key,
+        tuple,
+        firstSeenAtUnixMs: nowUnixMs,
+        observations: 1,
+      };
+      return false;
+    }
+    pendingTrackTuple.tuple = tuple;
+    pendingTrackTuple.observations += 1;
+    const stableForMs = nowUnixMs - pendingTrackTuple.firstSeenAtUnixMs;
+    const identityMetadataChanged =
+      trackIdentityMetadataKey(tuple) !== trackIdentityMetadataKey(acceptedTrackTuple);
+    const stableChangedTuple =
+      identityMetadataChanged &&
+      pendingTrackTuple.observations >= 2 &&
+      stableForMs >= TRACK_CHANGE_STABILITY_MS;
+    const boundedHoldExpired = stableForMs >= TRACK_CHANGE_MAX_HOLD_MS;
+    if (!stableChangedTuple && !boundedHoldExpired) return false;
+
+    acceptedTrackTuple = tuple;
+    pendingTrackTuple = null;
+    playbackClockAnchor = null;
+    return true;
+  };
+
   const buildSnapshot = () => {
     const playerBar = document.querySelector("ytmusic-player-bar");
     const media = selectPlaybackMedia(playerBar);
@@ -259,9 +369,11 @@
     const album = clean(bylineLinks[1]?.textContent);
     const artwork = playerBar?.querySelector?.("img.image, img");
     const artworkURL = highResolutionArtworkURL(artwork?.currentSrc || artwork?.src)
-      || metadataArtworkURL(metadata);
+      || metadataArtworkURL(metadata)
+      || videoArtworkURL(trackID);
     const durationMs = barClock?.durationMs
       ?? (Number.isFinite(media.duration) ? Math.max(0, media.duration * 1000) : 0);
+    if (!acceptsTrackTuple({ trackID, title, artist, durationMs })) return null;
     return {
       type: "youtube-music-snapshot",
       version: protocolVersion,
@@ -356,6 +468,7 @@
         "click",
         () => {
           lastInteractedTab = tab;
+          resetStageMountRecovery();
           const confirmedLyricsTab = getConfirmedLyricsTab(tabList);
           if (confirmedLyricsTab && tab !== confirmedLyricsTab && inPageStageHost?.isConnected) {
             releaseStageMount();
@@ -404,6 +517,12 @@
     clearStageReadyProbe();
   };
 
+  const resetStageMountRecovery = () => {
+    stageMountFailureCount = 0;
+    stageMountRetryAt = 0;
+    stageMountFailure = "";
+  };
+
   const restoreNativeRenderers = () => {
     savedNativeRenderers.forEach((saved, renderer) => {
       if (!renderer.isConnected) return;
@@ -426,7 +545,7 @@
     }
     activeNativeRenderer = null;
     stageMountState = "idle";
-    stageMountFailure = "";
+    resetStageMountRecovery();
   };
 
   const coverNativeRenderer = (renderer) => {
@@ -455,14 +574,36 @@
     }
   };
 
+  const notifySourceDisconnect = () => {
+    if (!sourceWasAvailable) return;
+    sourceWasAvailable = false;
+    sourceMissingSince = null;
+    try {
+      if (!runtimeAvailable()) return;
+      chrome.runtime.sendMessage({ type: "youtube-music-source-disconnect" }, () => {
+        try {
+          void chrome.runtime.lastError;
+        } catch {
+          // The invalidated extension context already dropped this source.
+        }
+      });
+    } catch {
+      // The background lease remains the final cleanup boundary.
+    }
+  };
+
   const stop = () => {
     if (stopped) return;
     stopped = true;
+    notifySourceDisconnect();
     queued = false;
     if (pendingSend !== null) clearTimeout(pendingSend);
     if (heartbeat !== null) clearInterval(heartbeat);
     observer?.disconnect();
     document.documentElement.removeEventListener(CONTENT_SCRIPT_STOP_EVENT, stop);
+    if (document.documentElement.getAttribute(CONTENT_SCRIPT_MARKER_ATTR) === CONTENT_SCRIPT_MARKER) {
+      document.documentElement.removeAttribute(CONTENT_SCRIPT_MARKER_ATTR);
+    }
     document.removeEventListener?.("click", rememberClickedVideo, true);
     sponsorBlockControlHost?.remove();
     sponsorBlockTitleCompat?.remove();
@@ -483,6 +624,8 @@
     stageMountFailure = "";
     observedMedia = null;
     playbackClockAnchor = null;
+    acceptedTrackTuple = null;
+    pendingTrackTuple = null;
   };
 
   const updateStageMount = () => {
@@ -536,13 +679,19 @@
     }
 
     if (!inPageStageHost?.isConnected || inPageStageHost.parentElement !== activeRenderer) {
+      if (
+        stageMountState === "failed" &&
+        (
+          stageMountFailureCount >= STAGE_MOUNT_MAX_FAILURES ||
+          Date.now() < stageMountRetryAt
+        )
+      ) return false;
       if (inPageStageHost?.isConnected) {
         inPageStageHost.remove();
         inPageStageHost = null;
       }
       invalidateStageAttempt();
       stageMountState = "checking";
-      stageMountFailure = "";
       const attemptGeneration = stageMountGeneration;
 
       const host = document.createElement("div");
@@ -607,12 +756,19 @@
       const failAttempt = (reason) => {
         if (!attemptIsCurrent()) return;
         restoreNativeRenderers();
-        host.hidden = true;
-        host.style.display = "none";
         stageMountState = "failed";
         stageMountFailure = reason;
+        stageMountFailureCount += 1;
+        document.documentElement.setAttribute(STAGE_FAILURE_ATTR, reason);
+        document.documentElement.setAttribute(STAGE_FAILURE_COUNT_ATTR, String(stageMountFailureCount));
+        const retryDelay = STAGE_MOUNT_RETRY_DELAYS_MS[stageMountFailureCount - 1];
+        stageMountRetryAt = stageMountFailureCount < STAGE_MOUNT_MAX_FAILURES
+          ? Date.now() + (retryDelay ?? STAGE_MOUNT_RETRY_DELAYS_MS.at(-1) ?? 750)
+          : Number.POSITIVE_INFINITY;
         console.warn(`[LyricStage] Embedded Stage unavailable: ${reason}`);
         clearStageReadyProbe();
+        if (inPageStageHost === host) inPageStageHost = null;
+        host.remove();
       };
 
       const markReady = () => {
@@ -623,7 +779,9 @@
         host.hidden = false;
         host.style.display = "flex";
         stageMountState = "ready";
-        stageMountFailure = "";
+        resetStageMountRecovery();
+        document.documentElement.removeAttribute(STAGE_FAILURE_ATTR);
+        document.documentElement.removeAttribute(STAGE_FAILURE_COUNT_ATTR);
       };
 
       const markError = () => {
@@ -680,10 +838,36 @@
     return null;
   };
 
+  const expectedTrackIDForCommand = (message) =>
+    clean(message?.expectedTrackID) || clean(message?.trackID);
+
+  const commandMatchesCurrentTrack = (message, playerBar, sendResponse) => {
+    const expectedTrackID = expectedTrackIDForCommand(message);
+    if (!expectedTrackID) {
+      sendResponse({ ok: false, reason: "missing-track-identity" });
+      return false;
+    }
+    if (pendingTrackTuple) {
+      queueSend();
+      sendResponse({ ok: false, reason: "track-transition" });
+      return false;
+    }
+    const actualTrackID = currentVideoID(playerBar);
+    if (actualTrackID === expectedTrackID) return true;
+    queueSend();
+    sendResponse({
+      ok: false,
+      reason: "track-changed",
+      ...(actualTrackID ? { trackID: actualTrackID } : {}),
+    });
+    return false;
+  };
+
   const onRuntimeMessage = (message, _sender, sendResponse) => {
     if (message?.type === "youtube-music-seek-to") {
       const requestedTimeMs = message.timeMs;
-      const media = document.querySelector("video, audio");
+      const playerBar = document.querySelector("ytmusic-player-bar");
+      const media = selectPlaybackMedia(playerBar);
       if (
         typeof requestedTimeMs !== "number" ||
         !Number.isFinite(requestedTimeMs) ||
@@ -693,6 +877,7 @@
         sendResponse({ ok: false, reason: "invalid-seek" });
         return;
       }
+      if (!commandMatchesCurrentTrack(message, playerBar, sendResponse)) return;
       const requestedSeconds = requestedTimeMs / 1000;
       const boundedSeconds = Number.isFinite(media.duration)
         ? Math.min(requestedSeconds, Math.max(0, media.duration))
@@ -705,8 +890,8 @@
 
     if (message?.type === "youtube-music-transport-command") {
       const action = message.action;
-      const media = document.querySelector("video, audio");
       const playerBar = document.querySelector("ytmusic-player-bar");
+      const media = selectPlaybackMedia(playerBar);
       if (
         !(media instanceof HTMLMediaElement) ||
         !["play", "pause", "previous", "next"].includes(action)
@@ -714,6 +899,7 @@
         sendResponse({ ok: false, reason: "invalid-transport" });
         return;
       }
+      if (!commandMatchesCurrentTrack(message, playerBar, sendResponse)) return;
       const control = transportButton(
         playerBar ?? document,
         action === "play" || action === "pause" ? "playPause" : action,
@@ -740,6 +926,7 @@
       message?.type === "youtube-music-activate-lyrics" ||
       message?.type === "youtube-music-show-stage"
     ) {
+      resetStageMountRecovery();
       const sidePanel = document.querySelector("ytmusic-player-page#player-page #side-panel");
       const tabList =
         sidePanel?.querySelector?.('tp-yt-paper-tabs [role="tablist"], tp-yt-paper-tabs #tabsContent, tp-yt-paper-tabs') ||
@@ -792,24 +979,21 @@
       stop();
       return;
     }
+    if (!isYouTubeMusicLocation()) {
+      notifySourceDisconnect();
+      stop();
+      return;
+    }
     const snapshot = buildSnapshot();
     if (!snapshot) {
       if (!sourceWasAvailable) return;
-      sourceWasAvailable = false;
-      try {
-        chrome.runtime.sendMessage({ type: "youtube-music-source-disconnect" }, () => {
-          try {
-            void chrome.runtime.lastError;
-          } catch {
-            stop();
-          }
-        });
-      } catch {
-        stop();
-      }
+      if (sourceMissingSince === null) sourceMissingSince = Date.now();
+      if (Date.now() - sourceMissingSince < SOURCE_LEASE_MS) return;
+      notifySourceDisconnect();
       return;
     }
     sourceWasAvailable = true;
+    sourceMissingSince = null;
     try {
       chrome.runtime.sendMessage(
         { type: "youtube-music-source-snapshot", snapshot },

@@ -91,6 +91,115 @@ describe("YouTube Music lyric identity", () => {
     expect(identity.isCover).toBe(false);
   });
 
+  it.each([
+    {
+      title: "DECO*27 - ハートアラモード feat. 初音ミク",
+      artist: "U/M/A/A Inc.",
+      canonicalTitle: "ハートアラモード",
+      originals: ["DECO*27", "初音ミク"],
+      performers: [],
+      isCover: false,
+    },
+    {
+      title: "Justin Bieber - Peaches ft. Daniel Caesar, Giveon /東 雪蓮 (cover)",
+      artist: "東 雪蓮",
+      canonicalTitle: "Peaches",
+      originals: ["Justin Bieber", "Daniel Caesar", "Giveon"],
+      performers: ["東 雪蓮"],
+      isCover: true,
+    },
+    {
+      title: "さようなら、花泥棒さん /東 雪蓮(cover)",
+      artist: "東 雪蓮",
+      canonicalTitle: "さようなら、花泥棒さん",
+      originals: [],
+      performers: ["東 雪蓮"],
+      isCover: true,
+    },
+    {
+      title: "mosi mosi? (楽音) ／ダズビー COVER",
+      artist: "ダズビー",
+      canonicalTitle: "mosi mosi?",
+      originals: ["楽音"],
+      performers: ["ダズビー"],
+      isCover: true,
+    },
+    {
+      title: "不可幸力 - Vaundy Covered by 理芽 / RIM (2024)｜from 神椿",
+      artist: "理芽",
+      canonicalTitle: "不可幸力",
+      originals: ["Vaundy"],
+      performers: ["理芽", "RIM"],
+      isCover: true,
+    },
+    {
+      title: "nekomeshi - やくしまるえつこ (cover)｜somunia",
+      artist: "somunia",
+      canonicalTitle: "nekomeshi",
+      originals: ["やくしまるえつこ"],
+      performers: ["somunia"],
+      isCover: true,
+    },
+    {
+      title: "「セプテンバーさん」 - 音乃瀬奏（cover）",
+      artist: "音乃瀬奏",
+      canonicalTitle: "セプテンバーさん",
+      originals: [],
+      performers: ["音乃瀬奏"],
+      isCover: true,
+    },
+    {
+      title: "プロポーズ/ なとり cover 9Lana",
+      artist: "9Lana",
+      canonicalTitle: "プロポーズ",
+      originals: ["なとり"],
+      performers: ["9Lana"],
+      isCover: true,
+    },
+    {
+      title: "ありふれたしあわせ / 歌 : 黒騎れい (CV : 内田真礼)",
+      artist: "黒騎れい",
+      canonicalTitle: "ありふれたしあわせ",
+      originals: ["黒騎れい", "内田真礼"],
+      performers: [],
+      isCover: false,
+    },
+    {
+      title: "【デレステMV】O-Ku-Ri-Mo-No Sunday！(Full ver.)　久川颯、久川凪【4K】",
+      artist: "playlist channel",
+      canonicalTitle: "O-Ku-Ri-Mo-No Sunday!",
+      originals: ["久川颯", "久川凪"],
+      performers: [],
+      isCover: false,
+    },
+  ])("parses playlist role grammar instead of uploader punctuation: $title", ({
+    title,
+    artist,
+    canonicalTitle,
+    originals,
+    performers,
+    isCover,
+  }) => {
+    const identity = buildLyricsLookupIdentity(track(title, artist));
+    expect(identity.canonicalTitle).toBe(canonicalTitle);
+    expect(identity.originalArtists).toEqual(expect.arrayContaining(originals));
+    expect(identity.coverPerformers).toEqual(expect.arrayContaining(performers));
+    expect(identity.isCover).toBe(isCover);
+  });
+
+  it.each([
+    ["Wildest Flower", "Wildest Flower"],
+    ["灰とよすが（feat. 日和る）", "灰とよすが"],
+    ["憧れをいっぱい (Tomggg Remix)", "憧れをいっぱい"],
+    ["One In A Billion -Wake Up, Girls!ver.-", "One In A Billion -Wake Up, Girls!ver.-"],
+    ["Silent Star (2021 Remastered Version)", "Silent Star"],
+    ["愛のまま (Cover Live)", "愛のまま"],
+    ["14平米にスーベニア (GAME VERSION)", "14平米にスーベニア"],
+    ["Holiday∞Holiday", "Holiday∞Holiday"],
+  ])("keeps ordinary playlist titles conservative: %s", (title, canonicalTitle) => {
+    expect(buildLyricsLookupIdentity(track(title, "playlist artist")).canonicalTitle).toBe(canonicalTitle);
+  });
+
   it("prefers the cover recording and requires a proven original artist for fallback", () => {
     const coverTrack = track("【歌ってみた】修羅 by 花譜", "花譜");
     const identity = buildLyricsLookupIdentity(coverTrack);

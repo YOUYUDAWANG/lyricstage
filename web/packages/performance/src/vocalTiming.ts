@@ -15,6 +15,12 @@ export interface VocalTimingMapV1 {
   samples: VocalTimingSampleV1[];
 }
 
+export interface VocalLyricsOffsetEstimateV1 {
+  offsetMs: number;
+  confidence: number;
+  matchedLineCount: number;
+}
+
 const finite = (value: unknown): value is number =>
   typeof value === "number" && Number.isFinite(value);
 const unit = (value: unknown): value is number =>
@@ -130,6 +136,86 @@ export const sanitizeVocalTimingMapV1 = (value: unknown): VocalTimingMapV1 | und
     toMs: Math.round(wire.toMs),
     featureRateHz: rounded(wire.featureRateHz),
     samples,
+  };
+};
+
+const meanSampleValue = (
+  samples: VocalTimingSampleV1[],
+  fromMs: number,
+  toMs: number,
+  value: (sample: VocalTimingSampleV1) => number,
+): number => {
+  let sum = 0;
+  let weight = 0;
+  for (const sample of samples) {
+    if (sample.atMs < fromMs || sample.atMs > toMs) continue;
+    const sampleWeight = 0.2 + sample.confidence * 0.8;
+    sum += value(sample) * sampleWeight;
+    weight += sampleWeight;
+  }
+  return weight > 0 ? sum / weight : 0;
+};
+
+/**
+ * Estimate one global lyric timestamp shift from recent local vocal attacks.
+ * Positive output delays the lyric timestamps; negative output advances them.
+ * Low-evidence windows deliberately return undefined instead of changing state.
+ */
+export const estimateLyricsOffsetFromVocalTimingV1 = (
+  lines: Array<{ fromMs: number; toMs: number }>,
+  map?: VocalTimingMapV1,
+): VocalLyricsOffsetEstimateV1 | undefined => {
+  if (!map || map.samples.length < 80 || map.toMs - map.fromMs < 6_000) return undefined;
+  const usableLines = lines.filter((line) =>
+    finite(line.fromMs) && finite(line.toMs) && line.fromMs >= 0 && line.toMs - line.fromMs >= 400
+  );
+  if (usableLines.length < 2) return undefined;
+
+  const candidates: Array<{
+    offsetMs: number;
+    score: number;
+    attackEvidence: number;
+    matchedLineCount: number;
+  }> = [];
+  for (let offsetMs = -10_000; offsetMs <= 10_000; offsetMs += 100) {
+    const lineScores: number[] = [];
+    const attacks: number[] = [];
+    for (const line of usableLines) {
+      const onsetMs = line.fromMs + offsetMs;
+      if (onsetMs < map.fromMs + 450 || onsetMs > map.toMs - 650) continue;
+      const before = meanSampleValue(map.samples, onsetMs - 450, onsetMs - 150, (sample) => sample.presence);
+      const after = meanSampleValue(map.samples, onsetMs, onsetMs + 600, (sample) => sample.presence);
+      const attack = meanSampleValue(map.samples, onsetMs - 100, onsetMs + 300, (sample) => sample.attack);
+      const transition = clamp(after - before, 0, 1);
+      lineScores.push(attack * 0.58 + transition * 0.27 + after * 0.15);
+      attacks.push(attack);
+    }
+    if (lineScores.length < 2) continue;
+    const orderedScores = [...lineScores].sort((left, right) => left - right);
+    const trimmedScores = orderedScores.length >= 5 ? orderedScores.slice(1) : orderedScores;
+    const meanScore = trimmedScores.reduce((sum, value) => sum + value, 0) / trimmedScores.length;
+    const attackEvidence = attacks.reduce((sum, value) => sum + value, 0) / attacks.length;
+    const support = clamp(lineScores.length / 4, 0, 1);
+    candidates.push({
+      offsetMs,
+      score: meanScore * (0.74 + support * 0.26),
+      attackEvidence,
+      matchedLineCount: lineScores.length,
+    });
+  }
+  candidates.sort((left, right) => right.score - left.score || Math.abs(left.offsetMs) - Math.abs(right.offsetMs));
+  const best = candidates[0];
+  if (!best || best.attackEvidence < 0.22) return undefined;
+  const alternative = candidates.find((candidate) => Math.abs(candidate.offsetMs - best.offsetMs) >= 700);
+  const margin = best.score - (alternative?.score ?? 0);
+  if (margin < 0.025) return undefined;
+  const support = clamp(best.matchedLineCount / 4, 0, 1);
+  const confidence = clamp(best.attackEvidence * 0.42 + margin * 3.2 * 0.38 + support * 0.2, 0, 1);
+  if (confidence < 0.45) return undefined;
+  return {
+    offsetMs: best.offsetMs,
+    confidence: rounded(confidence),
+    matchedLineCount: best.matchedLineCount,
   };
 };
 

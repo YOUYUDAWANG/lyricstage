@@ -14,6 +14,13 @@ import {
 } from "./columnModel";
 import { activeScrollKey, shouldScrollForActiveChange } from "./embeddedFullscreen";
 import { alignTimedLineSegments, wordProgressFromTiming } from "./timedLineText";
+import {
+  clampLyricsOffsetMs,
+  formatLyricsOffset,
+  LYRICS_OFFSET_STEP_MS,
+  lyricsTimeForPlaybackMs,
+  playbackTimeForLyricsMs,
+} from "../playback/lyricsTimeOffset";
 
 export interface ColumnStageViewProps {
   bridgeAvailable: boolean;
@@ -23,6 +30,7 @@ export interface ColumnStageViewProps {
   title: string;
   artist: string;
   directorStatus: string;
+  directorStatusReason?: string;
   automaticStatus: AutomaticLyricsStatus;
   message: string;
   candidates: LyricsCandidateV0[];
@@ -44,9 +52,13 @@ export interface ColumnStageViewProps {
   vocalTimingMap?: VocalTimingMapV1;
   vocalTimingStatus: "idle" | "analyzing" | "ready" | "error";
   vocalTimingError?: string;
+  lyricsOffsetMs: number;
+  autoAlignPending: boolean;
   onToggleLightweight: () => void;
   onToggleVJMode: () => void;
   onToggleVocalTiming: () => void;
+  onSetLyricsOffset: (offsetMs: number) => void;
+  onAutoAlignLyrics: () => void;
   onSeekLine: (timeMs: number) => void;
 }
 
@@ -99,6 +111,7 @@ export function ColumnStageView({
   title,
   artist,
   directorStatus,
+  directorStatusReason,
   automaticStatus,
   message,
   candidates,
@@ -120,9 +133,13 @@ export function ColumnStageView({
   vocalTimingMap,
   vocalTimingStatus,
   vocalTimingError,
+  lyricsOffsetMs,
+  autoAlignPending,
   onToggleLightweight,
   onToggleVJMode,
   onToggleVocalTiming,
+  onSetLyricsOffset,
+  onAutoAlignLyrics,
   onSeekLine,
 }: ColumnStageViewProps) {
   const streamRef = useRef<HTMLDivElement>(null);
@@ -131,14 +148,18 @@ export function ColumnStageView({
   const enterFullscreenRef = useRef(onEnterFullscreen);
   enterFullscreenRef.current = onEnterFullscreen;
   const [showManualSearch, setShowManualSearch] = useState(false);
+  const [showTimingAdjust, setShowTimingAdjust] = useState(false);
   const [manualTitle, setManualTitle] = useState(title);
   const [manualArtist, setManualArtist] = useState(artist);
   const frozen = disconnected || playbackState === "paused" || playbackState === "ended";
+  const lyricTimeMs = lyricsTimeForPlaybackMs(timeMs, lyricsOffsetMs, durationMs);
+  const lyricsOffsetLabel = lyricsOffsetMs === 0 ? "" : ` · 歌词${formatLyricsOffset(lyricsOffsetMs)}`;
 
   useEffect(() => {
     setManualTitle(title);
     setManualArtist(artist);
     setShowManualSearch(false);
+    setShowTimingAdjust(false);
   }, [title, artist]);
 
   const surface = resolveColumnSurfaceState({
@@ -149,7 +170,7 @@ export function ColumnStageView({
     automaticStatus,
     hasMatchingLyrics,
     playbackState,
-    timeMs,
+    timeMs: lyricTimeMs,
     lyrics: hasMatchingLyrics ? lyrics : null,
   });
 
@@ -202,8 +223,8 @@ export function ColumnStageView({
 
   const activeIndices = useMemo(() => {
     if (!timeline) return new Set<number>();
-    return new Set(activeLineIndicesAt(timeline, timeMs));
-  }, [timeline, timeMs]);
+    return new Set(activeLineIndicesAt(timeline, lyricTimeMs));
+  }, [timeline, lyricTimeMs]);
 
   const activeKey = useMemo(() => activeScrollKey(activeIndices), [activeIndices]);
   const primaryActiveIndex = useMemo(
@@ -270,8 +291,8 @@ export function ColumnStageView({
         <div className="column-header-info">
           <strong title={title || "YouTube Music 歌词"}>{title || "YouTube Music 歌词"}</strong>
           {artist && <small title={artist}>{artist}</small>}
-          <small className="column-director-status" aria-live="polite">
-            {directorStatus}{estimatedTimingLabel}
+          <small className="column-director-status" aria-live="polite" title={directorStatusReason || directorStatus}>
+            {directorStatus}{estimatedTimingLabel}{lyricsOffsetLabel}
           </small>
         </div>
         <div className="column-toolbar" role="toolbar" aria-label="歌词工具栏">
@@ -315,6 +336,20 @@ export function ColumnStageView({
           >
             <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" strokeWidth="1.8" aria-hidden="true">
               <path d="M3 12h2l1.5-5 3 10 2.5-13 3 16 2.5-9 1.5 4H21" />
+            </svg>
+          </button>
+          <button
+            type="button"
+            className={`column-tool-button ${showTimingAdjust || lyricsOffsetMs !== 0 ? "is-active" : ""}`}
+            aria-pressed={showTimingAdjust}
+            aria-label="调整歌词时间轴"
+            title={`调整歌词时间轴 · ${formatLyricsOffset(lyricsOffsetMs)}`}
+            disabled={!hasMatchingLyrics}
+            onClick={() => setShowTimingAdjust((value) => !value)}
+          >
+            <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" strokeWidth="1.8" aria-hidden="true">
+              <circle cx="12" cy="12" r="8" />
+              <path d="M12 7v5l3 2M4 5l2.4 2.4M20 5l-2.4 2.4" />
             </svg>
           </button>
           <button
@@ -369,6 +404,40 @@ export function ColumnStageView({
         </div>
       </header>
 
+      {showTimingAdjust && hasMatchingLyrics && (
+        <div className="column-timing-adjust" role="group" aria-label="歌词时间轴调整">
+          <button
+            type="button"
+            className="column-timing-auto"
+            disabled={autoAlignPending}
+            onClick={onAutoAlignLyrics}
+          >
+            {autoAlignPending ? "分析中…" : "自动对齐"}
+          </button>
+          <button
+            type="button"
+            onClick={() => onSetLyricsOffset(clampLyricsOffsetMs(lyricsOffsetMs - LYRICS_OFFSET_STEP_MS))}
+          >
+            提前 0.5s
+          </button>
+          <strong aria-live="polite">{formatLyricsOffset(lyricsOffsetMs)}</strong>
+          <button
+            type="button"
+            onClick={() => onSetLyricsOffset(clampLyricsOffsetMs(lyricsOffsetMs + LYRICS_OFFSET_STEP_MS))}
+          >
+            延后 0.5s
+          </button>
+          <button
+            type="button"
+            className="column-timing-reset"
+            disabled={lyricsOffsetMs === 0}
+            onClick={() => onSetLyricsOffset(0)}
+          >
+            归零
+          </button>
+        </div>
+      )}
+
       {(surface === "paused" || surface === "disconnected") && (
         <div className="column-banner" role="status">
           {copy.title} · {copy.body}
@@ -378,7 +447,7 @@ export function ColumnStageView({
       <div className="column-stream" ref={streamRef}>
         {showStream ? (
           lyrics.lines.map((line) => {
-            const phase = linePhase(line, timeMs, activeIndices);
+            const phase = linePhase(line, lyricTimeMs, activeIndices);
             const voice = mapVoiceClass(line.voiceRole);
             const segments = lineSegments.get(line.lineIndex) ?? [{ kind: "plain" as const, text: line.text }];
             const estimatedEndMs = segments.reduce((latest, segment) =>
@@ -386,9 +455,33 @@ export function ColumnStageView({
                 ? Math.max(latest, segment.toMs)
                 : latest,
             line.fromMs);
+            // VocalTimingMap samples live on the host playback axis. Convert the
+            // lyric estimate bounds to that axis before applying the acoustic
+            // warp, then convert the result back for word progress sampling.
+            // This keeps a persisted lyric offset from shifting text and audio
+            // evidence in opposite coordinate systems.
+            const estimatedPlaybackFromMs = playbackTimeForLyricsMs(
+              line.fromMs,
+              lyricsOffsetMs,
+              durationMs,
+            );
+            const estimatedPlaybackEndMs = playbackTimeForLyricsMs(
+              estimatedEndMs,
+              lyricsOffsetMs,
+              durationMs,
+            );
             const estimatedTimeMs = estimatedEndMs > line.fromMs
-              ? vocalAwareVirtualTimeMs(line.fromMs, estimatedEndMs, timeMs, vocalTimingMap)
-              : timeMs;
+              ? lyricsTimeForPlaybackMs(
+                  vocalAwareVirtualTimeMs(
+                    estimatedPlaybackFromMs,
+                    estimatedPlaybackEndMs,
+                    timeMs,
+                    vocalTimingMap,
+                  ),
+                  lyricsOffsetMs,
+                  durationMs,
+                )
+              : lyricTimeMs;
             const distance =
               primaryActiveIndex < 0
                 ? Number.POSITIVE_INFINITY
@@ -401,23 +494,23 @@ export function ColumnStageView({
                 className="column-line"
                 role="button"
                 tabIndex={0}
-                aria-label={`跳转到 ${formatClock(line.fromMs)}`}
-                title={`跳转到 ${formatClock(line.fromMs)}`}
+                aria-label={`跳转到 ${formatClock(playbackTimeForLyricsMs(line.fromMs, lyricsOffsetMs, durationMs))}`}
+                title={`跳转到 ${formatClock(playbackTimeForLyricsMs(line.fromMs, lyricsOffsetMs, durationMs))}`}
                 data-phase={phase}
                 data-voice={voice}
                 data-proximity={proximity}
-                onClick={() => onSeekLine(line.fromMs)}
+                onClick={() => onSeekLine(playbackTimeForLyricsMs(line.fromMs, lyricsOffsetMs, durationMs))}
                 onKeyDown={(event) => {
                   if (event.key !== "Enter" && event.key !== " ") return;
                   event.preventDefault();
-                  onSeekLine(line.fromMs);
+                  onSeekLine(playbackTimeForLyricsMs(line.fromMs, lyricsOffsetMs, durationMs));
                 }}
               >
                 <span className="column-line-words">
                   {segments.map((segment, index) => {
                     if (segment.kind === "word") {
                       const progress = wordProgressFromTiming(
-                        segment.timingKind === "estimated" ? estimatedTimeMs : timeMs,
+                        segment.timingKind === "estimated" ? estimatedTimeMs : lyricTimeMs,
                         segment.fromMs,
                         segment.toMs,
                       );

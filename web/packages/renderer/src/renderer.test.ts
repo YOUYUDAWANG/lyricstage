@@ -3,12 +3,41 @@ import { lyricFixtures } from "@lyricstage/contracts";
 import { compilePerformancePlan } from "@lyricstage/core";
 import { compileLocalDirectorPlanV1, type DirectorPlanV1 } from "@lyricstage/performance";
 import { prepareStage } from "./prepare";
-import { prepareDirectedStageV1 } from "./prepareDirected";
-import { fitAnchoredLineV1, readingCompositionForV1, readingStackStateAtV1 } from "./drawDirected";
+import { directedPaletteForIndexV1, prepareDirectedStageV1 } from "./prepareDirected";
+import { drawDramaticScenesV1 } from "./drawDramatic";
+import {
+  clearCanvasBackingStoreV1,
+  dissolveEnvelopeAtV1,
+  fitAnchoredLineV1,
+  readingCompositionForV1,
+  readingStackStateAtV1,
+  reducedMotionPrimitiveUseV1,
+} from "./drawDirected";
 
 const measure = (text: string, font: string): number => {
   const size = Number(font.match(/([0-9.]+)px/)?.[1] ?? 48);
   return Array.from(text).length * size * 0.58;
+};
+
+const recordingContext = (): { context: CanvasRenderingContext2D; operations: unknown[][] } => {
+  const operations: unknown[][] = [];
+  const values: Record<string | symbol, unknown> = {
+    canvas: { width: 1920, height: 1080 },
+    globalAlpha: 1,
+    lineWidth: 1,
+  };
+  const context = new Proxy(values, {
+    get(target, property) {
+      if (property in target) return target[property];
+      return (...args: unknown[]) => operations.push([String(property), ...args]);
+    },
+    set(target, property, value) {
+      target[property] = value;
+      operations.push([`set:${String(property)}`, value]);
+      return true;
+    },
+  });
+  return { context: context as unknown as CanvasRenderingContext2D, operations };
 };
 
 describe("PreparedStageV0", () => {
@@ -76,6 +105,109 @@ describe("PreparedStageV0", () => {
 });
 
 describe("PreparedDirectedStageV1", () => {
+  it("gives final dissolution a bounded clock envelope instead of persistent hard strips", () => {
+    expect(dissolveEnvelopeAtV1(10_000, 20_000, 9_999, false)).toBe(0);
+    expect(dissolveEnvelopeAtV1(10_000, 20_000, 10_000, false)).toBe(0);
+    expect(dissolveEnvelopeAtV1(10_000, 20_000, 12_000, false)).toBeCloseTo(1);
+    expect(dissolveEnvelopeAtV1(10_000, 20_000, 19_500, false)).toBeGreaterThan(0);
+    expect(dissolveEnvelopeAtV1(10_000, 20_000, 19_500, false)).toBeLessThan(0.7);
+    expect(dissolveEnvelopeAtV1(10_000, 20_000, 20_000, false)).toBe(0);
+    expect(dissolveEnvelopeAtV1(10_000, 20_000, 15_000, true)).toBe(0.28);
+  });
+
+  it("consumes primitive reduced-motion fallbacks while preserving static primitives", () => {
+    expect(reducedMotionPrimitiveUseV1({
+      primitive: "transition.dissolve",
+      intensity: 0.7,
+      direction: -1,
+    })).toEqual({
+      primitive: "density.release",
+      intensity: 0.7,
+    });
+    const staticUse = { primitive: "field.aperture", intensity: 0.4 } as const;
+    expect(reducedMotionPrimitiveUseV1(staticUse)).toBe(staticUse);
+  });
+
+  it("clears the entire physical backing store before drawing the next frame", () => {
+    const operations: unknown[][] = [];
+    clearCanvasBackingStoreV1({
+      canvas: { width: 1943, height: 1570 },
+      save: () => operations.push(["save"]),
+      setTransform: (...values: number[]) => operations.push(["setTransform", ...values]),
+      clearRect: (...values: number[]) => operations.push(["clearRect", ...values]),
+      restore: () => operations.push(["restore"]),
+    } as unknown as CanvasRenderingContext2D);
+
+    expect(operations).toEqual([
+      ["save"],
+      ["setTransform", 1, 0, 0, 1, 0, 0],
+      ["clearRect", 0, 0, 1943, 1570],
+      ["restore"],
+    ]);
+  });
+
+  it("prepares deterministic 8-20s dramatic scenes with one recurring motif", () => {
+    const lyrics = lyricFixtures.longSongStructure;
+    const plan = compileLocalDirectorPlanV1(lyrics);
+    const viewport = { width: 1920, height: 1080, rendererVersion: "test-dramatic-score" };
+    const first = prepareDirectedStageV1(lyrics, plan, viewport, measure);
+    const second = prepareDirectedStageV1(lyrics, plan, viewport, measure);
+    expect(first.dramaticMoments).toHaveLength(2);
+    expect(first.dramaticMoments).toEqual(second.dramaticMoments);
+    expect(first.dramaticMoments[0]?.moment.motifState).toBe("seed");
+    expect(first.dramaticMoments[1]?.moment.purpose).toBe("resolution");
+    expect(new Set(first.dramaticMoments.map((moment) => moment.moment.actorFamily))).toEqual(
+      new Set([plan.dramaticScore.motifActor.family]),
+    );
+    first.dramaticMoments.forEach((moment) => {
+      expect(moment.toMs - moment.fromMs).toBeGreaterThanOrEqual(8_000);
+      expect(moment.toMs - moment.fromMs).toBeLessThanOrEqual(20_000);
+      expect(moment.fromMs).toBeLessThan(moment.anticipationEndMs);
+      expect(moment.anticipationEndMs).toBeLessThan(moment.eventEndMs);
+      expect(moment.eventEndMs).toBeLessThan(moment.consequenceEndMs);
+      expect(moment.consequenceEndMs).toBeLessThanOrEqual(moment.toMs);
+      expect(moment.memoryToMs).toBeGreaterThanOrEqual(moment.toMs);
+      expect(moment.memoryToMs - moment.toMs).toBeLessThanOrEqual(18_000);
+    });
+  });
+
+  it("precomputes bounded lyric gestures without changing the readable lyric glyphs", () => {
+    const lyrics = lyricFixtures.repeatedHook;
+    const plan = compileLocalDirectorPlanV1(lyrics);
+    const viewport = { width: 1920, height: 1080, rendererVersion: "test-lyric-gestures" };
+    const first = prepareDirectedStageV1(lyrics, plan, viewport, measure);
+    const second = prepareDirectedStageV1(lyrics, plan, viewport, measure);
+    expect(first.gestures.length).toBeGreaterThan(0);
+    expect(first.gestures).toEqual(second.gestures);
+    first.gestures.forEach((gesture) => {
+      const line = first.linesByIndex.get(gesture.lineIndex)!;
+      expect(gesture.bounds.width).toBeGreaterThan(0);
+      expect(gesture.bounds.height).toBeGreaterThan(0);
+      expect(gesture.fromMs).toBeGreaterThanOrEqual(line.fromMs);
+      expect(gesture.toMs).toBeLessThanOrEqual(line.toMs);
+      expect(gesture.targetGlyphIndices.length).toBeGreaterThan(0);
+      expect(line.glyphs.map((glyph) => glyph.text).join("")).toBe(lyrics.lines[line.lineIndex]!.text);
+    });
+  });
+
+  it("keeps a reduced-motion dramatic scene static between structural boundaries", () => {
+    const lyrics = lyricFixtures.longSongStructure;
+    const plan = compileLocalDirectorPlanV1(lyrics);
+    const viewport = { width: 1920, height: 1080, rendererVersion: "test-static-dramatic" };
+    const stage = prepareDirectedStageV1(lyrics, plan, viewport, measure);
+    const moment = stage.dramaticMoments[0]!;
+    const palette = directedPaletteForIndexV1(0);
+    const sample = (timeMs: number, reduceMotion: boolean) => {
+      const { context, operations } = recordingContext();
+      drawDramaticScenesV1(context, stage, timeMs, reduceMotion, palette, "scenic");
+      return operations;
+    };
+    const firstTime = moment.fromMs + 1_000;
+    const secondTime = moment.fromMs + 2_000;
+    expect(sample(firstTime, true)).toEqual(sample(secondTime, true));
+    expect(sample(firstTime, false)).not.toEqual(sample(secondTime, false));
+  });
+
   it("keeps compact Japanese reading lines on one row before reducing the whole composition", () => {
     const lyrics = lyricFixtures.lineOnlyJA;
     const plan = compileLocalDirectorPlanV1(lyrics);
@@ -105,7 +237,7 @@ describe("PreparedDirectedStageV1", () => {
     const viewport = { width: 1280, height: 900, rendererVersion: "test-directed-long" };
     const stage = prepareDirectedStageV1(lyrics, plan, viewport, measure);
     const line = stage.lines[0]!;
-    const composition = readingCompositionForV1(line, viewport);
+    const composition = readingCompositionForV1(line, viewport, plan.source);
     const fitted = fitAnchoredLineV1(
       viewport,
       line.bounds,
@@ -114,15 +246,15 @@ describe("PreparedDirectedStageV1", () => {
       composition.currentWidth,
       viewport.height * 0.48,
       0.84,
-      "leading",
+      composition.horizontalAnchor,
     );
     expect(line.glyphs.map((glyph) => glyph.text).join("")).toBe(lyrics.lines[0]!.text);
     expect(fitted.left).toBeGreaterThanOrEqual(viewport.width * 0.055 - 1);
     expect(fitted.right).toBeLessThanOrEqual(viewport.width * 0.945 + 1);
     expect(fitted.top).toBeGreaterThanOrEqual(viewport.height * 0.055 - 1);
     expect(fitted.bottom).toBeLessThanOrEqual(viewport.height * 0.945 + 1);
-    expect(composition.currentX).toBeCloseTo(viewport.width * 0.09);
-    expect(fitted.left).toBeCloseTo(composition.axisX, 1);
+    expect(composition.horizontalAnchor).toBe("trailing");
+    expect(composition.currentX).toBeCloseTo(viewport.width * 0.91);
   });
 
   it("moves the reading stack along one stable leading axis and settles within 760ms", () => {
@@ -145,6 +277,31 @@ describe("PreparedDirectedStageV1", () => {
     expect(settled.currentY).toBeCloseTo(composition.currentY);
     expect(settled.currentOpacity).toBe(1);
     expect(reduced).toEqual(settled);
+  });
+
+  it("turns director layouts into visibly distinct but stable reading axes", () => {
+    const lyrics = lyricFixtures.repeatedHook;
+    const local = compileLocalDirectorPlanV1(lyrics);
+    const viewport = { width: 1600, height: 900, rendererVersion: "test-reading-layouts" };
+    const build = (layout: DirectorPlanV1["sections"][number]["layout"], alignment: "leading" | "center" | "trailing") => {
+      const plan: DirectorPlanV1 = {
+        ...local,
+        source: "ai",
+        planIdentity: `layout:${layout}:${alignment}`,
+        sections: local.sections.map((section) => ({ ...section, layout })),
+        directives: local.directives.map((directive) => ({ ...directive, alignment })),
+      };
+      return readingCompositionForV1(prepareDirectedStageV1(lyrics, plan, viewport, measure).lines[0]!, viewport, plan.source);
+    };
+    const monument = build("monument", "center");
+    const leading = build("railLeading", "leading");
+    const trailing = build("railTrailing", "trailing");
+    expect(monument.horizontalAnchor).toBe("center");
+    expect(monument.axisX).toBeCloseTo(viewport.width * 0.50);
+    expect(leading.horizontalAnchor).toBe("leading");
+    expect(leading.axisX).toBeCloseTo(viewport.width * 0.09);
+    expect(trailing.horizontalAnchor).toBe("trailing");
+    expect(trailing.axisX).toBeCloseTo(viewport.width * 0.91);
   });
 
   it("preserves the complete per-line directive instead of collapsing it to a legacy family", () => {

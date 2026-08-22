@@ -13,8 +13,14 @@ interface CaptureClock {
   receivedAtMs: number;
 }
 
+type AudioCaptureOwnerScope = "boundTab" | "followAuthority";
+
 interface CaptureSession {
+  captureID: string;
   trackID: string;
+  tabID: number;
+  generation: number;
+  ownerScope: AudioCaptureOwnerScope;
   durationMs: number;
   stream: MediaStream;
   context: AudioContext;
@@ -31,13 +37,34 @@ interface CaptureSession {
   vocalPublishInterval: ReturnType<typeof setInterval>;
 }
 
+interface PendingCapture {
+  captureID: string;
+  trackID: string;
+  tabID: number;
+  generation: number;
+  ownerScope: AudioCaptureOwnerScope;
+  lifecycleGeneration: number;
+  durationMs: number;
+  clock: CaptureClock;
+  stream?: MediaStream;
+  context?: AudioContext;
+}
+
 interface RuntimeAPI {
-  onMessage: { addListener(listener: (message: unknown) => void): void };
+  onMessage: {
+    addListener(listener: (
+      message: unknown,
+      sender: unknown,
+      sendResponse: (response: unknown) => void,
+    ) => boolean | void): void;
+  };
   sendMessage(message: unknown): Promise<unknown>;
 }
 
 const runtime = (globalThis as typeof globalThis & { chrome: { runtime: RuntimeAPI } }).chrome.runtime;
 let session: CaptureSession | undefined;
+let pendingCapture: PendingCapture | undefined;
+let captureLifecycleGeneration = 0;
 
 const unit = (value: number): number => Math.min(1, Math.max(0, value));
 
@@ -56,7 +83,7 @@ const bandEnergy = (spectrum: Float32Array, from: number, to: number): number =>
   return unit(sum / (to - from));
 };
 
-const stop = async () => {
+const stopCurrentSession = async () => {
   const current = session;
   session = undefined;
   if (!current) return;
@@ -67,13 +94,84 @@ const stop = async () => {
   await current.context.close().catch(() => undefined);
 };
 
+const stopAll = async () => {
+  captureLifecycleGeneration += 1;
+  const pending = pendingCapture;
+  pendingCapture = undefined;
+  await Promise.all([
+    pending ? releasePendingResources(pending) : Promise.resolve(),
+    stopCurrentSession(),
+  ]);
+};
+
+const releasePendingResources = async (pending: PendingCapture) => {
+  const stream = pending.stream;
+  const context = pending.context;
+  pending.stream = undefined;
+  pending.context = undefined;
+  stream?.getTracks().forEach((track) => track.stop());
+  await context?.close().catch(() => undefined);
+};
+
+const stop = async (
+  captureID: string,
+  trackID: string,
+  tabID: number,
+  generation: number,
+  ownerScope: AudioCaptureOwnerScope,
+) => {
+  const matchesPending = pendingCapture?.captureID === captureID
+    && pendingCapture.trackID === trackID
+    && pendingCapture.tabID === tabID
+    && pendingCapture.generation === generation
+    && pendingCapture.ownerScope === ownerScope;
+  const matchesSession = session?.captureID === captureID
+    && session.trackID === trackID
+    && session.tabID === tabID
+    && session.generation === generation
+    && session.ownerScope === ownerScope;
+  if (!matchesPending && !matchesSession) return;
+  captureLifecycleGeneration += 1;
+  const pending = matchesPending ? pendingCapture : undefined;
+  if (pending) pendingCapture = undefined;
+  if (pending) await releasePendingResources(pending);
+  if (matchesSession) await stopCurrentSession();
+};
+
+const notifyEndedAndStop = (current: CaptureSession) => {
+  void runtime.sendMessage({
+    type: "lyricstage-audio-capture-ended",
+    captureID: current.captureID,
+    trackID: current.trackID,
+    tabID: current.tabID,
+    generation: current.generation,
+    ownerScope: current.ownerScope,
+  }).catch(() => undefined);
+  void stop(
+    current.captureID,
+    current.trackID,
+    current.tabID,
+    current.generation,
+    current.ownerScope,
+  ).catch(() => undefined);
+};
+
 const publish = () => {
   const current = session;
   if (!current) return;
   const frames = [...current.framesByBucket.values()].sort((left, right) => left.atMs - right.atMs);
   const musicMap = compileMusicMapV1(current.durationMs, frames);
   if (!musicMap) return;
-  void runtime.sendMessage({ type: "lyricstage-audio-map-update", trackID: current.trackID, musicMap });
+  void runtime.sendMessage({
+    type: "lyricstage-audio-map-update",
+    captureID: current.captureID,
+    trackID: current.trackID,
+    tabID: current.tabID,
+    generation: current.generation,
+    ownerScope: current.ownerScope,
+    musicMap,
+  })
+    .catch(() => undefined);
 };
 
 const publishVocalTiming = () => {
@@ -84,9 +182,13 @@ const publishVocalTiming = () => {
   if (!vocalTimingMap) return;
   void runtime.sendMessage({
     type: "lyricstage-vocal-timing-update",
+    captureID: current.captureID,
     trackID: current.trackID,
+    tabID: current.tabID,
+    generation: current.generation,
+    ownerScope: current.ownerScope,
     vocalTimingMap,
-  });
+  }).catch(() => undefined);
 };
 
 const sample = () => {
@@ -151,82 +253,224 @@ const sample = () => {
   if (vocalSample) current.vocalSamplesByBucket.set(Math.round(atMs / 50), vocalSample);
 };
 
-const start = async (streamID: string, trackID: string, durationMs: number, clock: CaptureClock) => {
-  await stop();
-  const stream = await navigator.mediaDevices.getUserMedia({
-    audio: {
-      mandatory: { chromeMediaSource: "tab", chromeMediaSourceId: streamID },
-    } as MediaTrackConstraints,
-    video: false,
-  });
-  const context = new AudioContext();
-  const source = context.createMediaStreamSource(stream);
-  const analyser = context.createAnalyser();
-  analyser.fftSize = 2048;
-  analyser.smoothingTimeConstant = 0.48;
-  source.connect(analyser);
-  // tabCapture removes the tab audio from normal output. Reconnect the same
-  // stream to the destination so starting the performance never mutes YTM.
-  analyser.connect(context.destination);
-
-  const splitter = context.createChannelSplitter(2);
-  const centerAnalyser = context.createAnalyser();
-  const sideAnalyser = context.createAnalyser();
-  centerAnalyser.fftSize = 2048;
-  sideAnalyser.fftSize = 2048;
-  centerAnalyser.smoothingTimeConstant = 0.32;
-  sideAnalyser.smoothingTimeConstant = 0.32;
-  const centerLeft = context.createGain();
-  const centerRight = context.createGain();
-  const sideLeft = context.createGain();
-  const sideRight = context.createGain();
-  centerLeft.gain.value = 0.5;
-  centerRight.gain.value = 0.5;
-  sideLeft.gain.value = 0.5;
-  sideRight.gain.value = -0.5;
-  source.connect(splitter);
-  splitter.connect(centerLeft, 0);
-  splitter.connect(centerRight, 1);
-  splitter.connect(sideLeft, 0);
-  splitter.connect(sideRight, 1);
-  centerLeft.connect(centerAnalyser);
-  centerRight.connect(centerAnalyser);
-  sideLeft.connect(sideAnalyser);
-  sideRight.connect(sideAnalyser);
-  const analysisSink = context.createGain();
-  analysisSink.gain.value = 0;
-  centerAnalyser.connect(analysisSink);
-  sideAnalyser.connect(analysisSink);
-  analysisSink.connect(context.destination);
-  await context.resume();
-  const next: CaptureSession = {
+const start = async (
+  streamID: string,
+  captureID: string,
+  trackID: string,
+  tabID: number,
+  durationMs: number,
+  clock: CaptureClock,
+  generation: number,
+  ownerScope: AudioCaptureOwnerScope,
+  lifecycleGeneration: number,
+) => {
+  const previousPending = pendingCapture;
+  const pending: PendingCapture = {
+    captureID,
     trackID,
+    tabID,
+    generation,
+    ownerScope,
+    lifecycleGeneration,
     durationMs,
-    stream,
-    context,
-    analyser,
-    centerAnalyser,
-    sideAnalyser,
-    framesByBucket: new Map(),
-    vocalSamplesByBucket: new Map(),
-    previousSpectrum: new Float32Array(analyser.frequencyBinCount),
-    previousCenterSpectrum: new Float32Array(centerAnalyser.frequencyBinCount),
     clock,
-    interval: setInterval(sample, 1000 / 30),
-    publishInterval: setInterval(publish, 4_000),
-    vocalPublishInterval: setInterval(publishVocalTiming, 500),
   };
-  session = next;
-  void runtime.sendMessage({ type: "lyricstage-audio-capture-ready", trackID });
+  pendingCapture = pending;
+  await Promise.all([
+    previousPending ? releasePendingResources(previousPending) : Promise.resolve(),
+    stopCurrentSession(),
+  ]);
+  if (pendingCapture !== pending || lifecycleGeneration !== captureLifecycleGeneration) return;
+  try {
+    const stream = await navigator.mediaDevices.getUserMedia({
+      audio: {
+        mandatory: { chromeMediaSource: "tab", chromeMediaSourceId: streamID },
+      } as MediaTrackConstraints,
+      video: false,
+    });
+    if (pendingCapture !== pending || lifecycleGeneration !== captureLifecycleGeneration) {
+      stream.getTracks().forEach((track) => track.stop());
+      return;
+    }
+    pending.stream = stream;
+    const context = new AudioContext();
+    pending.context = context;
+    const source = context.createMediaStreamSource(stream);
+    const analyser = context.createAnalyser();
+    analyser.fftSize = 2048;
+    analyser.smoothingTimeConstant = 0.48;
+    source.connect(analyser);
+    // tabCapture removes the tab audio from normal output. Reconnect the same
+    // stream to the destination so starting the performance never mutes YTM.
+    analyser.connect(context.destination);
+
+    const splitter = context.createChannelSplitter(2);
+    const centerAnalyser = context.createAnalyser();
+    const sideAnalyser = context.createAnalyser();
+    centerAnalyser.fftSize = 2048;
+    sideAnalyser.fftSize = 2048;
+    centerAnalyser.smoothingTimeConstant = 0.32;
+    sideAnalyser.smoothingTimeConstant = 0.32;
+    const centerLeft = context.createGain();
+    const centerRight = context.createGain();
+    const sideLeft = context.createGain();
+    const sideRight = context.createGain();
+    centerLeft.gain.value = 0.5;
+    centerRight.gain.value = 0.5;
+    sideLeft.gain.value = 0.5;
+    sideRight.gain.value = -0.5;
+    source.connect(splitter);
+    splitter.connect(centerLeft, 0);
+    splitter.connect(centerRight, 1);
+    splitter.connect(sideLeft, 0);
+    splitter.connect(sideRight, 1);
+    centerLeft.connect(centerAnalyser);
+    centerRight.connect(centerAnalyser);
+    sideLeft.connect(sideAnalyser);
+    sideRight.connect(sideAnalyser);
+    const analysisSink = context.createGain();
+    analysisSink.gain.value = 0;
+    centerAnalyser.connect(analysisSink);
+    sideAnalyser.connect(analysisSink);
+    analysisSink.connect(context.destination);
+    await context.resume();
+    if (pendingCapture !== pending || lifecycleGeneration !== captureLifecycleGeneration) {
+      await releasePendingResources(pending);
+      return;
+    }
+    pending.stream = undefined;
+    pending.context = undefined;
+    const next: CaptureSession = {
+      captureID,
+      trackID,
+      tabID,
+      generation,
+      ownerScope,
+      durationMs,
+      stream,
+      context,
+      analyser,
+      centerAnalyser,
+      sideAnalyser,
+      framesByBucket: new Map(),
+      vocalSamplesByBucket: new Map(),
+      previousSpectrum: new Float32Array(analyser.frequencyBinCount),
+      previousCenterSpectrum: new Float32Array(centerAnalyser.frequencyBinCount),
+      clock,
+      interval: setInterval(sample, 1000 / 30),
+      publishInterval: setInterval(publish, 4_000),
+      vocalPublishInterval: setInterval(publishVocalTiming, 500),
+    };
+    pendingCapture = undefined;
+    session = next;
+    stream.getTracks().forEach((track) => {
+      const eventTrack = track as MediaStreamTrack & {
+        addEventListener?: (type: "ended", listener: () => void, options?: { once?: boolean }) => void;
+      };
+      eventTrack.addEventListener?.("ended", () => {
+        if (session !== next) return;
+        notifyEndedAndStop(next);
+      }, { once: true });
+    });
+    void runtime.sendMessage({
+      type: "lyricstage-audio-capture-ready",
+      captureID,
+      trackID,
+      tabID,
+      generation,
+      ownerScope,
+    })
+      .catch(() => undefined);
+  } catch (error) {
+    await releasePendingResources(pending);
+    throw error;
+  }
 };
 
-runtime.onMessage.addListener((message) => {
+const captureStatus = () => {
+  const current = session;
+  if (current) {
+    const frames = [...current.framesByBucket.values()].sort((left, right) => left.atMs - right.atMs);
+    const samples = [...current.vocalSamplesByBucket.values()].sort((left, right) => left.atMs - right.atMs);
+    const latestMusicMap = compileMusicMapV1(current.durationMs, frames) ?? undefined;
+    const latestVocalMap = compileVocalTimingMapV1(current.durationMs, samples) ?? undefined;
+    const coverageReady = Boolean(
+      latestMusicMap
+      && latestMusicMap.analyzedMs >= Math.min(28_000, Math.max(8_000, latestMusicMap.durationMs * 0.08)),
+    );
+    return {
+      type: "lyricstage-audio-capture-status",
+      active: true,
+      captureID: current.captureID,
+      trackID: current.trackID,
+      tabID: current.tabID,
+      generation: current.generation,
+      ownerScope: current.ownerScope,
+      durationMs: current.durationMs,
+      status: coverageReady ? "ready" : "analyzing",
+      ...(latestMusicMap ? { latestMusicMap } : {}),
+      ...(latestVocalMap ? { latestVocalMap } : {}),
+    };
+  }
+  const pending = pendingCapture;
+  if (pending) {
+    return {
+      type: "lyricstage-audio-capture-status",
+      active: true,
+      captureID: pending.captureID,
+      trackID: pending.trackID,
+      tabID: pending.tabID,
+      generation: pending.generation,
+      ownerScope: pending.ownerScope,
+      durationMs: pending.durationMs,
+      status: "analyzing",
+    };
+  }
+  return { type: "lyricstage-audio-capture-status", active: false };
+};
+
+runtime.onMessage.addListener((message, _sender, sendResponse) => {
   const request = message as Record<string, unknown>;
-  if (request.type === "lyricstage-audio-capture-stop") {
-    void stop();
+  if (request.type === "lyricstage-audio-capture-status-request") {
+    sendResponse(captureStatus());
     return;
   }
-  if (request.type === "lyricstage-audio-clock" && session && request.trackID === session.trackID) {
+  if (request.type === "lyricstage-audio-capture-stop-all") {
+    void stopAll().then(
+      () => sendResponse({ ok: true }),
+      () => sendResponse({ ok: false }),
+    );
+    return true;
+  }
+  if (request.type === "lyricstage-audio-capture-stop") {
+    if (
+      typeof request.captureID === "string"
+      && typeof request.trackID === "string"
+      && typeof request.tabID === "number"
+      && Number.isInteger(request.tabID)
+      && typeof request.generation === "number"
+      && Number.isInteger(request.generation)
+      && (request.ownerScope === "boundTab" || request.ownerScope === "followAuthority")
+    ) {
+      void stop(
+        request.captureID,
+        request.trackID,
+        request.tabID,
+        request.generation,
+        request.ownerScope,
+      ).catch(() => undefined);
+    }
+    return;
+  }
+  if (
+    request.type === "lyricstage-audio-clock"
+    && session
+    && request.captureID === session.captureID
+    && request.trackID === session.trackID
+    && request.tabID === session.tabID
+    && request.generation === session.generation
+    && request.ownerScope === session.ownerScope
+  ) {
     const clock = request.clock as Partial<CaptureClock> | undefined;
     if (clock && Number.isFinite(clock.currentTimeMs) && Number.isFinite(clock.playbackRate)) {
       session.clock = {
@@ -237,22 +481,64 @@ runtime.onMessage.addListener((message) => {
           : "paused",
         receivedAtMs: performance.now(),
       };
+      if (session.clock.state === "ended") {
+        notifyEndedAndStop(session);
+      }
     }
     return;
   }
   if (
     request.type === "lyricstage-audio-capture-start"
     && typeof request.streamID === "string"
+    && typeof request.captureID === "string"
     && typeof request.trackID === "string"
+    && typeof request.tabID === "number"
+    && Number.isInteger(request.tabID)
+    && typeof request.generation === "number"
+    && Number.isInteger(request.generation)
+    && request.generation > 0
+    && (request.ownerScope === "boundTab" || request.ownerScope === "followAuthority")
     && typeof request.durationMs === "number"
     && request.clock && typeof request.clock === "object"
   ) {
     const initial = request.clock as Omit<CaptureClock, "receivedAtMs">;
-    void start(request.streamID, request.trackID, request.durationMs, { ...initial, receivedAtMs: performance.now() })
-      .catch((error) => runtime.sendMessage({
-        type: "lyricstage-audio-capture-error",
-        trackID: request.trackID,
-        reason: error instanceof Error ? error.message.slice(0, 160) : "capture-failed",
-      }));
+    const lifecycleGeneration = ++captureLifecycleGeneration;
+    const generation = request.generation;
+    const ownerScope = request.ownerScope;
+    const captureID = request.captureID;
+    const trackID = request.trackID;
+    const tabID = request.tabID;
+    void start(
+      request.streamID,
+      captureID,
+      trackID,
+      tabID,
+      request.durationMs,
+      { ...initial, receivedAtMs: performance.now() },
+      generation,
+      ownerScope,
+      lifecycleGeneration,
+    )
+      .catch((error) => {
+        if (
+          pendingCapture?.captureID !== captureID
+          || pendingCapture.trackID !== trackID
+          || pendingCapture.tabID !== tabID
+          || pendingCapture.generation !== generation
+          || pendingCapture.ownerScope !== ownerScope
+          || pendingCapture.lifecycleGeneration !== lifecycleGeneration
+          || lifecycleGeneration !== captureLifecycleGeneration
+        ) return;
+        pendingCapture = undefined;
+        void runtime.sendMessage({
+          type: "lyricstage-audio-capture-error",
+          captureID,
+          trackID,
+          tabID,
+          generation,
+          ownerScope,
+          reason: error instanceof Error ? error.message.slice(0, 160) : "capture-failed",
+        }).catch(() => undefined);
+      });
   }
 });

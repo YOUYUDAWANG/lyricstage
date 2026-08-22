@@ -112,12 +112,21 @@ const contentUISource = readFileSync(contentUIPath, "utf8");
 if (!contentUISource.includes("director-plan-v1") || !contentUISource.includes("environment-scene-v1")) {
   throw new Error("Embedded fullscreen runtime is missing the production performance engine.");
 }
-const directorOrigin = "https://director.hachi-mi.uk/*";
-if (!(manifest.host_permissions ?? []).includes(directorOrigin)) {
-  throw new Error("Extension manifest is missing the fixed AI director origin.");
+const fixedDirectorOrigin = "https://director.hachi-mi.uk/*";
+if ((manifest.host_permissions ?? []).includes(fixedDirectorOrigin)) {
+  throw new Error("Extension manifest still grants the retired fixed AI director origin.");
 }
-if (!popupHTML.includes("data-director-token") || !popupHTML.includes("data-save-director-config")) {
-  throw new Error("Extension popup is missing local AI director configuration controls.");
+if ((manifest.host_permissions ?? []).some((origin) => origin === "https://*/*" || origin === "http://*/*")) {
+  throw new Error("Custom AI provider origins must never be granted as required host permissions.");
+}
+if (!(manifest.optional_host_permissions ?? []).includes("https://*/*")
+  || !(manifest.optional_host_permissions ?? []).includes("http://*/*")) {
+  throw new Error("Extension manifest cannot request exact custom or local AI provider origins.");
+}
+if (!popupHTML.includes("data-director-api-key")
+  || !popupHTML.includes("data-director-protocol")
+  || !popupHTML.includes("data-save-director-config")) {
+  throw new Error("Extension popup is missing provider-neutral local AI director controls.");
 }
 const exposedStage = (manifest.web_accessible_resources ?? []).some((entry) =>
   (entry.resources ?? []).some((resource) => resource === "stage.html" || resource === "assets/*"),

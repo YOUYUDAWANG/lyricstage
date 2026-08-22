@@ -1,4 +1,4 @@
-# LyricStage for YouTube Music 0.2.1 Release Candidate
+# LyricStage for YouTube Music 0.3.0 Release Candidate
 
 Build artifact: `web/extension-dist`
 
@@ -6,13 +6,13 @@ Build artifact: `web/extension-dist`
 
 - [x] `DirectorPlanV1` strict identity, bounded sections/directives and deterministic local fallback.
 - [x] Fullscreen AI plan is rejected on degraded, incomplete, mismatched identity or invalid values.
-- [x] AI plan handoff happens only at the next section boundary; no mid-line replacement.
-- [x] Director request contains title/artist/duration/full lyrics/timing and no audio, artwork or media URL.
+- [x] A matching AI/cache plan that is ready before Fullscreen owns the first frame; only a plan arriving while the Stage is running waits for the next section boundary, never replacing a line mid-flight.
+- [x] BYOK provider request contains title/artist/duration/full lyrics/timing and an optional bounded `MusicMapV1`, but no PCM, artwork, Cookie, media URL or playable YouTube attachment.
 - [x] `EffectRecipeV1` preserves concept/motif/intensityArc/sections/directives and adds one registered primary plus at most two bounded support primitives.
 - [x] Local compiler, OCI Director and extension client all validate effect evidence, card/primitive identity, conflicts, cost and exact section/line ownership.
-- [x] Performance Direction Skill v1 contains the runtime grammar, twelve cards, anti-patterns, examples and the Gemini response schema; arbitrary code/shaders/keyframes are outside the contract.
+- [x] Performance Direction Skill v3 contains the dramaturgy-first grammar, `DramaticScoreV1`, registered motif actors/actions, blocking/choreography rules, anti-patterns, examples and Gemini response schema; arbitrary code/SVG/shaders/coordinates/keyframes remain outside the contract.
 - [x] Requests above 180 lines or 90KB fail closed to local performance.
-- [x] Director token stays in `chrome.storage.local`; production bundle contains no token.
+- [x] User API Keys stay in `chrome.storage.local`; public status, cache identity, errors and production bundles contain no Key. HTTPS is required off private/local networks, and custom origins are requested as optional permissions only when the user saves them.
 - [x] PixiJS WebGL environment and Canvas2D CJK lyric layers are independent.
 - [x] Production `StageCanvas` consumes `DirectorPlanV1` directly through `PreparedDirectedStageV1`; it no longer collapses nine behaviors and section design into the legacy three-family recipe adapter.
 - [x] Six art directions, five layouts, five typography choices, twelve section palettes, nine behaviors and every line directive control have an independent renderer effect.
@@ -26,18 +26,19 @@ Build artifact: `web/extension-dist`
 - [x] System reduced-motion and lightweight mode override personal VJ intensity.
 - [x] Production extension excludes Theatre Studio, `MediaRecorder`, `captureStream`, eval and CommonJS require; `tabCapture` is limited to user-started, in-memory feature analysis in the offscreen document.
 - [x] `content-ui.js` stays below the 1.2MB launch ceiling.
-- [x] Focused release suite: 9 Web files and 74/74 tests passing; dedicated OCI Director: 8/8 passing.
-- [x] TypeScript and Manifest V3 double build pass.
-- [x] Source/built `content.js` and `manifest.json` remain byte-identical.
-- [x] OCI `director.hachi-mi.uk` runs Director 1.3.1 / `lyricstage-fullscreen-vertex-gemini-3.5-skill-v3` on the existing loopback/Tunnel path. The aesthetic canary returned `degraded=false`, one quiet editorial section at intensity 0.3 and no effects for a calm domestic lyric; no grid, rail, symmetric panel or generic technology motif was requested. Pre-1.3.1 Quadlet/env backups remain available.
+- [x] Full local release suite: 32 Web files and 296/296 tests passing; dedicated Director: 27/27 passing. The final race gates cover same-recording standalone A→B ownership/clock reset (including no-capture B and late A status), captureID/StrictMode/fullscreen cleanup, immutable follow-authority/bound-tab ownership including authorization-pending promotion, MV3 worker rehydration, four BYOK protocols, fallback/retry, one shared 105-second deadline, Key-free cache identity and bounded host recovery.
+- [x] TypeScript and `build:all` pass; the aggregate build explicitly rebuilds standalone Stage, Performance Lab and both Manifest V3 extension surfaces, followed by CSP verification.
+- [x] A clean temporary source copy independently rebuilt every file in `web/extension-dist` byte-for-byte; source `content.js` and `manifest.json` are packaged verbatim.
+- [x] The Companion no longer depends on `director.hachi-mi.uk`; the existing 1.5.8/V4 service and deployment files remain an optional gateway/rollback implementation and are not a source of user provider Keys.
+- [x] The client cache epoch is `fullscreen-director-v4-client-contract-v8.6-byok-v1`, and cache identity includes protocol/endpoint/model but excludes API Key.
 - [x] Local browser continuous benchmark: 240 Canvas frames, P95 0.30ms, P99 0.30ms, max 0.40ms, WebGL active.
 - [x] AMLL 0.5.2/TTML 1.0.1 ADR keeps one glyph renderer and one clock; repository license/NOTICE is AGPL-3.0-only.
 
 ## Manual Chrome gates
 
-- [ ] Reload the latest `web/extension-dist` containing artwork palette extraction and the subtractive visual pass, then confirm `data-palette-source="artwork"`, real cover/progress/transport, calm three-level Reading, one justified Hero/Duet/Aperture state, lyric click seek, pause/resume, track change cleanup, AI boundary handoff and no new console error. This is the only open release gate.
+- [ ] Reload the latest unpacked `web/extension-dist`, refresh every open YTM tab, then confirm `data-lyricstage-content-script="isolated-v3"`, video artwork fallback, BYOK configuration/status/takeover, two different-song tabs route their own Stage/seek/transport/capture, pause/seek redraw, track cleanup, Lyrics/Related leaves exactly one host, and no warning/error loop. Any bounded mount failure is exposed through `data-lyricstage-last-mount-failure` instead of silently disappearing.
 
-- [x] Reloaded `web/extension-dist` 0.2.1 in Chrome; existing baseline YTM UI gates remain closed.
+- [x] A previous `web/extension-dist` 0.2.1 build was reloaded and established the baseline YTM UI gates below; these are historical evidence, not validation of the current candidate.
 - [x] Native Lyrics Column mounts exactly once; Related hides the extension and restores native content, then Lyrics remounts once.
 - [x] The button and `F` enter the viewport-filling Stage; `Esc` returns only to Column.
 - [x] Previous build baseline showed synchronized GPU lyrics and stable local/AI handoff; the new visible-cover shell still requires the final reload gate above.
@@ -47,4 +48,4 @@ Build artifact: `web/extension-dist`
 - [x] Page reload/reconnect remounts exactly once, preserves the VJ preference and produces no console warning/error loop.
 - [x] Dedicated OCI Director Bearer is saved in extension-local storage. On real YTM track `Hew46pJkFW0`, background generation completed and fullscreen changed from `LS / LOCAL` to `LS / DIRECTED` at the next section boundary without interrupting playback.
 
-The baseline release candidate is installable and fully usable without AI configuration. AI configuration is an optional enhancement and must never be required for a complete fullscreen performance.
+The source candidate remains fully usable without AI configuration by design, but the current artifact is not a release-ready Chrome build until the open Reload/multi-tab recovery gate is observed. AI configuration is optional and must never be required for a complete fullscreen performance.

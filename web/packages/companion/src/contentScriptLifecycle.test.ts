@@ -157,6 +157,12 @@ describe("YouTube Music companion isolated content script lifecycle (real DOM sh
     invalidateRuntime?: boolean;
     contentUIMarker?: boolean;
     playerBarTimeText?: string;
+    playerBarTitle?: string;
+    playerBarArtist?: string;
+    playerBarArtworkURL?: string;
+    playerBarVideoID?: string;
+    mediaSessionArtworkURLs?: string[];
+    videoArtworkURL?: string;
     mediaElements?: Array<Partial<Pick<
       FakeMediaElement,
       "ended" | "paused" | "readyState" | "duration" | "currentTime" | "playbackRate"
@@ -175,6 +181,13 @@ describe("YouTube Music companion isolated content script lifecycle (real DOM sh
     let invalidateRuntime = overrides.invalidateRuntime ?? false;
     let playerBarAvailable = true;
     let mediaAvailable = true;
+    let playerBarTitle = overrides.playerBarTitle ?? "You & 合図";
+    let playerBarArtist = overrides.playerBarArtist ?? "音乃瀬奏";
+    let playerBarVideoID = overrides.playerBarVideoID;
+    const locationValue = {
+      href: "https://music.youtube.com/watch?v=ZmCRFGcON-I",
+      origin: "https://music.youtube.com",
+    };
     let tabOrder: FakeElement[];
 
     const mediaElements = (overrides.mediaElements ?? [{}]).map((values) =>
@@ -254,19 +267,29 @@ describe("YouTube Music companion isolated content script lifecycle (real DOM sh
     };
     const playerBar = {
       querySelector: (selector: string) => {
-        if (selector.includes(".title")) return { textContent: "You & 合図" };
+        if (selector.includes('a[href*="watch?v="]') && playerBarVideoID) {
+          return {
+            getAttribute: (name: string) => name === "href"
+              ? `/watch?v=${encodeURIComponent(playerBarVideoID!)}`
+              : null,
+          };
+        }
+        if (selector.includes(".title")) return { textContent: playerBarTitle };
         if (selector.includes(".time-info")) {
           return { textContent: overrides.playerBarTimeText ?? "0:12 / 2:39" };
         }
         if (selector.includes("img")) {
-          return { currentSrc: "https://yt3.googleusercontent.com/cover-id=w60-h60-l90-rj" };
+          return {
+            currentSrc: overrides.playerBarArtworkURL
+              ?? "https://yt3.googleusercontent.com/cover-id=w60-h60-l90-rj",
+          };
         }
         if (selector.includes("play-pause-button")) return transportControls.playPause;
         if (selector.includes("previous-button")) return transportControls.previous;
         if (selector.includes("next-button")) return transportControls.next;
         return null;
       },
-      querySelectorAll: () => [{ textContent: "音乃瀬奏" }],
+      querySelectorAll: () => [{ textContent: playerBarArtist }],
     };
 
     const FakeDate = class extends Date {
@@ -308,6 +331,11 @@ describe("YouTube Music companion isolated content script lifecycle (real DOM sh
         querySelector: (selector: string) => {
           if (selector === "video, audio") return mediaAvailable ? media : null;
           if (selector === "ytmusic-player-bar") return playerBarAvailable ? playerBar : null;
+          if (selector.includes('img[src*="/vi/')) {
+            return overrides.videoArtworkURL
+              ? { currentSrc: overrides.videoArtworkURL, src: overrides.videoArtworkURL }
+              : null;
+          }
           if (selector.includes("ytmusic-player-page#player-page")) return sidePanel;
           if (selector.includes("tp-yt-paper-tabs")) return tabList;
           return null;
@@ -320,14 +348,13 @@ describe("YouTube Music companion isolated content script lifecycle (real DOM sh
           metadata: {
             title: "Media Session Title",
             artist: "Media Session Artist",
-            artwork: [{ src: "https://i.ytimg.com/vi/ZmCRFGcON-I/hqdefault.jpg" }],
+            artwork: (overrides.mediaSessionArtworkURLs
+              ?? ["https://i.ytimg.com/vi/ZmCRFGcON-I/hqdefault.jpg"]
+            ).map((src) => ({ src })),
           },
         },
       },
-      location: {
-        href: "https://music.youtube.com/watch?v=ZmCRFGcON-I",
-        origin: "https://music.youtube.com",
-      },
+      location: locationValue,
       MutationObserver: class {
         observe() {}
         disconnect = disconnectFn;
@@ -369,6 +396,10 @@ describe("YouTube Music companion isolated content script lifecycle (real DOM sh
         [...createdElements]
           .reverse()
           .find((element) => element.id === "lyricstage-enhanced-lyrics-v2" && element.isConnected),
+      latestHost: () =>
+        [...createdElements]
+          .reverse()
+          .find((element) => element.id === "lyricstage-enhanced-lyrics-v2"),
       sidePanel,
       tabList,
       nativeLyricsTab,
@@ -392,6 +423,21 @@ describe("YouTube Music companion isolated content script lifecycle (real DOM sh
       },
       setPlayerBarAvailable: (value: boolean) => {
         playerBarAvailable = value;
+      },
+      setPlayerBarTitle: (value: string) => {
+        playerBarTitle = value;
+      },
+      setPlayerBarArtist: (value: string) => {
+        playerBarArtist = value;
+      },
+      setPlayerBarVideoID: (value: string | undefined) => {
+        playerBarVideoID = value;
+      },
+      setLocationHref: (value: string) => {
+        locationValue.href = value;
+      },
+      emitWindow: (event: string, value: unknown = {}) => {
+        for (const listener of [...(windowListeners.get(event) ?? [])]) listener(value);
       },
       setMediaAvailable: (value: boolean) => {
         mediaAvailable = value;
@@ -439,6 +485,16 @@ describe("YouTube Music companion isolated content script lifecycle (real DOM sh
     );
   });
 
+  it("prefers the current player-bar video identity when the SPA URL is stale", () => {
+    const env = createEnvironment({ playerBarVideoID: "current-track-id" });
+    vm.runInContext(contentScriptSource, env.context);
+    env.clock.advance(40);
+    const snapshotMessage = env.sentMessages.find((message) =>
+      (message as { type?: string }).type === "youtube-music-source-snapshot"
+    ) as { snapshot?: { track?: { trackID?: string } } } | undefined;
+    expect(snapshotMessage?.snapshot?.track?.trackID).toBe("current-track-id");
+  });
+
   it("keeps the bridge alive when the new player layout omits the legacy player-bar metadata", () => {
     const env = createEnvironment();
     env.setPlayerBarAvailable(false);
@@ -452,6 +508,37 @@ describe("YouTube Music companion isolated content script lifecycle (real DOM sh
       artist: "Media Session Artist",
       artworkURL: "https://i.ytimg.com/vi/ZmCRFGcON-I/maxresdefault.jpg",
     });
+  });
+
+  it("uses the matching video thumbnail when video playback leaves the player-bar artwork empty", () => {
+    const env = createEnvironment({
+      playerBarArtworkURL: "",
+      mediaSessionArtworkURLs: [],
+      videoArtworkURL: "https://i.ytimg.com/vi/ZmCRFGcON-I/hq720.jpg?sqp=video",
+    });
+    vm.runInContext(contentScriptSource, env.context);
+    env.clock.advance(40);
+    const snapshotMessage = env.sentMessages.find((message) =>
+      (message as { type?: string }).type === "youtube-music-source-snapshot"
+    ) as { snapshot?: { track?: { artworkURL?: string } } } | undefined;
+    expect(snapshotMessage?.snapshot?.track?.artworkURL).toBe(
+      "https://i.ytimg.com/vi/ZmCRFGcON-I/hq720.jpg?sqp=video",
+    );
+  });
+
+  it("constructs a public thumbnail fallback when YouTube Music exposes no artwork node", () => {
+    const env = createEnvironment({
+      playerBarArtworkURL: "",
+      mediaSessionArtworkURLs: [],
+    });
+    vm.runInContext(contentScriptSource, env.context);
+    env.clock.advance(40);
+    const snapshotMessage = env.sentMessages.find((message) =>
+      (message as { type?: string }).type === "youtube-music-source-snapshot"
+    ) as { snapshot?: { track?: { artworkURL?: string } } } | undefined;
+    expect(snapshotMessage?.snapshot?.track?.artworkURL).toBe(
+      "https://i.ytimg.com/vi/ZmCRFGcON-I/hqdefault.jpg",
+    );
   });
 
   it("uses the media element whose time and duration match the current player bar", () => {
@@ -520,9 +607,61 @@ describe("YouTube Music companion isolated content script lifecycle (real DOM sh
     expect(afterSeek.at(-1)?.snapshot?.playback?.currentTimeMs).toBe(50_000);
   });
 
+  it("holds a route-first SPA identity until the new metadata tuple is stable", () => {
+    const env = createEnvironment();
+    vm.runInContext(contentScriptSource, env.context);
+    env.clock.advance(40);
+    const snapshots = () => env.sentMessages.filter((message) =>
+      (message as { type?: string }).type === "youtube-music-source-snapshot"
+    ) as Array<{ snapshot?: { track?: { trackID?: string; title?: string; artist?: string } } }>;
+    expect(snapshots()).toHaveLength(1);
+
+    env.setLocationHref("https://music.youtube.com/watch?v=abcdefghijk");
+    env.getHeartbeatCallback()?.();
+    expect(snapshots()).toHaveLength(1);
+    expect(snapshots().at(-1)?.snapshot?.track?.trackID).toBe("ZmCRFGcON-I");
+
+    env.setPlayerBarTitle("New Track");
+    env.setPlayerBarArtist("New Artist");
+    env.getHeartbeatCallback()?.();
+    expect(snapshots()).toHaveLength(1);
+    env.clock.advance(250);
+    env.getHeartbeatCallback()?.();
+
+    expect(snapshots()).toHaveLength(2);
+    expect(snapshots().at(-1)?.snapshot?.track).toMatchObject({
+      trackID: "abcdefghijk",
+      title: "New Track",
+      artist: "New Artist",
+    });
+  });
+
+  it("bounds the SPA tuple hold when two recordings have identical metadata", () => {
+    const env = createEnvironment();
+    vm.runInContext(contentScriptSource, env.context);
+    env.clock.advance(40);
+
+    env.setLocationHref("https://music.youtube.com/watch?v=abcdefghijk");
+    env.getHeartbeatCallback()?.();
+    env.clock.advance(1499);
+    env.getHeartbeatCallback()?.();
+    expect(env.sentMessages.filter((message) =>
+      (message as { type?: string }).type === "youtube-music-source-snapshot"
+    )).toHaveLength(1);
+
+    env.clock.advance(1);
+    env.getHeartbeatCallback()?.();
+    const snapshots = env.sentMessages.filter((message) =>
+      (message as { type?: string }).type === "youtube-music-source-snapshot"
+    ) as Array<{ snapshot?: { track?: { trackID?: string } } }>;
+    expect(snapshots.at(-1)?.snapshot?.track?.trackID).toBe("abcdefghijk");
+  });
+
   it("keeps native lyrics visible while the direct Shadow DOM column is not ready", () => {
     const env = createEnvironment();
     vm.runInContext(contentScriptSource, env.context);
+
+    expect(env.documentElement.getAttribute("data-lyricstage-content-script")).toBe("isolated-v3");
 
     expect(env.currentHost()?.parentElement).toBe(env.getRenderer());
     expect(env.currentHost()?.style.display).toBe("none");
@@ -659,10 +798,10 @@ describe("YouTube Music companion isolated content script lifecycle (real DOM sh
     const env = createEnvironment({ contentUIMarker: false });
     vm.runInContext(contentScriptSource, env.context);
 
-    const host = env.currentHost();
+    const host = env.latestHost();
     const disposeEvent = host?.getAttribute("data-lyricstage-dispose-event");
-    expect(env.currentHost()?.style.display).toBe("none");
-    expect(env.currentHost()?.hidden).toBe(true);
+    expect(env.currentHost()).toBeUndefined();
+    expect(host?.isConnected).toBe(false);
     expect(host?.dispatchedEvents).toContain(disposeEvent);
     expect(env.nativeLyricsBody.style.display).toBe("");
     expect(env.nativeLyricsBody.hidden).toBe(false);
@@ -678,8 +817,12 @@ describe("YouTube Music companion isolated content script lifecycle (real DOM sh
     makeError(env, "react-render-error", host);
 
     expect(host?.dispatchedEvents).toContain(disposeEvent);
-    expect(env.currentHost()?.style.display).toBe("none");
-    expect(env.currentHost()?.hidden).toBe(true);
+    expect(env.currentHost()).toBeUndefined();
+    expect(host?.isConnected).toBe(false);
+    expect(env.documentElement.getAttribute("data-lyricstage-last-mount-failure")).toBe(
+      "embedded-column-react-render-error",
+    );
+    expect(env.documentElement.getAttribute("data-lyricstage-mount-failure-count")).toBe("1");
     expect(env.nativeLyricsBody.hidden).toBe(false);
     expect(env.nativeLyricsBody.style.display).toBe("");
   });
@@ -693,10 +836,92 @@ describe("YouTube Music companion isolated content script lifecycle (real DOM sh
     env.clock.advance(4000);
 
     expect(host?.dispatchedEvents).toContain(disposeEvent);
-    expect(env.currentHost()?.style.display).toBe("none");
-    expect(env.currentHost()?.hidden).toBe(true);
+    expect(env.currentHost()).toBeUndefined();
+    expect(host?.isConnected).toBe(false);
     expect(env.nativeLyricsBody.hidden).toBe(false);
     expect(env.nativeLyricsBody.style.display).toBe("");
+  });
+
+  it("removes a failed host and retries after bounded backoff", () => {
+    const env = createEnvironment();
+    vm.runInContext(contentScriptSource, env.context);
+    const firstHost = env.currentHost();
+    makeError(env, "react-render-error", firstHost);
+
+    expect(firstHost?.isConnected).toBe(false);
+    expect(env.currentHost()).toBeUndefined();
+    env.clock.advance(249);
+    env.getHeartbeatCallback()?.();
+    expect(env.currentHost()).toBeUndefined();
+
+    env.clock.advance(1);
+    env.getHeartbeatCallback()?.();
+    const secondHost = env.currentHost();
+    expect(secondHost).toBeDefined();
+    expect(secondHost).not.toBe(firstHost);
+    makeReady(env);
+    expect(secondHost?.style.display).toBe("flex");
+    expect(env.documentElement.getAttribute("data-lyricstage-last-mount-failure")).toBeNull();
+    expect(env.documentElement.getAttribute("data-lyricstage-mount-failure-count")).toBeNull();
+  });
+
+  it("caps automatic mount failures at three and lets explicit activation reset the cap", () => {
+    const env = createEnvironment({ contentUIMarker: false });
+    vm.runInContext(contentScriptSource, env.context);
+    const stageHosts = () => env.createdElements.filter((element) =>
+      element.id === "lyricstage-enhanced-lyrics-v2"
+    );
+    expect(stageHosts()).toHaveLength(1);
+
+    env.clock.advance(250);
+    env.getHeartbeatCallback()?.();
+    expect(stageHosts()).toHaveLength(2);
+    env.clock.advance(750);
+    env.getHeartbeatCallback()?.();
+    expect(stageHosts()).toHaveLength(3);
+    env.clock.advance(10_000);
+    env.getHeartbeatCallback()?.();
+    expect(stageHosts()).toHaveLength(3);
+
+    env.documentElement.setAttribute("data-lyricstage-content-ui", "direct-shadow-v2");
+    const respond = vi.fn();
+    env.runtimeListeners[0]?.(
+      { type: "youtube-music-activate-lyrics" },
+      undefined,
+      respond,
+    );
+    expect(stageHosts()).toHaveLength(4);
+    makeReady(env);
+    env.clock.advance(30);
+    expect(respond).toHaveBeenCalledWith({ ok: true });
+  });
+
+  it("resets a capped mount recovery after switching away and back to Lyrics", () => {
+    const env = createEnvironment({ contentUIMarker: false });
+    vm.runInContext(contentScriptSource, env.context);
+    const stageHosts = () => env.createdElements.filter((element) =>
+      element.id === "lyricstage-enhanced-lyrics-v2"
+    );
+    env.clock.advance(250);
+    env.getHeartbeatCallback()?.();
+    env.clock.advance(750);
+    env.getHeartbeatCallback()?.();
+    expect(stageHosts()).toHaveLength(3);
+
+    selectRelated(env);
+    env.getHeartbeatCallback()?.();
+    env.documentElement.setAttribute("data-lyricstage-content-ui", "direct-shadow-v2");
+    env.nativeRelatedTab.setAttribute("aria-selected", "false");
+    env.nativeRelatedTab.removeAttribute("selected");
+    env.nativeLyricsTab.setAttribute("aria-selected", "true");
+    env.nativeLyricsTab.toggleAttribute("selected", true);
+    env.getRenderer().setAttribute("page-type", "MUSIC_PAGE_TYPE_TRACK_LYRICS");
+    env.nativeLyricsTab.emit("click");
+    env.getHeartbeatCallback()?.();
+
+    expect(stageHosts()).toHaveLength(4);
+    makeReady(env);
+    expect(env.currentHost()?.style.display).toBe("flex");
   });
 
   it("ignores a stale ready event after switching away and dispatches dispose", () => {
@@ -766,7 +991,7 @@ describe("YouTube Music companion isolated content script lifecycle (real DOM sh
     ).toHaveLength(1);
   });
 
-  it("notifies the background when an established media source disappears", () => {
+  it("keeps a transiently missing source for the 3 second lease before disconnecting", () => {
     const env = createEnvironment();
     vm.runInContext(contentScriptSource, env.context);
     env.clock.advance(40);
@@ -778,6 +1003,55 @@ describe("YouTube Music companion isolated content script lifecycle (real DOM sh
     env.getHeartbeatCallback()?.();
 
     expect(env.sentMessages.some((message) =>
+      (message as { type?: string }).type === "youtube-music-source-disconnect"
+    )).toBe(false);
+
+    env.clock.advance(2999);
+    env.getHeartbeatCallback()?.();
+    expect(env.sentMessages.some((message) =>
+      (message as { type?: string }).type === "youtube-music-source-disconnect"
+    )).toBe(false);
+
+    env.clock.advance(1);
+    env.getHeartbeatCallback()?.();
+    expect(env.sentMessages.some((message) =>
+      (message as { type?: string }).type === "youtube-music-source-disconnect"
+    )).toBe(true);
+  });
+
+  it("resumes snapshots without disconnecting when the source returns inside the lease", () => {
+    const env = createEnvironment();
+    vm.runInContext(contentScriptSource, env.context);
+    env.clock.advance(40);
+    env.setMediaAvailable(false);
+    env.getHeartbeatCallback()?.();
+    env.clock.advance(1000);
+    env.setMediaAvailable(true);
+    env.getHeartbeatCallback()?.();
+
+    expect(env.sentMessages.some((message) =>
+      (message as { type?: string }).type === "youtube-music-source-disconnect"
+    )).toBe(false);
+    expect(env.sentMessages.filter((message) =>
+      (message as { type?: string }).type === "youtube-music-source-snapshot"
+    )).toHaveLength(2);
+  });
+
+  it("disconnects immediately on page stop or an explicit exit from YouTube Music", () => {
+    const stoppedEnv = createEnvironment();
+    vm.runInContext(contentScriptSource, stoppedEnv.context);
+    stoppedEnv.clock.advance(40);
+    stoppedEnv.emitWindow("pagehide");
+    expect(stoppedEnv.sentMessages.some((message) =>
+      (message as { type?: string }).type === "youtube-music-source-disconnect"
+    )).toBe(true);
+
+    const exitedEnv = createEnvironment();
+    vm.runInContext(contentScriptSource, exitedEnv.context);
+    exitedEnv.clock.advance(40);
+    exitedEnv.setLocationHref("https://www.youtube.com/watch?v=ZmCRFGcON-I");
+    exitedEnv.getHeartbeatCallback()?.();
+    expect(exitedEnv.sentMessages.some((message) =>
       (message as { type?: string }).type === "youtube-music-source-disconnect"
     )).toBe(true);
   });
@@ -844,7 +1118,7 @@ describe("YouTube Music companion isolated content script lifecycle (real DOM sh
     const respond = vi.fn();
 
     env.runtimeListeners[0]?.(
-      { type: "youtube-music-seek-to", timeMs: 72_500 },
+      { type: "youtube-music-seek-to", timeMs: 72_500, expectedTrackID: "ZmCRFGcON-I" },
       undefined,
       respond,
     );
@@ -854,13 +1128,82 @@ describe("YouTube Music companion isolated content script lifecycle (real DOM sh
     expect(respond).toHaveBeenCalledWith({ ok: true, timeMs: 72_500 });
   });
 
+  it("seeks the same media element selected for the authoritative snapshot", () => {
+    const env = createEnvironment({
+      playerBarTimeText: "0:50 / 4:19",
+      mediaElements: [
+        { paused: true, currentTime: 193, duration: 282 },
+        { paused: false, currentTime: 50, duration: 259 },
+      ],
+    });
+    vm.runInContext(contentScriptSource, env.context);
+    const respond = vi.fn();
+    env.runtimeListeners[0]?.(
+      { type: "youtube-music-seek-to", timeMs: 72_500, trackID: "ZmCRFGcON-I" },
+      undefined,
+      respond,
+    );
+
+    expect(env.mediaElements[0]?.currentTime).toBe(193);
+    expect(env.mediaElements[1]?.currentTime).toBe(72.5);
+    expect(respond).toHaveBeenCalledWith({ ok: true, timeMs: 72_500 });
+  });
+
+  it("fails transport and seek closed when the expected track changed", () => {
+    const env = createEnvironment();
+    vm.runInContext(contentScriptSource, env.context);
+    const seekResponse = vi.fn();
+    env.runtimeListeners[0]?.(
+      { type: "youtube-music-seek-to", timeMs: 72_500, expectedTrackID: "abcdefghijk" },
+      undefined,
+      seekResponse,
+    );
+    expect(env.media.currentTime).toBe(12);
+    expect(seekResponse).toHaveBeenCalledWith({
+      ok: false,
+      reason: "track-changed",
+      trackID: "ZmCRFGcON-I",
+    });
+
+    const transportResponse = vi.fn();
+    env.runtimeListeners[0]?.(
+      { type: "youtube-music-transport-command", action: "pause", trackID: "abcdefghijk" },
+      undefined,
+      transportResponse,
+    );
+    expect(env.transportControls.playPause.click).not.toHaveBeenCalled();
+    expect(transportResponse).toHaveBeenCalledWith({
+      ok: false,
+      reason: "track-changed",
+      trackID: "ZmCRFGcON-I",
+    });
+  });
+
+  it("fails commands closed while a route-first SPA track tuple is unsettled", () => {
+    const env = createEnvironment();
+    vm.runInContext(contentScriptSource, env.context);
+    env.clock.advance(40);
+    env.setLocationHref("https://music.youtube.com/watch?v=abcdefghijk");
+    env.getHeartbeatCallback()?.();
+
+    const respond = vi.fn();
+    env.runtimeListeners[0]?.(
+      { type: "youtube-music-seek-to", timeMs: 72_500, expectedTrackID: "ZmCRFGcON-I" },
+      undefined,
+      respond,
+    );
+
+    expect(env.media.currentTime).toBe(12);
+    expect(respond).toHaveBeenCalledWith({ ok: false, reason: "track-transition" });
+  });
+
   it("uses authoritative native controls and avoids redundant play/pause clicks", () => {
     const env = createEnvironment();
     vm.runInContext(contentScriptSource, env.context);
     const respond = vi.fn();
 
     env.runtimeListeners[0]?.(
-      { type: "youtube-music-transport-command", action: "pause" },
+      { type: "youtube-music-transport-command", action: "pause", expectedTrackID: "ZmCRFGcON-I" },
       undefined,
       respond,
     );
@@ -870,7 +1213,7 @@ describe("YouTube Music companion isolated content script lifecycle (real DOM sh
     env.media.paused = true;
     respond.mockClear();
     env.runtimeListeners[0]?.(
-      { type: "youtube-music-transport-command", action: "pause" },
+      { type: "youtube-music-transport-command", action: "pause", expectedTrackID: "ZmCRFGcON-I" },
       undefined,
       respond,
     );
@@ -878,11 +1221,31 @@ describe("YouTube Music companion isolated content script lifecycle (real DOM sh
     expect(respond).toHaveBeenCalledWith({ ok: true, state: "paused", unchanged: true });
 
     env.runtimeListeners[0]?.(
-      { type: "youtube-music-transport-command", action: "next" },
+      { type: "youtube-music-transport-command", action: "next", expectedTrackID: "ZmCRFGcON-I" },
       undefined,
       vi.fn(),
     );
     expect(env.transportControls.next.click).toHaveBeenCalledOnce();
+  });
+
+  it("uses the snapshot-selected media when deciding whether transport is redundant", () => {
+    const env = createEnvironment({
+      playerBarTimeText: "0:50 / 4:19",
+      mediaElements: [
+        { paused: true, currentTime: 193, duration: 282 },
+        { paused: false, currentTime: 50, duration: 259 },
+      ],
+    });
+    vm.runInContext(contentScriptSource, env.context);
+    const respond = vi.fn();
+    env.runtimeListeners[0]?.(
+      { type: "youtube-music-transport-command", action: "pause", expectedTrackID: "ZmCRFGcON-I" },
+      undefined,
+      respond,
+    );
+
+    expect(env.transportControls.playPause.click).toHaveBeenCalledOnce();
+    expect(respond).toHaveBeenCalledWith({ ok: true, state: "pause" });
   });
 
   it("keeps the source and manifest free of the removed MAIN-world bridge and peer tab", () => {

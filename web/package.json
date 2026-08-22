@@ -1,6 +1,6 @@
 {
   "name": "lyricstage-web",
-  "version": "0.2.1",
+  "version": "0.3.0",
   "private": true,
   "license": "AGPL-3.0-only",
   "type": "module",
@@ -11,13 +11,14 @@
     "dev": "vite --host 127.0.0.1",
     "dev:performance": "vite --config performance.vite.config.ts --host 127.0.0.1",
     "generate:contracts": "node scripts/generate-contract-validators.mjs",
-    "build": "npm run generate:contracts && tsc -p tsconfig.json && vite build",
-    "build:performance": "tsc -p tsconfig.json && vite build --config performance.vite.config.ts",
-    "build:extension": "npm run generate:contracts && tsc -p tsconfig.json && vite build --config extension.vite.config.ts && vite build --config extension-content.vite.config.ts && npm run verify:extension-csp",
-    "build:all": "npm run build && npm run build:extension",
+    "sync:director-contract": "node scripts/sync-director-contract.mjs",
+    "build": "npm run generate:contracts && npm run sync:director-contract && tsc -p tsconfig.json && vite build",
+    "build:performance": "npm run sync:director-contract && tsc -p tsconfig.json && vite build --config performance.vite.config.ts",
+    "build:extension": "npm run generate:contracts && npm run sync:director-contract && tsc -p tsconfig.json && vite build --config extension.vite.config.ts && vite build --config extension-content.vite.config.ts && npm run verify:extension-csp",
+    "build:all": "npm run build && npm run build:performance && npm run build:extension",
     "verify:extension-csp": "node scripts/verify-extension-csp.mjs",
-    "test": "vitest run",
-    "typecheck": "tsc -p tsconfig.json"
+    "test": "npm run sync:director-contract && vitest run",
+    "typecheck": "npm run sync:director-contract && tsc -p tsconfig.json"
   },
   "dependencies": {
     "ajv": "8.17.1",

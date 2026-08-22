@@ -10,7 +10,39 @@ const parseJSON = (value) => {
 
 const responseJsonSchema = performanceDirectionSkill.responseSchema;
 
-export async function callVertexDirector(environment, systemPrompt, promptInput, fetchImpl = fetch) {
+const upstreamErrorDetail = async (response) => {
+  const body = await response.text().catch(() => "");
+  const payload = (() => {
+    try { return JSON.parse(body); } catch { return null; }
+  })();
+  const message = typeof payload?.error?.message === "string" ? payload.error.message : body;
+  return message
+    .replace(/[\r\n\t]+/gu, " ")
+    .replace(/[^\p{L}\p{N} .,:;_\-/()[\]]/gu, "")
+    .slice(0, 320);
+};
+
+const boundedSignal = (maximumMilliseconds, options = {}) => {
+  const now = typeof options.now === "function" ? options.now() : Date.now();
+  const remaining = Number.isFinite(options.deadlineUnixMs)
+    ? Math.max(1, options.deadlineUnixMs - now)
+    : maximumMilliseconds;
+  const timeoutFactory = typeof options.timeoutFactory === "function"
+    ? options.timeoutFactory
+    : AbortSignal.timeout;
+  const timeout = timeoutFactory(Math.max(1, Math.min(maximumMilliseconds, remaining)));
+  return options.signal ? AbortSignal.any([options.signal, timeout]) : timeout;
+};
+
+export async function callVertexDirector(
+  environment,
+  systemPrompt,
+  promptInput,
+  fetchOrOptions = fetch,
+  maybeOptions = {},
+) {
+  const fetchImpl = typeof fetchOrOptions === "function" ? fetchOrOptions : fetch;
+  const options = typeof fetchOrOptions === "function" ? maybeOptions : fetchOrOptions;
   const baseURL = String(environment.UPSTREAM_BASE_URL || "https://aiplatform.googleapis.com").replace(/\/+$/u, "");
   const apiKey = String(environment.GCP_API_KEY || "");
   const model = String(environment.MODEL || "gemini-3.7-flash");
@@ -20,11 +52,11 @@ export async function callVertexDirector(environment, systemPrompt, promptInput,
     ? promptInput.wholeSong.youtubeURL
     : "";
   const endpoint = `${baseURL}/v1/publishers/google/models/${encodeURIComponent(model)}:generateContent`;
-  const request = (includeWholeSong) => fetchImpl(endpoint, {
+  const request = (includeWholeSong, includeSchema = true) => fetchImpl(endpoint, {
       method: "POST",
       headers: {
         "content-type": "application/json",
-        "user-agent": "LyricStage/OCI-Fullscreen-Director-V2",
+        "user-agent": "LyricStage/OCI-Fullscreen-Director-V4",
         "x-goog-api-key": apiKey,
       },
       body: JSON.stringify({
@@ -37,26 +69,34 @@ export async function callVertexDirector(environment, systemPrompt, promptInput,
           ],
         }],
         generationConfig: {
-          temperature: 0.76,
+          temperature: 0.68,
           maxOutputTokens: 16_000,
           responseMimeType: "application/json",
-          responseJsonSchema,
+          ...(includeSchema ? { responseJsonSchema } : {}),
         },
       }),
-      signal: AbortSignal.timeout(includeWholeSong ? 96_000 : 62_000),
+      signal: boundedSignal(includeWholeSong ? 96_000 : 90_000, options),
     });
   let response = await request(Boolean(youtubeURL));
   let wholeSongFallback = false;
+  let schemaFallback = false;
   if (!response.ok && youtubeURL && [400, 404, 415, 422].includes(response.status)) {
     wholeSongFallback = true;
     response = await request(false);
   }
-  if (!response.ok) throw new Error(`upstream_http_${response.status}`);
+  if (!response.ok && response.status === 400) {
+    schemaFallback = true;
+    response = await request(false, false);
+  }
+  if (!response.ok) {
+    const detail = await upstreamErrorDetail(response);
+    throw new Error(`upstream_http_${response.status}${detail ? `:${detail}` : ""}`);
+  }
   const payload = await response.json();
   const text = payload?.candidates?.[0]?.content?.parts
     ?.map((part) => typeof part?.text === "string" ? part.text : "")
     .join("");
-  return { value: parseJSON(text), model: payload?.modelVersion || model, wholeSongFallback };
+  return { value: parseJSON(text), model: payload?.modelVersion || model, wholeSongFallback, schemaFallback };
 }
 
 export async function callGemmaMusicIdentity(
@@ -65,6 +105,7 @@ export async function callGemmaMusicIdentity(
   promptInput,
   responseSchema,
   fetchImpl = fetch,
+  options = {},
 ) {
   const baseURL = String(environment.IDENTITY_UPSTREAM_BASE_URL || "https://generativelanguage.googleapis.com")
     .replace(/\/+$/u, "");
@@ -92,7 +133,7 @@ export async function callGemmaMusicIdentity(
         responseJsonSchema: responseSchema,
       },
     }),
-    signal: AbortSignal.timeout(28_000),
+    signal: boundedSignal(28_000, options),
   });
   if (!response.ok) throw new Error(`identity_upstream_http_${response.status}`);
   const payload = await response.json();
@@ -113,6 +154,7 @@ export async function callVertexMusicIdentity(
   promptInput,
   responseSchema,
   fetchImpl = fetch,
+  options = {},
 ) {
   const baseURL = String(environment.UPSTREAM_BASE_URL || "https://aiplatform.googleapis.com").replace(/\/+$/u, "");
   const apiKey = String(environment.GCP_API_KEY || "");
@@ -139,7 +181,7 @@ export async function callVertexMusicIdentity(
         responseJsonSchema: responseSchema,
       },
     }),
-    signal: AbortSignal.timeout(28_000),
+    signal: boundedSignal(28_000, options),
   });
   if (!response.ok) throw new Error(`identity_fallback_http_${response.status}`);
   const payload = await response.json();
@@ -160,9 +202,10 @@ export async function callMusicIdentityWithFallback(
   promptInput,
   responseSchema,
   fetchImpl = fetch,
+  options = {},
 ) {
   try {
-    return await callGemmaMusicIdentity(environment, systemPrompt, promptInput, responseSchema, fetchImpl);
+    return await callGemmaMusicIdentity(environment, systemPrompt, promptInput, responseSchema, fetchImpl, options);
   } catch (primaryError) {
     if (!environment.GCP_API_KEY) throw primaryError;
     try {
@@ -172,6 +215,7 @@ export async function callMusicIdentityWithFallback(
         promptInput,
         responseSchema,
         fetchImpl,
+        options,
       );
       return { ...fallback, fallbackReason: String(primaryError?.message || "identity_primary_failed") };
     } catch (fallbackError) {

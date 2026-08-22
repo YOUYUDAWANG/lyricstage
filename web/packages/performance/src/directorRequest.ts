@@ -41,21 +41,29 @@ export const buildDirectorRequestPayloadV1 = async (
   track: DirectorRequestTrackV1,
   lyrics: LyricDocumentV0,
   musicMap?: MusicMapV1,
+  options: { lineTimingOnly?: boolean } = {},
 ): Promise<DirectorRequestPayloadV1 | undefined> => {
   if (lyrics.lines.length === 0 || lyrics.lines.length > 180) return undefined;
   const lyricsHash = await sha256Hex(JSON.stringify(lyrics));
+  const directorDurationMs = Math.max(1_000, Math.round(track.durationMs));
   const lines = lyrics.lines.map((line) => {
-    const nativeWords = (line.words ?? []).slice(0, 120);
-    const estimatedWords = nativeWords.length === 0
-      ? estimateWordTimingV1(line.text, line.fromMs, line.toMs)
+    const safeFromMs = Math.max(0, Math.min(line.fromMs, directorDurationMs - 1));
+    const safeToMs = Math.max(safeFromMs + 1, Math.min(line.toMs, directorDurationMs));
+    const nativeWords = options.lineTimingOnly ? [] : (line.words ?? []).slice(0, 120).flatMap((word) => {
+      const fromMs = Math.max(safeFromMs, Math.min(word.fromMs, safeToMs - 1));
+      const toMs = Math.min(safeToMs, word.toMs);
+      return toMs > fromMs ? [{ ...word, fromMs, toMs }] : [];
+    });
+    const estimatedWords = !options.lineTimingOnly && nativeWords.length === 0
+      ? estimateWordTimingV1(line.text, safeFromMs, safeToMs)
       : [];
     const timingPrecision = nativeWords.length > 0
       ? "word"
       : estimatedWords.length > 0
         ? "estimated"
         : "line";
-    const words = nativeWords.map((word) => ({
-      index: word.wordIndex,
+    const words = nativeWords.map((word, index) => ({
+      index,
       from: word.fromMs / 1000,
       to: word.toMs / 1000,
       text: word.text,
@@ -68,8 +76,8 @@ export const buildDirectorRequestPayloadV1 = async (
     }));
     return {
       index: line.lineIndex,
-      from: line.fromMs / 1000,
-      to: line.toMs / 1000,
+      from: safeFromMs / 1000,
+      to: safeToMs / 1000,
       text: line.text,
       timingPrecision,
       words,

@@ -11,7 +11,11 @@ import {
   type EnvironmentSceneV1,
   type EnvironmentTuningV1,
 } from "@lyricstage/performance";
-import type { DirectedStagePaletteV1 } from "@lyricstage/renderer";
+import {
+  clearCanvasBackingStoreV1,
+  type DirectedStagePaletteV1,
+} from "@lyricstage/renderer";
+import { canvasBackingStoreForV1 } from "./canvasBackingStore";
 
 export type PerformanceEnvironmentStatus = "loading" | "webgl" | "canvas2d" | "failed";
 
@@ -133,7 +137,7 @@ const drawCanvas2D = (
 ) => {
   const { scene, tuning, energy } = tuningFor(plan, timeMs, reduceMotion, vjMode);
   const frame = applyDirectedPalette(sampleEnvironmentSceneV1(scene, timeMs, tuning, energy), palette);
-  context.clearRect(0, 0, width, height);
+  clearCanvasBackingStoreV1(context);
   context.save();
   context.globalAlpha = 0.72;
   context.fillStyle = cssColor(frame.background);
@@ -279,15 +283,14 @@ export function PerformanceEnvironment({
       const rect = host.getBoundingClientRect();
       if (rect.width < 2 || rect.height < 2) return;
       const dpr = Math.min(window.devicePixelRatio || 1, 2);
-      const pixelWidth = Math.round(rect.width * dpr);
-      const pixelHeight = Math.round(rect.height * dpr);
-      if (canvas.width !== pixelWidth || canvas.height !== pixelHeight) {
-        canvas.width = pixelWidth;
-        canvas.height = pixelHeight;
-        canvas.style.width = `${rect.width}px`;
-        canvas.style.height = `${rect.height}px`;
+      const backing = canvasBackingStoreForV1(rect.width, rect.height, dpr);
+      if (canvas.width !== backing.pixelWidth || canvas.height !== backing.pixelHeight) {
+        canvas.width = backing.pixelWidth;
+        canvas.height = backing.pixelHeight;
       }
-      context.setTransform(dpr, 0, 0, dpr, 0, 0);
+      canvas.style.width = `${rect.width}px`;
+      canvas.style.height = `${rect.height}px`;
+      context.setTransform(backing.scaleX, 0, 0, backing.scaleY, 0, 0);
       drawCanvas2D(
         context,
         rect.width,
@@ -356,8 +359,41 @@ export function PerformanceEnvironment({
         activateCanvasFallback("webgl-context-lost");
       };
       onContextRestored = () => {
+        if (disposed) return;
+        const current = latestRef.current;
+        const timeMs = Number.isFinite(current.timeMsRef.current)
+          ? current.timeMsRef.current
+          : current.displayTimeMs;
+        try {
+          // Prove that Pixi can draw and submit a frame again before removing
+          // the functioning Canvas2D fallback or reporting WebGL recovery.
+          draw(
+            graphics,
+            application.screen.width,
+            application.screen.height,
+            current.plan,
+            timeMs,
+            current.reduceMotion,
+            current.vjMode,
+            current.palette,
+          );
+          application.render();
+        } catch {
+          applicationRef.current = null;
+          graphicsRef.current = null;
+          application.canvas.style.display = "none";
+          report("canvas2d");
+          renderCurrent();
+          return;
+        }
+        applicationRef.current = application;
+        graphicsRef.current = graphics;
+        application.canvas.style.display = "";
+        fallbackContextRef.current = null;
+        fallbackCanvasRef.current?.remove();
+        fallbackCanvasRef.current = null;
+        delete host.dataset.failureReason;
         report("webgl");
-        renderCurrent();
       };
       application.canvas.addEventListener("webglcontextlost", onContextLost);
       application.canvas.addEventListener("webglcontextrestored", onContextRestored);
@@ -369,11 +405,19 @@ export function PerformanceEnvironment({
         activateCanvasFallback(error instanceof Error ? error.message : "webgl-init-failed");
       }
     });
-    const observer = new ResizeObserver(() => requestAnimationFrame(renderCurrent));
+    let resizeFrameID = 0;
+    const observer = new ResizeObserver(() => {
+      if (resizeFrameID) cancelAnimationFrame(resizeFrameID);
+      resizeFrameID = requestAnimationFrame(() => {
+        resizeFrameID = 0;
+        renderCurrent();
+      });
+    });
     observer.observe(host);
     return () => {
       disposed = true;
       observer.disconnect();
+      if (resizeFrameID) cancelAnimationFrame(resizeFrameID);
       graphicsRef.current = null;
       applicationRef.current = null;
       fallbackContextRef.current = null;

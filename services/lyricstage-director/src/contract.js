@@ -1,8 +1,8 @@
 import { performanceDirectionSkill, performanceDirectionSystemPrompt } from "./skill.js";
 
 export const requestVersion = "lyricstage-fullscreen-director-request-v1";
-export const responseVersion = "lyricstage-fullscreen-director-v2";
-export const directorVersion = "lyricstage-fullscreen-gemini-3.7-world-v4";
+export const responseVersion = "lyricstage-fullscreen-director-v4";
+export const directorVersion = "lyricstage-fullscreen-gemini-3.7-dramaturgy-v8.6";
 
 const artDirections = [
   "editorialKinetic", "neonRail", "paperCut", "liquidMemory", "monoImpact", "celestialGrid",
@@ -23,6 +23,42 @@ const primitiveNames = new Set(Object.keys(effectGrammar.primitives));
 const triggerNames = new Set(effectGrammar.triggers);
 const presentationNames = new Set(effectGrammar.presentations);
 const musicMapLandmarkTypes = new Set(["silence", "onset_cluster", "energy_lift", "energy_release", "section_boundary"]);
+const gestureGrammar = performanceDirectionSkill.gestureGrammar;
+const gestureScopes = new Set(gestureGrammar.scopes);
+const gestureDrivers = new Set(gestureGrammar.drivers);
+const gestureSpaces = new Set(gestureGrammar.spaces);
+const gestureSemanticRoles = new Set(gestureGrammar.semanticRoles);
+const gesturePrimitives = new Set(gestureGrammar.primitives);
+const dramaticGrammar = performanceDirectionSkill.dramaticGrammar;
+const dramaticActRoles = new Set(dramaticGrammar.actRoles);
+const dramaticFamilies = new Set(dramaticGrammar.motifFamilies);
+const dramaticStates = new Set(dramaticGrammar.motifStates);
+const dramaticOrigins = new Set(dramaticGrammar.origins);
+const dramaticPurposes = new Set(dramaticGrammar.purposes);
+const dramaticActions = new Set(dramaticGrammar.stageActions);
+const dramaticCoverRoles = new Set(dramaticGrammar.coverRoles);
+const dramaticConsequences = new Set(dramaticGrammar.consequences);
+const dramaticPurposeTriggers = new Map([
+  ["reveal", new Set(["section_boundary", "silence_gap", "density_release", "repeated_hook"])],
+  ["connection", new Set(["duet_overlap", "voice_handoff", "collective_chorus", "repeated_hook", "semantic_distance"])],
+  ["rupture", new Set(["semantic_contrast", "semantic_motion", "density_lift", "duet_overlap"])],
+  ["release", new Set(["density_release", "silence_gap", "final_resolution"])],
+  ["distance", new Set(["semantic_distance", "silence_gap", "density_release"])],
+  ["collective", new Set(["collective_chorus", "duet_overlap", "voice_handoff"])],
+  ["resolution", new Set(["final_resolution", "repeated_hook", "density_release"])],
+]);
+const dramaticActionTriggers = new Map([
+  ["duet.tension", new Set(["duet_overlap", "voice_handoff", "collective_chorus"])],
+  ["silence.vacuum", new Set(["silence_gap", "density_release"])],
+  ["motif.recall", new Set(["repeated_hook", "final_resolution", "density_release"])],
+  ["thread.snap", new Set(["semantic_contrast", "semantic_motion", "density_lift", "duet_overlap"])],
+  ["phrase.cascade", new Set(["repeated_hook", "density_lift", "collective_chorus", "voice_handoff"])],
+  ["memory.imprint", new Set(["repeated_hook", "final_resolution", "semantic_distance", "density_release"])],
+]);
+const lyricLocalDramaticTriggers = new Set([
+  "repeated_hook", "duet_overlap", "voice_handoff", "collective_chorus",
+  "semantic_distance", "semantic_contrast", "semantic_motion",
+]);
 
 const clamp = (value, minimum, maximum) => Math.min(maximum, Math.max(minimum, value));
 const finite = (value, fallback) => typeof value === "number" && Number.isFinite(value) ? value : fallback;
@@ -30,6 +66,40 @@ const clean = (value, maximum) => typeof value === "string" ? value.trim().slice
 const normalize = (value) => value.normalize("NFKC").replace(/\s+/gu, " ").trim().toLocaleLowerCase();
 const unit = (value) => typeof value === "number" && Number.isFinite(value) && value >= 0 && value <= 1;
 const rounded = (value) => Math.round(value * 10_000) / 10_000;
+const graphemes = (text) => typeof Intl.Segmenter === "function"
+  ? Array.from(new Intl.Segmenter(undefined, { granularity: "grapheme" }).segment(text), (entry) => entry.segment)
+  : Array.from(text);
+
+const hasAnyTrigger = (triggers, accepted) => triggers.some((trigger) => accepted.has(trigger));
+
+function requiredFamilyForAction(action) {
+  if (action.startsWith("thread.")) return "thread";
+  if (action === "window.reveal") return "window";
+  if (action === "silhouette.trace") return "silhouette";
+  if (action === "sentence.horizon") return "horizon";
+  if (action === "stage.fold") return "fold";
+  return null;
+}
+
+function wordRanges(line) {
+  const pieces = graphemes(line.text);
+  const output = [];
+  let cursor = 0;
+  for (const word of line.words) {
+    const wordPieces = graphemes(word.text);
+    let start = -1;
+    for (let index = cursor; index <= pieces.length - wordPieces.length; index += 1) {
+      if (wordPieces.every((piece, offset) => pieces[index + offset] === piece)) {
+        start = index;
+        break;
+      }
+    }
+    if (start < 0) continue;
+    output.push({ index: word.index, fromGrapheme: start, toGrapheme: start + wordPieces.length, from: word.from, to: word.to, text: word.text });
+    cursor = start + wordPieces.length;
+  }
+  return output;
+}
 
 function sanitizeMusicMap(value, durationSeconds) {
   if (!value || typeof value !== "object" || Array.isArray(value)) return null;
@@ -155,9 +225,11 @@ export function sanitizeFullscreenRequest(value) {
     const from = finite(line.from, -1);
     const to = finite(line.to, -1);
     const text = clean(line.text, 800);
-    if (from < previousFrom || to <= from || from < 0 || to > duration + 8 || !text) {
-      throw new Error("invalid_line_timing");
-    }
+    if (from < 0) throw new Error(`invalid_line_timing:${position}:negative`);
+    if (from < previousFrom) throw new Error(`invalid_line_timing:${position}:order`);
+    if (to <= from) throw new Error(`invalid_line_timing:${position}:duration`);
+    if (to > duration + 8) throw new Error(`invalid_line_timing:${position}:overflow`);
+    if (!text) throw new Error(`invalid_line_timing:${position}:text`);
     previousFrom = from;
     totalCharacters += text.length;
     if (totalCharacters > 24_000) throw new Error("lyrics_too_large");
@@ -242,6 +314,7 @@ export function buildFullscreenPromptInput(input) {
       fromSeconds: line.from,
       toSeconds: line.to,
       exactText: line.text,
+      graphemeCount: graphemes(line.text).length,
       voiceRole: line.voiceRole,
       overlapGroup: line.overlapGroup,
       timingPrecision: line.timingPrecision,
@@ -250,7 +323,7 @@ export function buildFullscreenPromptInput(input) {
       wordCount: line.words.length,
       wordTiming: line.timingPrecision === "line" ? null : {
         precision: line.timingPrecision,
-        cues: line.words.map((word) => [word.from, word.to, word.text]),
+        cues: wordRanges(line).map((word) => [word.index, word.from, word.to, word.text, word.fromGrapheme, word.toGrapheme]),
       },
       repetitionCount: facts.repetitionCounts.get(normalize(line.text)) || 1,
     })),
@@ -264,19 +337,212 @@ export const fullscreenSystemPrompt = `${performanceDirectionSystemPrompt}
 You are the visual director for a 16:9 fullscreen lyric-performance system. Create a song-specific editorial direction that feels authored rather than shuffled from a theme pack. The whole screen is a scene graph: background, artwork, lyrics, structure, camera and post-processing are actors. The cover and transport begin as a stable Apple-like local reading state, but an AI direction may reposition the artwork and open the lyric composition across the full canvas when the song provides evidence. The runtime derives its palette from the actual cover. Default Reading is cover-led color, light, material and negative space—not generic technology styling. Never add empty symmetric panels, persistent grids, continuous rails, scanning lines, converging rays or particle soup merely to make the frame look active. One layer owns each structural motif.
 
 The runtime can render only these artDirection values: editorialKinetic, neonRail, paperCut, liquidMemory, monoImpact, celestialGrid.
-Layouts: monument, editorialSplit, railLeading, railTrailing, duetDivide.
+Layouts are dramaturgic positions, not an ordered preference list. monument is a concentrated proclamation or iconic single-focus frame and is never the generic default; editorialSplit stages a real dialogue between artwork and narrative lyric; railLeading gives forward motion or approach a strong reading axis; railTrailing supports withdrawal, memory or aftermath; duetDivide is reserved for verified divided or overlapping voices. Compare all five against the song before choosing the base layout.
 Typography: jpGothic, jpMincho, cjkGrotesk, latinDisplay, monoEditorial.
 Line behaviors: settle, assemble, gravityDrop, ripple, stretch, echo, drift, focus, converge.
 Alignment: leading, center, trailing. Palette roles: primary, accent, warm, secondary. paletteIndex is an integer 0-11.
 
 Treat the registered grammar as instruments, not a fixed recipe. Compose them according to this song, and use continuous world parameters to avoid theme-pack repetition. If exact whole-song video context is attached, listen to it before directing: use its structure, energy, timbre, silence and lyric-audio relationship. If a local MusicMap is attached, use its normalized segments and landmarks to refine structural emphasis and energy development. Never move lyric or word reveal away from supplied real word timing. Estimated word timing is a low-confidence phrasing hint for visual pacing only: never treat it as exact reveal, beat, onset or structural evidence. Be static-first before AI handoff and in ordinary lines. Reserve strong motion for structural turns, repetitions, hooks and overlapping voices; keep high-motion lines below 45 percent. Repeated hooks may grow across returns. duetA/duetB overlaps should normally use duetDivide and opposing directions.
 
-Return one JSON object only with concept, motif, intensityArc, world, sections, directives, effects.
+Return one JSON object only with concept, motif, intensityArc, world, blocking, sections, directives, effects, gestures, dramaticScore.
 world defines the song-wide visual physics and contains spatialMode, motionLaw, artworkRole, texture, depth, fluidity, elasticity, atmosphere and rationale. spatialMode: anchored, panoramic, cinematic, orbital, splitStage, chorusWall. motionLaw: drift, flow, pulse, fall, orbit, converge, suspend, fracture. artworkRole: anchor, portal, memory, counterpoint, atmosphere. texture: silk, ink, mist, glass, paper, light. Numeric world parameters are 0-1. Choose a coherent combination for this exact song; do not merely rotate choices.
 sections must be a contiguous cover of every zero-based line exactly once, use 2-8 lines where possible, and contain fromLineIndex, toLineIndex, artDirection, layout, typography, paletteIndex, intensity (0-1).
+blocking is authoritative over section layout. It uses song-blocking-v1, one baseLayout and zero to three transitions. For a song with three or more genuinely distinct dramatic acts, prefer one or two justified major transitions instead of holding one composition by habit; zero transitions is appropriate only when uninterrupted continuity is itself the dramatic idea. A third transition must be exceptional with at least three independent evidence categories and confidence >=0.90. Major transitions need confidence >=0.78, at least two evidence categories, and meaningful separation. Every transition rationale must state what changed in the song, why the previous geometry no longer expresses it, and what the destination layout makes newly possible. A section label, palette, intensity, typography or desire for variety is never sufficient evidence. A final return to an established layout is allowed when it visibly resolves or recalls the dramatic premise. Keep section layout equal to the blocking layout active in that section.
 directives must contain exactly one entry for every lineIndex and contain behavior, alignment, direction (-1 or 1), intensity (0.35-1.25), fontScale (0.78-1.22), glyphStagger (0-0.14), paletteRole.
 effects must contain at least one grounded entry across the song and at most one entry per section. A calm song may use a restrained field, memory or dissolution effect, but an empty effects array is not a completed direction. Each effect uses zero-based sectionIndex, a cardID or custom, presentation, one primary primitive, at most two support primitives, and evidence with songMotif, controlled sectionTriggers, real lineIndices, rationale and confidence.
-Never return lyric text, coordinates, colors, animation keyframes, audio instructions, translations, or rewritten lyrics.`;
+gestures must contain at least one lyric-gesture-v1 cue. Target grapheme ranges and expectedText must exactly match the supplied line. Use glyph only inside real word timing, wordWindow only with real word timing, and fullStage only with strong evidence. Prefer gestures that develop the song motif across glyph, token and phrase scales without moving the readable master lyric.
+dramaticScore must be dramatic-score-v1. First define a premise, contiguous acts, one motif actor with seed/transform/return states, two to four ordered signature moments and authored quiet windows. Every moment uses the same actor family, cites real lyric indices and structural evidence, and explains a causal scene with anticipation, event, consequence and later recall. The final moment returns or resolves an earlier image. Do not confuse a new section, palette or particle pattern with a dramatic event.
+Ground each signature purpose in at least one compatible verified trigger: reveal uses section_boundary/silence_gap/density_release/repeated_hook; connection uses duet_overlap/voice_handoff/collective_chorus/repeated_hook/semantic_distance; rupture uses semantic_contrast/semantic_motion/density_lift/duet_overlap; release uses density_release/silence_gap/final_resolution; distance uses semantic_distance/silence_gap/density_release; collective uses collective_chorus/duet_overlap/voice_handoff; resolution uses final_resolution/repeated_hook/density_release. duet.tension requires voice evidence; silence.vacuum requires silence_gap or density_release; motif.recall requires recall plus repeated_hook/final_resolution/density_release; thread.snap requires semantic_contrast/semantic_motion/density_lift/duet_overlap; phrase.cascade requires repeated_hook/density_lift/collective_chorus/voice_handoff; memory.imprint requires repeated_hook/final_resolution/semantic_distance/density_release. thread actions belong only to thread, window.reveal to window, silhouette.trace to silhouette, sentence.horizon to horizon and stage.fold to fold. Lyric-local triggers must be true at an anchorLineIndex; boundary, silence, density and final triggers may be supported by the whole moment range.
+Never return rewritten lyric text, coordinates, colors, paths, SVG, code, animation keyframes, audio instructions, or translations.`;
+
+function sanitizeDramaticScore(value, input) {
+  const failed = (failure) => ({ score: null, failure });
+  if (!value || typeof value !== "object" || Array.isArray(value) || value.version !== "dramatic-score-v1") return failed("shape");
+  if (!Array.isArray(value.acts) || !Array.isArray(value.signatureMoments) || !Array.isArray(value.quietWindows)) return failed("collections");
+  const premise = clean(value.premise, 240);
+  const emotionalArc = clean(value.emotionalArc, 320);
+  if (!premise || !emotionalArc) return failed("premise");
+  if (value.acts.length < 2 || value.acts.length > 5) return failed(`acts:count:${value.acts.length}`);
+  if (value.signatureMoments.length < 2 || value.signatureMoments.length > 4) return failed(`moments:count:${value.signatureMoments.length}`);
+  const lineByIndex = new Map(input.lines.map((line) => [line.index, line]));
+  const facts = deriveFacts(input.lines);
+  const lineRangeValid = (fromLineIndex, toLineIndex) => lineByIndex.has(fromLineIndex) && lineByIndex.has(toLineIndex) && fromLineIndex <= toLineIndex;
+
+  const acts = [];
+  for (const [actIndex, raw] of value.acts.entries()) {
+    if (!raw || typeof raw !== "object" || Array.isArray(raw)) return failed(`acts:${actIndex}:shape`);
+    const role = dramaticActRoles.has(raw.role) ? raw.role : null;
+    const motifState = dramaticStates.has(raw.motifState) ? raw.motifState : null;
+    const fromLineIndex = Number.isInteger(raw.fromLineIndex) ? raw.fromLineIndex : -1;
+    const toLineIndex = Number.isInteger(raw.toLineIndex) ? raw.toLineIndex : -1;
+    const intention = clean(raw.intention, 320);
+    if (!role) return failed(`acts:${actIndex}:role`);
+    if (!motifState) return failed(`acts:${actIndex}:state`);
+    if (!lineRangeValid(fromLineIndex, toLineIndex)) return failed(`acts:${actIndex}:range`);
+    if (!intention) return failed(`acts:${actIndex}:intention`);
+    if (acts.length > 0 && fromLineIndex !== acts.at(-1).toLineIndex + 1) return failed(`acts:${actIndex}:contiguity`);
+    acts.push({
+      id: clean(raw.id, 120) || `act:${acts.length}:${fromLineIndex}-${toLineIndex}`,
+      role, fromLineIndex, toLineIndex,
+      tension: clamp(finite(raw.tension, 0.5), 0, 1),
+      visualDensity: clamp(finite(raw.visualDensity, 0.4), 0, 1),
+      motifState, intention,
+    });
+  }
+  if (acts[0].fromLineIndex !== input.lines[0]?.index || acts.at(-1).toLineIndex !== input.lines.at(-1)?.index) return failed("acts:coverage");
+
+  const motif = value.motifActor;
+  if (!motif || typeof motif !== "object" || Array.isArray(motif) || !Array.isArray(motif.states)) return failed("motif:shape");
+  const family = dramaticFamilies.has(motif.family) ? motif.family : null;
+  const origin = dramaticOrigins.has(motif.origin) ? motif.origin : null;
+  const relationship = clean(motif.relationship, 360);
+  const states = motif.states.map((raw) => {
+    if (!raw || typeof raw !== "object" || Array.isArray(raw) || !dramaticStates.has(raw.state)) return null;
+    const meaning = clean(raw.meaning, 240);
+    return meaning ? { state: raw.state, meaning } : null;
+  });
+  if (!family) return failed("motif:family");
+  if (!origin) return failed("motif:origin");
+  if (!relationship) return failed("motif:relationship");
+  if (states.length < 3 || states.length > 6) return failed(`motif:states:count:${states.length}`);
+  if (states.some((state) => !state)) return failed("motif:states:invalid");
+  if (!states.some((state) => state.state === "seed")
+    || !states.some((state) => state.state === "transform" || state.state === "fracture")
+    || !states.some((state) => state.state === "return" || state.state === "resolve")) return failed("motif:states:arc");
+
+  const signatureMoments = [];
+  const ids = new Set();
+  const rejectedMoments = [];
+  for (const [momentIndex, raw] of value.signatureMoments.entries()) {
+    if (!raw || typeof raw !== "object" || Array.isArray(raw)) {
+      rejectedMoments.push(`${momentIndex}:shape`);
+      continue;
+    }
+    const id = clean(raw.id, 120);
+    const fromLineIndex = Number.isInteger(raw.fromLineIndex) ? raw.fromLineIndex : -1;
+    const toLineIndex = Number.isInteger(raw.toLineIndex) ? raw.toLineIndex : -1;
+    const anchorLineIndices = Array.isArray(raw.anchorLineIndices)
+      ? [...new Set(raw.anchorLineIndices.filter((index) => Number.isInteger(index) && index >= fromLineIndex && index <= toLineIndex && lineByIndex.has(index)))]
+      : [];
+    const evidence = raw.evidence;
+    const actorFamily = dramaticFamilies.has(raw.actorFamily) ? raw.actorFamily : null;
+    const requestedRecallOf = clean(raw.recallOf, 120);
+    const structuralFailure = !id ? "id"
+      : ids.has(id) ? "duplicate"
+        : !lineRangeValid(fromLineIndex, toLineIndex) ? "range"
+          : anchorLineIndices.length === 0 ? "anchors"
+            : !dramaticPurposes.has(raw.purpose) ? "purpose"
+              : !dramaticStates.has(raw.motifState) ? "state"
+                : actorFamily !== family ? "family"
+                  : !dramaticActions.has(raw.stageAction) ? "action"
+                    : !dramaticCoverRoles.has(raw.coverRole) ? "cover"
+                      : !dramaticConsequences.has(raw.consequence) ? "consequence"
+                        : !evidence || typeof evidence !== "object" || Array.isArray(evidence) ? "evidence"
+                          : "";
+    if (structuralFailure) {
+      rejectedMoments.push(`${momentIndex}:${structuralFailure}`);
+      continue;
+    }
+    const hintIndex = facts.sectionHints.findIndex((section) => section.fromLineIndex === fromLineIndex);
+    const verified = verifiedTriggersForSection(
+      input,
+      { fromLineIndex, toLineIndex },
+      facts,
+      hintIndex >= 0 ? hintIndex : 0,
+      hintIndex >= 0 ? facts.sectionHints.length : Number.MAX_SAFE_INTEGER,
+    );
+    if (fromLineIndex === input.lines[0]?.index) verified.add("section_boundary");
+    if (hintIndex < 0 && fromLineIndex !== input.lines[0]?.index) verified.delete("section_boundary");
+    if (toLineIndex === input.lines.at(-1)?.index) verified.add("final_resolution");
+    const anchorVerified = lyricLocalTriggersForLines(
+      anchorLineIndices.map((index) => lineByIndex.get(index)),
+      facts,
+    );
+    const triggers = Array.isArray(evidence.sectionTriggers)
+      ? [...new Set(evidence.sectionTriggers.filter((trigger) => triggerNames.has(trigger)
+        && verified.has(trigger)
+        && (!lyricLocalDramaticTriggers.has(trigger) || anchorVerified.has(trigger))))].slice(0, 8)
+      : [];
+    const rationale = clean(evidence.rationale, 420);
+    const confidence = clamp(finite(evidence.confidence, 0), 0, 1);
+    if (triggers.length === 0 || !rationale || confidence < 0.7) {
+      rejectedMoments.push(`${momentIndex}:${triggers.length === 0 ? "triggers" : !rationale ? "rationale" : "confidence"}`);
+      continue;
+    }
+    const previous = signatureMoments.at(-1);
+    if (previous && fromLineIndex <= previous.toLineIndex) {
+      rejectedMoments.push(`${momentIndex}:order`);
+      continue;
+    }
+    const returns = raw.motifState === "return" || raw.motifState === "resolve";
+    const recallOf = returns
+      ? ids.has(requestedRecallOf)
+        ? requestedRecallOf
+        : signatureMoments[0]?.id || ""
+      : "";
+    const purposeTriggers = dramaticPurposeTriggers.get(raw.purpose);
+    if (!purposeTriggers || !hasAnyTrigger(triggers, purposeTriggers)) {
+      rejectedMoments.push(`${momentIndex}:purpose-triggers`);
+      continue;
+    }
+    const requiredFamily = requiredFamilyForAction(raw.stageAction);
+    if (requiredFamily && actorFamily !== requiredFamily) {
+      rejectedMoments.push(`${momentIndex}:action-family`);
+      continue;
+    }
+    const actionTriggers = dramaticActionTriggers.get(raw.stageAction);
+    if ((actionTriggers && !hasAnyTrigger(triggers, actionTriggers))
+      || (raw.stageAction === "motif.recall" && !recallOf)) {
+      rejectedMoments.push(`${momentIndex}:action-triggers`);
+      continue;
+    }
+    signatureMoments.push({
+      id, fromLineIndex, toLineIndex, anchorLineIndices,
+      purpose: raw.purpose, motifState: raw.motifState, actorFamily,
+      stageAction: raw.stageAction, coverRole: raw.coverRole, consequence: raw.consequence,
+      recallOf, intensity: clamp(finite(raw.intensity, 0.72), 0.35, 1),
+      evidence: { sectionTriggers: triggers, rationale, confidence },
+    });
+    ids.add(id);
+  }
+  if (signatureMoments.length < 2) return failed(`moments:valid:${signatureMoments.length}:${rejectedMoments.join("|") || "unknown"}`);
+  const firstMoment = signatureMoments[0];
+  const lastMoment = signatureMoments.at(-1);
+  if (!["seed", "emerge"].includes(firstMoment.motifState) || firstMoment.recallOf) return failed("moments:arc:first");
+  if (!["return", "resolve"].includes(lastMoment.motifState)
+    || !signatureMoments.slice(0, -1).some((moment) => moment.id === lastMoment.recallOf)) return failed("moments:arc:last");
+
+  const quietWindows = [];
+  for (const raw of value.quietWindows.slice(0, dramaticGrammar.budgets.maximumQuietWindows)) {
+    if (!raw || typeof raw !== "object" || Array.isArray(raw)) continue;
+    const fromLineIndex = Number.isInteger(raw.fromLineIndex) ? raw.fromLineIndex : -1;
+    const toLineIndex = Number.isInteger(raw.toLineIndex) ? raw.toLineIndex : -1;
+    const reason = clean(raw.reason, 240);
+    if (lineRangeValid(fromLineIndex, toLineIndex) && reason) quietWindows.push({ fromLineIndex, toLineIndex, reason });
+  }
+  if (quietWindows.length === 0) {
+    const quietAct = [...acts].sort((left, right) => left.visualDensity - right.visualDensity)[0];
+    if (quietAct) {
+      quietWindows.push({
+        fromLineIndex: quietAct.fromLineIndex,
+        toLineIndex: quietAct.toLineIndex,
+        reason: "The director's lowest-density act is preserved as authored stillness between signature events.",
+      });
+    }
+  }
+  return {
+    score: {
+      version: "dramatic-score-v1",
+      premise,
+      emotionalArc,
+      acts,
+      motifActor: { family, origin, relationship, states },
+      signatureMoments,
+      quietWindows,
+    },
+    failure: "",
+  };
+}
 
 export function finalizeFullscreenResponse(input, aiValue, version = directorVersion) {
   const facts = deriveFacts(input.lines);
@@ -285,10 +551,12 @@ export function finalizeFullscreenResponse(input, aiValue, version = directorVer
   const intensityArc = clean(aiValue?.intensityArc, 200);
   const world = sanitizeWorld(aiValue?.world, concept, motif);
   const validAISections = sanitizeAISections(aiValue?.sections, input.lines);
+  const aiSectionStyles = sanitizeAISectionStyles(aiValue?.sections, input.lines.length);
   const sectionBlueprints = validAISections || facts.sectionHints;
-  const aiSections = Array.isArray(aiValue?.sections) ? aiValue.sections : [];
-  const sections = sectionBlueprints.map((blueprint, index) => {
-    const candidate = (validAISections ? validAISections[index] : aiSections[index]) || {};
+  const requestedSections = sectionBlueprints.map((blueprint, index) => {
+    const candidate = validAISections?.[index]
+      || aiSectionStyles?.[Math.min(index, aiSectionStyles.length - 1)]
+      || {};
     const lines = input.lines.slice(blueprint.fromLineIndex, blueprint.toLineIndex + 1);
     const hasOverlap = lines.some((line) => facts.overlapLines.has(line.index));
     const hasRepeat = lines.some((line) => (facts.repetitionCounts.get(normalize(line.text)) || 1) > 1);
@@ -309,6 +577,8 @@ export function finalizeFullscreenResponse(input, aiValue, version = directorVer
       intensity: clamp(finite(candidate.intensity, hasRepeat ? 0.9 : 0.55 + index * 0.06), 0, 1),
     };
   });
+  const blocking = sanitizeBlocking(aiValue?.blocking, input, requestedSections, facts);
+  const sections = blocking ? applyBlocking(requestedSections, blocking) : requestedSections;
 
   const aiDirectives = new Map();
   if (Array.isArray(aiValue?.directives)) {
@@ -352,14 +622,19 @@ export function finalizeFullscreenResponse(input, aiValue, version = directorVer
       usedSections.add(effect.sectionID);
     }
   }
+  const gestures = sanitizeGestures(aiValue?.gestures, input, sections, facts);
+  const { score: dramaticScore, failure: dramaticScoreFailure } = sanitizeDramaticScore(aiValue?.dramaticScore, input);
   const usableAI = Boolean(
     concept
     && motif
     && intensityArc
     && world
-    && validAISections
+    && blocking
+    && aiSectionStyles
     && aiDirectives.size >= minimumAICoverage
     && effects.length > 0
+    && gestures?.length > 0
+    && dramaticScore
   );
   const degradedReason = !usableAI
     ? [
@@ -367,11 +642,14 @@ export function finalizeFullscreenResponse(input, aiValue, version = directorVer
         !motif ? "motif" : null,
         !intensityArc ? "intensityArc" : null,
         !world ? "world" : null,
-        !validAISections ? "sections" : null,
+        !blocking ? "blocking" : null,
+        !aiSectionStyles ? "sections" : null,
         aiDirectives.size < minimumAICoverage
           ? `directives:${aiDirectives.size}/${minimumAICoverage}`
           : null,
         effects.length === 0 ? "effects" : null,
+        !gestures?.length ? "gestures" : null,
+        !dramaticScore ? `dramaticScore:${dramaticScoreFailure || "invalid"}` : null,
       ].filter(Boolean).join(",")
     : "";
   return {
@@ -383,10 +661,14 @@ export function finalizeFullscreenResponse(input, aiValue, version = directorVer
     lyricsIdentity: input.lyricsIdentity,
     degraded: !usableAI,
     ...(!usableAI ? { degradedReason } : {}),
-    ...(usableAI ? { concept, motif, intensityArc, world } : {}),
+    ...(usableAI ? {
+      concept, motif, intensityArc, world, blocking, dramaticScore,
+      sectionPartition: validAISections ? "ai" : "repaired",
+    } : {}),
     sections,
     directives,
     effects,
+    gestures: gestures || [],
   };
 }
 
@@ -417,21 +699,181 @@ function semanticTriggers(lines) {
   return output;
 }
 
-function verifiedTriggersForSection(input, section, facts, sectionIndex, sectionCount) {
-  const lines = input.lines.slice(section.fromLineIndex, section.toLineIndex + 1);
+function lyricLocalTriggersForLines(lines, facts) {
   const output = semanticTriggers(lines);
-  if (sectionIndex > 0) output.add("section_boundary");
   if (lines.some((line) => (facts.repetitionCounts.get(normalize(line.text)) || 1) > 1)) output.add("repeated_hook");
   if (lines.some((line) => facts.overlapLines.has(line.index))) output.add("duet_overlap");
   if (lines.some((line) => ["backing", "duetA", "duetB", "together"].includes(line.voiceRole))) output.add("voice_handoff");
+  if (lines.some((line) => /(我们|一起|所有|we|together|everyone|僕ら|みんな)/iu.test(line.text))) output.add("collective_chorus");
+  return output;
+}
+
+function verifiedTriggersForSection(input, section, facts, sectionIndex, sectionCount) {
+  const lines = input.lines.slice(section.fromLineIndex, section.toLineIndex + 1);
+  const output = lyricLocalTriggersForLines(lines, facts);
+  if (sectionIndex > 0) output.add("section_boundary");
   const previous = input.lines[section.fromLineIndex - 1];
   if (previous && lines[0].from - previous.to >= 2.8) output.add("silence_gap");
   const density = lines.reduce((sum, line) => sum + Array.from(line.text).length, 0)
     / Math.max(0.001, Math.max(...lines.map((line) => line.to)) - Math.min(...lines.map((line) => line.from)));
   if (density > facts.averageDensity * 1.22) output.add("density_lift");
   if (density < facts.averageDensity * 0.74) output.add("density_release");
-  if (lines.some((line) => /(我们|一起|所有|we|together|everyone|僕ら|みんな)/iu.test(line.text))) output.add("collective_chorus");
   if (sectionIndex === sectionCount - 1) output.add("final_resolution");
+  return output;
+}
+
+function evidenceCategoryCount(triggers) {
+  const categories = new Set();
+  for (const trigger of triggers) {
+    if (["section_boundary", "silence_gap", "final_resolution", "repeated_hook"].includes(trigger)) categories.add("structure");
+    else if (["duet_overlap", "voice_handoff", "collective_chorus"].includes(trigger)) categories.add("voice");
+    else if (trigger.startsWith("semantic_") || trigger === "question_suspension") categories.add("semantic");
+    else if (trigger.startsWith("density_") || trigger.startsWith("audio_")) categories.add("audio");
+  }
+  return categories.size;
+}
+
+function transitionPurposeMatchesEvidence(purpose, triggers) {
+  const evidence = new Set(triggers);
+  if (purpose === "voiceReframe") {
+    return ["duet_overlap", "voice_handoff", "collective_chorus"].some((trigger) => evidence.has(trigger));
+  }
+  if (purpose === "silenceOpen") {
+    return evidence.has("silence_gap") || evidence.has("density_release");
+  }
+  if (purpose === "finalExpansion") {
+    return evidence.has("final_resolution") && [
+      "repeated_hook", "density_lift", "density_release", "collective_chorus",
+      "semantic_distance", "semantic_motion", "semantic_contrast",
+    ].some((trigger) => evidence.has(trigger));
+  }
+  return [
+    "semantic_distance", "semantic_motion", "semantic_contrast", "question_suspension",
+    "repeated_hook", "density_lift", "density_release",
+  ].some((trigger) => evidence.has(trigger));
+}
+
+function sanitizeBlocking(candidate, input, sections, facts) {
+  if (!candidate || typeof candidate !== "object" || Array.isArray(candidate) || candidate.version !== "song-blocking-v1") return null;
+  const baseLayout = allowed(candidate.baseLayout, layouts, null);
+  if (!baseLayout || !Array.isArray(candidate.transitions) || candidate.transitions.length > 3) return null;
+  const transitions = [];
+  let currentLayout = baseLayout;
+  let previousSectionIndex = -1;
+  for (const raw of candidate.transitions) {
+    if (!raw || typeof raw !== "object" || Array.isArray(raw)) continue;
+    const atSectionIndex = Number.isInteger(raw.atSectionIndex) ? raw.atSectionIndex : -1;
+    const section = sections[atSectionIndex];
+    const toLayout = allowed(raw.toLayout, layouts, null);
+    const purpose = allowed(raw.purpose, ["perspectiveShift", "voiceReframe", "silenceOpen", "finalExpansion"], null);
+    const strength = allowed(raw.strength, ["major", "exceptional"], null);
+    const evidence = raw.evidence;
+    if (!section || atSectionIndex <= 0 || atSectionIndex <= previousSectionIndex || !toLayout || toLayout === currentLayout || !purpose || !strength || !evidence || typeof evidence !== "object" || Array.isArray(evidence)) continue;
+    const verified = verifiedTriggersForSection(input, section, facts, atSectionIndex, sections.length);
+    const sectionTriggers = Array.isArray(evidence.sectionTriggers)
+      ? [...new Set(evidence.sectionTriggers.filter((trigger) => triggerNames.has(trigger) && verified.has(trigger)))]
+      : [];
+    const lineIndices = Array.isArray(evidence.lineIndices)
+      ? [...new Set(evidence.lineIndices.filter((lineIndex) => Number.isInteger(lineIndex)
+        && lineIndex >= section.fromLineIndex && lineIndex <= section.toLineIndex))]
+      : [];
+    const audioLandmarkIDs = Array.isArray(evidence.audioLandmarkIDs)
+      ? [...new Set(evidence.audioLandmarkIDs.map((id) => clean(id, 80)).filter(Boolean))].slice(0, 8)
+      : [];
+    const rationale = clean(evidence.rationale, 400);
+    const confidence = clamp(finite(evidence.confidence, 0), 0, 1);
+    const previous = previousSectionIndex >= 0 ? sections[previousSectionIndex] : sections[0];
+    const separated = section.fromLineIndex - previous.fromLineIndex >= 6 || section.fromMs - previous.fromMs >= 20_000;
+    const exceptional = transitions.length >= 2;
+    if (
+      !rationale || lineIndices.length === 0 || sectionTriggers.length === 0 || !separated
+      || !transitionPurposeMatchesEvidence(purpose, sectionTriggers)
+      || (!exceptional && (strength !== "major" || confidence < 0.78 || evidenceCategoryCount(sectionTriggers) < 2))
+      || (exceptional && (strength !== "exceptional" || confidence < 0.9 || evidenceCategoryCount(sectionTriggers) < 3))
+    ) continue;
+    transitions.push({
+      atSectionIndex, toLayout, purpose, strength,
+      evidence: { sectionTriggers, lineIndices, audioLandmarkIDs, rationale, confidence },
+    });
+    currentLayout = toLayout;
+    previousSectionIndex = atSectionIndex;
+  }
+  return { version: "song-blocking-v1", baseLayout, transitions };
+}
+
+function applyBlocking(sections, blocking) {
+  const transitions = new Map(blocking.transitions.map((transition) => [transition.atSectionIndex, transition.toLayout]));
+  let layout = blocking.baseLayout;
+  return sections.map((section, index) => {
+    layout = transitions.get(index) || layout;
+    return { ...section, layout };
+  });
+}
+
+function sanitizeGestures(value, input, sections, facts) {
+  if (!Array.isArray(value)) return null;
+  const counts = { glyph: 0, token: 0, phrase: 0, fullStage: 0 };
+  const ids = new Set();
+  const output = [];
+  for (const raw of value.slice(0, gestureGrammar.budgets.total)) {
+    if (!raw || typeof raw !== "object" || Array.isArray(raw)) continue;
+    const id = clean(raw.id, 160);
+    const lineIndex = Number.isInteger(raw.lineIndex) ? raw.lineIndex : -1;
+    const line = input.lines[lineIndex];
+    const scope = gestureScopes.has(raw.scope) ? raw.scope : null;
+    const primitive = gesturePrimitives.has(raw.primitive) ? raw.primitive : null;
+    const driver = gestureDrivers.has(raw.driver) ? raw.driver : null;
+    const space = gestureSpaces.has(raw.space) ? raw.space : null;
+    if (!id || ids.has(id) || !line || !scope || !primitive || !primitive.startsWith(`${scope}.`) || !driver || !space) continue;
+    const target = raw.target;
+    const envelope = raw.envelope;
+    const evidence = raw.evidence;
+    if (!target || typeof target !== "object" || Array.isArray(target)
+      || !envelope || typeof envelope !== "object" || Array.isArray(envelope)
+      || !evidence || typeof evidence !== "object" || Array.isArray(evidence)) continue;
+    const pieces = graphemes(line.text);
+    const fromGrapheme = Number.isInteger(target.fromGrapheme) ? target.fromGrapheme : -1;
+    const toGrapheme = Number.isInteger(target.toGrapheme) ? target.toGrapheme : -1;
+    const expectedText = clean(target.expectedText, 240);
+    if (fromGrapheme < 0 || toGrapheme <= fromGrapheme || toGrapheme > pieces.length
+      || pieces.slice(fromGrapheme, toGrapheme).join("") !== expectedText
+      || (scope === "glyph" && toGrapheme - fromGrapheme !== 1)
+      || (scope === "phrase" && (fromGrapheme !== 0 || toGrapheme !== pieces.length))) continue;
+    const ranges = line.timingPrecision === "word" ? wordRanges(line) : [];
+    const insideRealWord = ranges.some((range) => fromGrapheme >= range.fromGrapheme && toGrapheme <= range.toGrapheme);
+    if ((scope === "glyph" || driver === "wordWindow") && !insideRealWord) continue;
+    const semanticRole = gestureSemanticRoles.has(evidence.semanticRole) ? evidence.semanticRole : null;
+    const rationale = clean(evidence.rationale, 360);
+    const confidence = clamp(finite(evidence.confidence, 0), 0, 1);
+    if (!semanticRole || !rationale || confidence < (space === "fullStage" ? 0.82 : 0.62)) continue;
+    if (driver === "structuralMoment") {
+      const sectionIndex = sections.findIndex((section) => lineIndex >= section.fromLineIndex && lineIndex <= section.toLineIndex);
+      const section = sections[sectionIndex];
+      if (!section || verifiedTriggersForSection(input, section, facts, sectionIndex, sections.length).size === 0) continue;
+    }
+    counts[scope] += 1;
+    if (space === "fullStage") counts.fullStage += 1;
+    if (counts.glyph > gestureGrammar.budgets.glyph || counts.token > gestureGrammar.budgets.token
+      || counts.phrase > gestureGrammar.budgets.phrase || counts.fullStage > gestureGrammar.budgets.fullStage) {
+      counts[scope] -= 1;
+      if (space === "fullStage") counts.fullStage -= 1;
+      continue;
+    }
+    output.push({
+      version: "lyric-gesture-v1", id, lineIndex, scope,
+      target: { fromGrapheme, toGrapheme, expectedText }, primitive, driver, space,
+      envelope: {
+        attackMs: Math.round(clamp(finite(envelope.attackMs, 280), 80, 900)),
+        holdMs: Math.round(clamp(finite(envelope.holdMs, 220), 0, 1_600)),
+        releaseMs: Math.round(clamp(finite(envelope.releaseMs, 420), 100, 1_200)),
+      },
+      intensity: clamp(finite(raw.intensity, 0.62), 0.2, 1),
+      direction: finite(raw.direction, 1) < 0 ? -1 : 1,
+      paletteRole: allowed(raw.paletteRole, paletteRoles, "accent"),
+      evidence: { semanticRole, rationale, confidence },
+    });
+    ids.add(id);
+  }
   return output;
 }
 
@@ -550,6 +992,24 @@ function sanitizeAISections(value, lines) {
     output.push({ ...candidate, fromLineIndex, toLineIndex });
   }
   return output[0].fromLineIndex === 0 && output.at(-1).toLineIndex === lines.length - 1 ? output : null;
+}
+
+function sanitizeAISectionStyles(value, lineCount) {
+  if (!Array.isArray(value) || value.length === 0 || value.length > Math.ceil(lineCount / 2) + 1) return null;
+  const output = [];
+  for (const candidate of value) {
+    if (!candidate || typeof candidate !== "object" || Array.isArray(candidate)) return null;
+    if (
+      !artDirections.includes(candidate.artDirection)
+      || !layouts.includes(candidate.layout)
+      || !typographies.includes(candidate.typography)
+      || !Number.isInteger(candidate.paletteIndex)
+      || candidate.paletteIndex < 0 || candidate.paletteIndex > 11
+      || !unit(candidate.intensity)
+    ) return null;
+    output.push(candidate);
+  }
+  return output;
 }
 
 function sanitizeDirective(candidate, lineCount) {

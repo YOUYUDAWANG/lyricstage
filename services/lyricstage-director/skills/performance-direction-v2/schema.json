@@ -1,0 +1,173 @@
+{
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["concept", "motif", "intensityArc", "world", "blocking", "sections", "directives", "effects", "gestures"],
+  "properties": {
+    "concept": { "type": "string" },
+    "motif": { "type": "string" },
+    "intensityArc": { "type": "string" },
+    "world": {
+      "type": "object", "additionalProperties": false,
+      "required": ["spatialMode", "motionLaw", "artworkRole", "texture", "depth", "fluidity", "elasticity", "atmosphere", "rationale"],
+      "properties": {
+        "spatialMode": { "type": "string", "enum": ["anchored", "panoramic", "cinematic", "orbital", "splitStage", "chorusWall"] },
+        "motionLaw": { "type": "string", "enum": ["drift", "flow", "pulse", "fall", "orbit", "converge", "suspend", "fracture"] },
+        "artworkRole": { "type": "string", "enum": ["anchor", "portal", "memory", "counterpoint", "atmosphere"] },
+        "texture": { "type": "string", "enum": ["silk", "ink", "mist", "glass", "paper", "light"] },
+        "depth": { "type": "number", "minimum": 0, "maximum": 1 },
+        "fluidity": { "type": "number", "minimum": 0, "maximum": 1 },
+        "elasticity": { "type": "number", "minimum": 0, "maximum": 1 },
+        "atmosphere": { "type": "number", "minimum": 0, "maximum": 1 },
+        "rationale": { "type": "string" }
+      }
+    },
+    "blocking": {
+      "type": "object", "additionalProperties": false,
+      "required": ["version", "baseLayout", "transitions"],
+      "properties": {
+        "version": { "type": "string", "enum": ["song-blocking-v1"] },
+        "baseLayout": { "$ref": "#/$defs/layout" },
+        "transitions": {
+          "type": "array", "maxItems": 3,
+          "items": {
+            "type": "object", "additionalProperties": false,
+            "required": ["atSectionIndex", "toLayout", "purpose", "strength", "evidence"],
+            "properties": {
+              "atSectionIndex": { "type": "integer", "minimum": 1 },
+              "toLayout": { "$ref": "#/$defs/layout" },
+              "purpose": { "type": "string", "enum": ["perspectiveShift", "voiceReframe", "silenceOpen", "finalExpansion"] },
+              "strength": { "type": "string", "enum": ["major", "exceptional"] },
+              "evidence": {
+                "type": "object", "additionalProperties": false,
+                "required": ["sectionTriggers", "lineIndices", "audioLandmarkIDs", "rationale", "confidence"],
+                "properties": {
+                  "sectionTriggers": { "type": "array", "minItems": 1, "uniqueItems": true, "items": { "type": "string" } },
+                  "lineIndices": { "type": "array", "minItems": 1, "uniqueItems": true, "items": { "type": "integer" } },
+                  "audioLandmarkIDs": { "type": "array", "maxItems": 8, "uniqueItems": true, "items": { "type": "string" } },
+                  "rationale": { "type": "string" },
+                  "confidence": { "type": "number", "minimum": 0, "maximum": 1 }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "sections": {
+      "type": "array",
+      "items": {
+        "type": "object", "additionalProperties": false,
+        "required": ["fromLineIndex", "toLineIndex", "artDirection", "layout", "typography", "paletteIndex", "intensity"],
+        "properties": {
+          "fromLineIndex": { "type": "integer" }, "toLineIndex": { "type": "integer" },
+          "artDirection": { "type": "string", "enum": ["editorialKinetic", "neonRail", "paperCut", "liquidMemory", "monoImpact", "celestialGrid"] },
+          "layout": { "$ref": "#/$defs/layout" },
+          "typography": { "type": "string", "enum": ["jpGothic", "jpMincho", "cjkGrotesk", "latinDisplay", "monoEditorial"] },
+          "paletteIndex": { "type": "integer", "minimum": 0, "maximum": 11 },
+          "intensity": { "type": "number", "minimum": 0, "maximum": 1 }
+        }
+      }
+    },
+    "directives": {
+      "type": "array",
+      "items": {
+        "type": "object", "additionalProperties": false,
+        "required": ["lineIndex", "behavior", "alignment", "direction", "intensity", "fontScale", "glyphStagger", "paletteRole"],
+        "properties": {
+          "lineIndex": { "type": "integer" },
+          "behavior": { "type": "string", "enum": ["settle", "assemble", "gravityDrop", "ripple", "stretch", "echo", "drift", "focus", "converge"] },
+          "alignment": { "type": "string", "enum": ["leading", "center", "trailing"] },
+          "direction": { "type": "integer", "enum": [-1, 1] },
+          "intensity": { "type": "number", "minimum": 0.35, "maximum": 1.25 },
+          "fontScale": { "type": "number", "minimum": 0.78, "maximum": 1.22 },
+          "glyphStagger": { "type": "number", "minimum": 0, "maximum": 0.14 },
+          "paletteRole": { "$ref": "#/$defs/paletteRole" }
+        }
+      }
+    },
+    "effects": {
+      "type": "array", "minItems": 1,
+      "items": {
+        "type": "object", "additionalProperties": false,
+        "required": ["sectionIndex", "cardID", "presentation", "primary", "support", "evidence"],
+        "properties": {
+          "sectionIndex": { "type": "integer" },
+          "cardID": { "type": "string", "enum": ["custom", "distance-convergence", "chorus-memory", "contrast-cut", "silence-aperture", "duet-mirror", "chorus-expansion", "question-suspension", "gravity-resolution", "density-lift", "field-release", "motif-recall", "final-dissolution", "motion-ribbon", "contrast-prism", "distance-orbit", "chorus-trail", "final-bloom"] },
+          "presentation": { "type": "string", "enum": ["reading", "section", "hero", "duet", "aperture"] },
+          "primary": { "$ref": "#/$defs/primitiveUse" },
+          "support": { "type": "array", "maxItems": 2, "items": { "$ref": "#/$defs/primitiveUse" } },
+          "evidence": { "$ref": "#/$defs/effectEvidence" }
+        }
+      }
+    },
+    "gestures": {
+      "type": "array",
+      "items": {
+        "type": "object", "additionalProperties": false,
+        "required": ["id", "lineIndex", "scope", "target", "primitive", "driver", "space", "envelope", "intensity", "direction", "paletteRole", "evidence"],
+        "properties": {
+          "id": { "type": "string" }, "lineIndex": { "type": "integer" },
+          "scope": { "type": "string", "enum": ["glyph", "token", "phrase"] },
+          "target": {
+            "type": "object", "additionalProperties": false,
+            "required": ["fromGrapheme", "toGrapheme", "expectedText"],
+            "properties": {
+              "fromGrapheme": { "type": "integer" },
+              "toGrapheme": { "type": "integer" },
+              "expectedText": { "type": "string" }
+            }
+          },
+          "primitive": { "type": "string", "enum": ["glyph.weightPulse", "glyph.strokeTrace", "glyph.offsetSnap", "token.underlinePath", "token.halo", "token.echo", "token.elasticFocus", "phrase.breathe", "phrase.arc", "phrase.breakReform", "phrase.handoff", "phrase.contour"] },
+          "driver": { "type": "string", "enum": ["lineEnter", "wordWindow", "lineHold", "lineExit", "structuralMoment"] },
+          "space": { "type": "string", "enum": ["lyricLocal", "lyricToArtwork", "fullStage"] },
+          "envelope": {
+            "type": "object", "additionalProperties": false,
+            "required": ["attackMs", "holdMs", "releaseMs"],
+            "properties": {
+              "attackMs": { "type": "number" },
+              "holdMs": { "type": "number" },
+              "releaseMs": { "type": "number" }
+            }
+          },
+          "intensity": { "type": "number" },
+          "direction": { "type": "integer", "enum": [-1, 1] },
+          "paletteRole": { "$ref": "#/$defs/paletteRole" },
+          "evidence": {
+            "type": "object", "additionalProperties": false,
+            "required": ["semanticRole", "rationale", "confidence"],
+            "properties": {
+              "semanticRole": { "type": "string", "enum": ["identity", "motion", "distance", "question", "repetition", "rupture", "resolution", "collective"] },
+              "rationale": { "type": "string" },
+              "confidence": { "type": "number" }
+            }
+          }
+        }
+      }
+    }
+  },
+  "$defs": {
+    "layout": { "type": "string", "enum": ["monument", "editorialSplit", "railLeading", "railTrailing", "duetDivide"] },
+    "paletteRole": { "type": "string", "enum": ["primary", "accent", "warm", "secondary"] },
+    "primitiveUse": {
+      "type": "object", "additionalProperties": false,
+      "required": ["primitive", "intensity"],
+      "properties": {
+        "primitive": { "type": "string", "enum": ["field.drift", "field.aperture", "field.ribbon", "field.prism", "field.rain", "geometry.converge", "geometry.expand", "geometry.mirror", "geometry.cut", "geometry.suspend", "geometry.orbit", "memory.echo", "memory.trail", "density.lift", "density.release", "motif.recall", "cover.island", "cover.portal", "transition.bloom", "transition.dissolve"] },
+        "intensity": { "type": "number", "minimum": 0, "maximum": 1 },
+        "direction": { "type": "integer", "enum": [-1, 1] },
+        "scale": { "type": "number", "minimum": 0.4, "maximum": 1.2 }
+      }
+    },
+    "effectEvidence": {
+      "type": "object", "additionalProperties": false,
+      "required": ["songMotif", "sectionTriggers", "lineIndices", "rationale", "confidence"],
+      "properties": {
+        "songMotif": { "type": "string" },
+        "sectionTriggers": { "type": "array", "minItems": 1, "uniqueItems": true, "items": { "type": "string" } },
+        "lineIndices": { "type": "array", "minItems": 1, "uniqueItems": true, "items": { "type": "integer" } },
+        "rationale": { "type": "string" },
+        "confidence": { "type": "number", "minimum": 0, "maximum": 1 }
+      }
+    }
+  }
+}

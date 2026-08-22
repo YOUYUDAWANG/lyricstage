@@ -16,6 +16,10 @@ export default defineConfig({
   },
   test: {
     environment: "node",
-    include: ["packages/**/*.test.ts", "apps/stage/src/**/*.test.ts"],
+    include: [
+      "packages/**/*.test.ts",
+      "apps/stage/src/**/*.test.ts",
+      "apps/youtube-music-companion/src/**/*.test.ts",
+    ],
   },
 });

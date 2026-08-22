@@ -1,0 +1,13 @@
+{
+  "version": "lyric-gesture-grammar-v1",
+  "scopes": ["glyph", "token", "phrase"],
+  "drivers": ["lineEnter", "wordWindow", "lineHold", "lineExit", "structuralMoment"],
+  "spaces": ["lyricLocal", "lyricToArtwork", "fullStage"],
+  "semanticRoles": ["identity", "motion", "distance", "question", "repetition", "rupture", "resolution", "collective"],
+  "primitives": [
+    "glyph.weightPulse", "glyph.strokeTrace", "glyph.offsetSnap",
+    "token.underlinePath", "token.halo", "token.echo", "token.elasticFocus",
+    "phrase.breathe", "phrase.arc", "phrase.breakReform", "phrase.handoff", "phrase.contour"
+  ],
+  "budgets": { "glyph": 24, "token": 16, "phrase": 8, "fullStage": 6, "total": 48, "maximumConcurrent": 2 }
+}

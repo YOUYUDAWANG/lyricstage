@@ -38,6 +38,32 @@ export interface YouTubeMusicSnapshotV0 {
 
 export type YouTubeMusicTransportActionV0 = "play" | "pause" | "previous" | "next";
 
+export const youtubeMusicBridgeFailureReasonsV0 = [
+  "extension-bridge-unavailable",
+  "extension-context-invalidated",
+  "extension-bridge-request-failed",
+  "extension-bridge-response-invalid",
+] as const;
+
+export type YouTubeMusicBridgeFailureReasonV0 =
+  typeof youtubeMusicBridgeFailureReasonsV0[number];
+
+export const youtubeMusicBridgeFailureReasonV0 = (
+  error: unknown,
+  fallback: YouTubeMusicBridgeFailureReasonV0 = "extension-bridge-request-failed",
+): YouTubeMusicBridgeFailureReasonV0 => {
+  const message = error instanceof Error
+    ? error.message
+    : typeof error === "string"
+      ? error
+      : error && typeof error === "object" && typeof (error as { message?: unknown }).message === "string"
+        ? (error as { message: string }).message
+        : "";
+  return /extension context invalidated/i.test(message)
+    ? "extension-context-invalidated"
+    : fallback;
+};
+
 export interface YouTubeMusicBridgeUpdateV0 {
   type: "youtube-music-bridge-update";
   snapshot: YouTubeMusicSnapshotV0;

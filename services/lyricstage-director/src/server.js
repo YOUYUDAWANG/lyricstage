@@ -25,8 +25,33 @@ import { callMusicIdentityWithFallback, callVertexDirector } from "./provider.js
 
 const maximumBodyBytes = 96_000;
 const cacheTTL = 30 * 24 * 60 * 60 * 1000;
+const directorDeadlineMilliseconds = 105_000;
+const identityDeadlineMilliseconds = 32_000;
 const inFlight = new Map();
 let activeUpstreamRequests = 0;
+
+const warn = (dependencies, event, error) => {
+  const detail = String(error?.message || error || "unknown").slice(0, 160);
+  const reporter = typeof dependencies.warn === "function" ? dependencies.warn : console.warn;
+  reporter(event, { detail });
+};
+
+const readCache = async (cache, key, dependencies) => {
+  try {
+    return await cache.get(key);
+  } catch (error) {
+    warn(dependencies, "cache_read_failed", error);
+    return null;
+  }
+};
+
+const writeCache = async (cache, key, value, dependencies) => {
+  try {
+    await cache.put(key, value, cacheTTL);
+  } catch (error) {
+    warn(dependencies, "cache_write_failed", error);
+  }
+};
 
 export function loadEnvironment(source = process.env) {
   return {
@@ -78,7 +103,7 @@ export async function handleRequest(request, environment, dependencies = {}) {
     return json({ error: error?.message === "payload_too_large" ? "payload_too_large" : "invalid_request" }, error?.message === "payload_too_large" ? 413 : 400);
   }
   if (isMusicIdentityRequest) {
-    return handleMusicIdentity(raw, environment, dependencies);
+    return handleMusicIdentity(raw, environment, dependencies, request.signal);
   }
   let input;
   try {
@@ -88,7 +113,7 @@ export async function handleRequest(request, environment, dependencies = {}) {
   }
   const key = sha256(`${environment.DIRECTOR_VERSION}:${JSON.stringify(input)}`);
   const cache = dependencies.cache || new FileCache(environment.CACHE_DIR);
-  const cached = await cache.get(key);
+  const cached = await readCache(cache, key, dependencies);
   if (cached) return json({ ...cached, cache: "hit" });
   if (inFlight.has(key)) return json(await inFlight.get(key));
   if (activeUpstreamRequests >= 2) return json({ error: "busy" }, 429, { "retry-after": "5" });
@@ -97,10 +122,26 @@ export async function handleRequest(request, environment, dependencies = {}) {
     activeUpstreamRequests += 1;
     try {
       const provider = dependencies.provider || callVertexDirector;
-      const upstream = await provider(environment, fullscreenSystemPrompt, buildFullscreenPromptInput(input));
-      const response = finalizeFullscreenResponse(input, upstream.value, environment.DIRECTOR_VERSION);
+      const promptInput = buildFullscreenPromptInput(input);
+      const providerOptions = {
+        signal: request.signal,
+        deadlineUnixMs: Date.now() + directorDeadlineMilliseconds,
+      };
+      let upstream = await provider(environment, fullscreenSystemPrompt, promptInput, providerOptions);
+      let response = finalizeFullscreenResponse(input, upstream.value, environment.DIRECTOR_VERSION);
+      if (response.degraded) {
+        upstream = await provider(environment, fullscreenSystemPrompt, {
+          ...promptInput,
+          retryContext: {
+            attempt: 2,
+            rejectedReason: response.degradedReason,
+            instruction: "Regenerate the complete plan. Correct the rejected contract field without weakening lyric, timing, evidence, layout-change, or readability constraints.",
+          },
+        }, providerOptions);
+        response = finalizeFullscreenResponse(input, upstream.value, environment.DIRECTOR_VERSION);
+      }
       const envelope = { ...response, model: upstream.model || environment.MODEL, cache: "miss" };
-      if (!response.degraded) await cache.put(key, envelope, cacheTTL);
+      if (!response.degraded) await writeCache(cache, key, envelope, dependencies);
       return envelope;
     } catch (error) {
       return {
@@ -123,7 +164,7 @@ export async function handleRequest(request, environment, dependencies = {}) {
   return json(await task);
 }
 
-async function handleMusicIdentity(raw, environment, dependencies) {
+async function handleMusicIdentity(raw, environment, dependencies, signal) {
   let input;
   try {
     input = sanitizeMusicIdentityRequest(raw);
@@ -133,7 +174,7 @@ async function handleMusicIdentity(raw, environment, dependencies) {
   const resolverVersion = environment.IDENTITY_RESOLVER_VERSION || musicIdentityResolverVersion;
   const key = sha256(`music-identity:${resolverVersion}:${JSON.stringify(input)}`);
   const cache = dependencies.cache || new FileCache(environment.CACHE_DIR);
-  const cached = await cache.get(key);
+  const cached = await readCache(cache, key, dependencies);
   if (cached) return json({ ...cached, cache: "hit" });
   if (inFlight.has(key)) return json(await inFlight.get(key));
   if (activeUpstreamRequests >= 2) return json({ error: "busy" }, 429, { "retry-after": "5" });
@@ -147,10 +188,12 @@ async function handleMusicIdentity(raw, environment, dependencies) {
         musicIdentitySystemPrompt,
         buildMusicIdentityPromptInput(input),
         musicIdentityResponseSchema,
+        undefined,
+        { signal, deadlineUnixMs: Date.now() + identityDeadlineMilliseconds },
       );
       const response = finalizeMusicIdentityResponse(input, upstream.value, upstream.groundingMetadata);
       const envelope = { ...response, resolverVersion, model: upstream.model || environment.IDENTITY_MODEL, cache: "miss" };
-      if (response.status === "grounded") await cache.put(key, envelope, cacheTTL);
+      if (response.status === "grounded") await writeCache(cache, key, envelope, dependencies);
       return envelope;
     } catch (error) {
       return {
@@ -183,6 +226,17 @@ async function handleMusicIdentity(raw, environment, dependencies) {
 
 export function createNodeServer(environment = loadEnvironment(), dependencies = {}) {
   return createServer(async (incoming, outgoing) => {
+    const abortController = new AbortController();
+    const abort = () => abortController.abort(new Error("client_disconnected"));
+    const abortIncompleteRequest = () => {
+      if (!incoming.complete) abort();
+    };
+    const abortIncompleteResponse = () => {
+      if (!outgoing.writableEnded) abort();
+    };
+    incoming.once("aborted", abort);
+    incoming.once("close", abortIncompleteRequest);
+    outgoing.once("close", abortIncompleteResponse);
     try {
       const chunks = [];
       let size = 0;
@@ -202,6 +256,7 @@ export function createNodeServer(environment = loadEnvironment(), dependencies =
       const response = await handleRequest(new Request(`${protocol}://${host}${incoming.url || "/"}`, {
         method,
         headers,
+        signal: abortController.signal,
         ...(method === "GET" || method === "HEAD" ? {} : { body: Buffer.concat(chunks) }),
       }), environment, dependencies);
       outgoing.statusCode = response.status;
@@ -213,6 +268,10 @@ export function createNodeServer(environment = loadEnvironment(), dependencies =
       outgoing.setHeader("content-type", "application/json; charset=utf-8");
       outgoing.end(JSON.stringify({ error: status === 413 ? "payload_too_large" : "internal_error" }));
       if (status === 500) console.error("request_failed", error);
+    } finally {
+      incoming.off("aborted", abort);
+      incoming.off("close", abortIncompleteRequest);
+      outgoing.off("close", abortIncompleteResponse);
     }
   });
 }

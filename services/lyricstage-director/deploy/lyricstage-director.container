@@ -4,7 +4,7 @@ After=network-online.target
 Wants=network-online.target
 
 [Container]
-Image=localhost/lyricstage-director:1.3.4
+Image=localhost/lyricstage-director:1.5.8
 ContainerName=lyricstage-director
 PublishPort=127.0.0.1:8092:8787
 EnvironmentFile=/etc/lyricstage-director/env

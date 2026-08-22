@@ -11,6 +11,20 @@ import {
   type PerformanceTriggerV1,
   type StagePresentationV1,
 } from "./effectGrammar";
+import {
+  applySongBlockingV1,
+  blockingFromSectionsV1,
+  compileLocalLyricGesturesV1,
+  sanitizeLyricGesturesV1,
+  sanitizeSongBlockingV1,
+  type LyricGestureV1,
+  type SongBlockingV1,
+} from "./lyricChoreography";
+import {
+  compileLocalDramaticScoreV1,
+  sanitizeDramaticScoreV1,
+  type DramaticScoreV1,
+} from "./dramaticScore";
 
 export type PerformanceArtDirectionV1 =
   | "editorialKinetic"
@@ -121,9 +135,12 @@ export interface DirectorPlanV1 {
   motif: string;
   intensityArc: string;
   world: PerformanceWorldV1;
+  blocking: SongBlockingV1;
   sections: DirectorSectionV1[];
   directives: DirectorLineDirectiveV1[];
   effects: EffectRecipeV1[];
+  gestures: LyricGestureV1[];
+  dramaticScore: DramaticScoreV1;
 }
 
 export interface DirectorResolutionResponseV1 {
@@ -168,6 +185,17 @@ export interface FullscreenDirectorWireV2 extends Omit<FullscreenDirectorWireV1,
   version: "lyricstage-fullscreen-director-v2";
   world?: unknown;
   effects?: unknown;
+}
+
+export interface FullscreenDirectorWireV3 extends Omit<FullscreenDirectorWireV2, "version"> {
+  version: "lyricstage-fullscreen-director-v3";
+  blocking?: unknown;
+  gestures?: unknown;
+}
+
+export interface FullscreenDirectorWireV4 extends Omit<FullscreenDirectorWireV3, "version"> {
+  version: "lyricstage-fullscreen-director-v4";
+  dramaticScore?: unknown;
 }
 
 const artDirections: PerformanceArtDirectionV1[] = [
@@ -373,7 +401,8 @@ export const compileLocalDirectorPlanV1 = (lyrics: LyricDocumentV0): DirectorPla
     };
   });
   const motif = "cover-led editorial atmosphere";
-  const effects = compileLocalEffectRecipesV1(lyrics, sections, motif);
+  const blocking = blockingFromSectionsV1(sections);
+  const blockedSections = applySongBlockingV1(sections, blocking);
   return finalizePlan({
     version: "director-plan-v1",
     recordingID: lyrics.recordingID,
@@ -384,9 +413,12 @@ export const compileLocalDirectorPlanV1 = (lyrics: LyricDocumentV0): DirectorPla
     motif,
     intensityArc: "quiet verses, structural lifts, repeated hooks resolve with memory",
     world: localPerformanceWorldV1(),
-    sections,
+    blocking,
+    sections: blockedSections,
     directives,
-    effects,
+    effects: compileLocalEffectRecipesV1(lyrics, blockedSections, motif),
+    gestures: compileLocalLyricGesturesV1(lyrics),
+    dramaticScore: compileLocalDramaticScoreV1(lyrics, blockedSections),
   });
 };
 
@@ -532,6 +564,8 @@ export const adaptLegacyDirectorResponseV1 = (
     };
   });
   const directives = local.directives.map((directive) => remoteByLine.get(directive.lineIndex) ?? directive);
+  const blocking = blockingFromSectionsV1(sections);
+  const blockedSections = applySongBlockingV1(sections, blocking);
   return finalizePlan({
     version: "director-plan-v1",
     recordingID: lyrics.recordingID,
@@ -542,9 +576,12 @@ export const adaptLegacyDirectorResponseV1 = (
     motif,
     intensityArc: intensityArc || local.intensityArc,
     world: performanceWorldFromWireV1(undefined, [concept, motif, directorVersion], source),
-    sections,
+    blocking,
+    sections: blockedSections,
     directives,
-    effects: compileLocalEffectRecipesV1(lyrics, sections, motif),
+    effects: compileLocalEffectRecipesV1(lyrics, blockedSections, motif),
+    gestures: local.gestures,
+    dramaticScore: compileLocalDramaticScoreV1(lyrics, blockedSections),
   });
 };
 
@@ -624,6 +661,8 @@ export const adaptFullscreenDirectorResponseV1 = (
   }
   const directives = lyrics.lines.map((line) => directivesByLine.get(line.lineIndex)).filter(Boolean) as DirectorLineDirectiveV1[];
   if (directives.length !== lyrics.lines.length) return null;
+  const blocking = blockingFromSectionsV1(sections);
+  const blockedSections = applySongBlockingV1(sections, blocking);
   return finalizePlan({
     version: "director-plan-v1",
     recordingID: lyrics.recordingID,
@@ -634,9 +673,12 @@ export const adaptFullscreenDirectorResponseV1 = (
     motif,
     intensityArc,
     world: performanceWorldFromWireV1((wire as Record<string, unknown>).world, [concept, motif, directorVersion], source),
-    sections,
+    blocking,
+    sections: blockedSections,
     directives,
-    effects: compileLocalEffectRecipesV1(lyrics, sections, motif),
+    effects: compileLocalEffectRecipesV1(lyrics, blockedSections, motif),
+    gestures: compileLocalLyricGesturesV1(lyrics),
+    dramaticScore: compileLocalDramaticScoreV1(lyrics, blockedSections),
   });
 };
 
@@ -671,6 +713,54 @@ export const adaptFullscreenDirectorResponseV2 = (
   });
 };
 
+export const adaptFullscreenDirectorResponseV3 = (
+  lyrics: LyricDocumentV0,
+  expectedTrackID: string,
+  expectedLyricsHash: string,
+  value: unknown,
+  source: "ai" | "cache" = "ai",
+): DirectorPlanV1 | null => {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  const wire = value as Partial<FullscreenDirectorWireV3>;
+  if (
+    wire.version !== "lyricstage-fullscreen-director-v3"
+    || !Array.isArray(wire.effects)
+    || !Array.isArray(wire.gestures)
+  ) return null;
+  const base = adaptFullscreenDirectorResponseV2(lyrics, expectedTrackID, expectedLyricsHash, {
+    ...wire,
+    version: "lyricstage-fullscreen-director-v2",
+  }, source);
+  if (!base) return null;
+  const blocking = sanitizeSongBlockingV1(wire.blocking, base.sections);
+  const gestures = sanitizeLyricGesturesV1(lyrics, wire.gestures);
+  if (!blocking || !gestures || gestures.length === 0) return null;
+  const sections = applySongBlockingV1(base.sections, blocking);
+  const { planIdentity: _ignored, ...withoutIdentity } = base;
+  return finalizePlan({ ...withoutIdentity, blocking, sections, gestures });
+};
+
+export const adaptFullscreenDirectorResponseV4 = (
+  lyrics: LyricDocumentV0,
+  expectedTrackID: string,
+  expectedLyricsHash: string,
+  value: unknown,
+  source: "ai" | "cache" = "ai",
+): DirectorPlanV1 | null => {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  const wire = value as Partial<FullscreenDirectorWireV4>;
+  if (wire.version !== "lyricstage-fullscreen-director-v4") return null;
+  const base = adaptFullscreenDirectorResponseV3(lyrics, expectedTrackID, expectedLyricsHash, {
+    ...wire,
+    version: "lyricstage-fullscreen-director-v3",
+  }, source);
+  if (!base) return null;
+  const dramaticScore = sanitizeDramaticScoreV1(lyrics, wire.dramaticScore);
+  if (!dramaticScore) return null;
+  const { planIdentity: _ignored, ...withoutIdentity } = base;
+  return finalizePlan({ ...withoutIdentity, dramaticScore });
+};
+
 export const isDirectorPlanV1ForLyrics = (
   value: unknown,
   lyrics: LyricDocumentV0,
@@ -687,11 +777,14 @@ export const isDirectorPlanV1ForLyrics = (
     || !cleanString(plan.motif, 160)
     || !cleanString(plan.intensityArc, 200)
     || !plan.world
+    || !plan.blocking
     || (plan.source !== "local" && plan.source !== "ai" && plan.source !== "cache")
     || !Array.isArray(plan.sections)
     || plan.sections.length === 0
     || !Array.isArray(plan.directives)
     || !Array.isArray(plan.effects)
+    || !Array.isArray(plan.gestures)
+    || !plan.dramaticScore
   ) return false;
   const complete = plan as DirectorPlanV1;
   if (complete.planIdentity !== planIdentity(complete)) return false;
@@ -714,7 +807,13 @@ export const isDirectorPlanV1ForLyrics = (
     && [complete.world.depth, complete.world.fluidity, complete.world.elasticity, complete.world.atmosphere]
       .every((value) => Number.isFinite(value) && value >= 0 && value <= 1)
     && cleanString(complete.world.rationale, 320).length > 0;
-  return validWorld && validEffects && complete.sections.every((section) => (
+  const validBlocking = sanitizeSongBlockingV1(complete.blocking, complete.sections);
+  const validGestures = sanitizeLyricGesturesV1(lyrics, complete.gestures);
+  const validDramaticScore = sanitizeDramaticScoreV1(lyrics, complete.dramaticScore);
+  const blockedLayoutsMatch = validBlocking
+    ? applySongBlockingV1(complete.sections, validBlocking).every((section, index) => section.layout === complete.sections[index]!.layout)
+    : false;
+  return validWorld && validEffects && Boolean(validBlocking) && Boolean(validGestures) && Boolean(validDramaticScore) && blockedLayoutsMatch && complete.sections.every((section) => (
     section
     && Number.isInteger(section.fromLineIndex)
     && Number.isInteger(section.toLineIndex)

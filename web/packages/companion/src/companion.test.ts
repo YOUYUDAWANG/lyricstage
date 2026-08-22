@@ -3,6 +3,7 @@ import { YouTubeMusicPlaybackClockV0 } from "./clock";
 import { YouTubeMusicSourceRegistryV0 } from "./sourceRegistry";
 import {
   isYouTubeMusicSnapshotV0,
+  youtubeMusicBridgeFailureReasonV0,
   youtubeMusicCompanionVersion,
   youtubeMusicRecordingID,
   type YouTubeMusicSnapshotV0,
@@ -48,6 +49,15 @@ describe("YouTube Music companion protocol", () => {
     expect(isYouTubeMusicSnapshotV0({ ...snapshot(), controls: { ...snapshot().controls!, next: "yes" } })).toBe(false);
   });
 
+  it("classifies an invalidated extension context as a fatal bridge failure", () => {
+    expect(youtubeMusicBridgeFailureReasonV0(new Error("Extension context invalidated.")))
+      .toBe("extension-context-invalidated");
+    expect(youtubeMusicBridgeFailureReasonV0({ message: "Extension context invalidated." }))
+      .toBe("extension-context-invalidated");
+    expect(youtubeMusicBridgeFailureReasonV0(new Error("message channel closed")))
+      .toBe("extension-bridge-request-failed");
+  });
+
   it("extrapolates only from an authoritative playing snapshot", () => {
     const clock = new YouTubeMusicPlaybackClockV0();
     expect(clock.accept(snapshot(), 200)).toBe(true);
@@ -88,11 +98,15 @@ describe("YouTube Music companion protocol", () => {
       sentAtUnixMs: 1100,
       track: { ...snapshot().track, trackID: "paused-tab" },
       playback: { ...snapshot().playback, state: "paused" },
-    }), 1100)).toBe(false);
+    }), 1100)).toBe(true);
     expect(registry.sourceTabID).toBe(10);
+    expect(registry.snapshotForTab(11, 1100)?.track.trackID).toBe("paused-tab");
 
     expect(registry.remove(10)).toBe(true);
-    expect(registry.state().connected).toBe(false);
+    expect(registry.state(1100)).toMatchObject({
+      connected: true,
+      snapshot: { track: { trackID: "paused-tab" } },
+    });
     expect(registry.accept(11, snapshot({
       sequence: 2,
       sentAtUnixMs: 1200,
@@ -110,5 +124,77 @@ describe("YouTube Music companion protocol", () => {
       connected: false,
     });
     expect(registry.sourceTabID).toBeUndefined();
+  });
+
+  it("keeps each embedded Stage bound to its own tab while standalone uses the authoritative source", () => {
+    const registry = new YouTubeMusicSourceRegistryV0();
+    const first = snapshot({
+      sentAtUnixMs: 1000,
+      track: { ...snapshot().track, trackID: "first-playing" },
+    });
+    const second = snapshot({
+      sequence: 1,
+      sentAtUnixMs: 1100,
+      track: { ...snapshot().track, trackID: "second-paused" },
+      playback: { ...snapshot().playback, state: "paused" },
+    });
+
+    expect(registry.accept(10, first, 1000)).toBe(true);
+    expect(registry.accept(11, second, 1100)).toBe(true);
+    expect(registry.state(1100).snapshot?.track.trackID).toBe("first-playing");
+    expect(registry.stateForTab(10, 1100).snapshot?.track.trackID).toBe("first-playing");
+    expect(registry.stateForTab(11, 1100).snapshot?.track.trackID).toBe("second-paused");
+    expect(registry.stateForTab(12, 1100)).toEqual({
+      type: "youtube-music-bridge-state",
+      connected: false,
+    });
+  });
+
+  it("leases by local receipt time so a sender clock in the future cannot lock the source", () => {
+    const registry = new YouTubeMusicSourceRegistryV0();
+    expect(registry.accept(10, snapshot({ sentAtUnixMs: 9_999_999_999 }), 1000)).toBe(true);
+    expect(registry.state(4000).connected).toBe(true);
+    expect(registry.state(4001).connected).toBe(false);
+
+    expect(registry.accept(10, snapshot({
+      sequence: 0,
+      sentAtUnixMs: 2000,
+      track: { ...snapshot().track, trackID: "recovered-after-future-clock" },
+    }), 4001)).toBe(true);
+    expect(registry.snapshotForTab(10, 4001)?.track.trackID).toBe("recovered-after-future-clock");
+  });
+
+  it("expires tabs independently and promotes the newest live playing source", () => {
+    const registry = new YouTubeMusicSourceRegistryV0();
+    registry.accept(10, snapshot({ sentAtUnixMs: 1000 }), 1000);
+    registry.accept(11, snapshot({
+      sentAtUnixMs: 1001,
+      track: { ...snapshot().track, trackID: "secondary-playing" },
+    }), 2000);
+
+    expect(registry.stateForTab(10, 4001).connected).toBe(false);
+    expect(registry.sourceTabID).toBe(11);
+    expect(registry.snapshot?.track.trackID).toBe("secondary-playing");
+  });
+
+  it("hands standalone authority to an already-known playing tab when the current tab pauses", () => {
+    const registry = new YouTubeMusicSourceRegistryV0();
+    registry.accept(10, snapshot({
+      sentAtUnixMs: 1000,
+      track: { ...snapshot().track, trackID: "first" },
+    }), 1000);
+    registry.accept(11, snapshot({
+      sentAtUnixMs: 1100,
+      track: { ...snapshot().track, trackID: "second" },
+    }), 1100);
+    expect(registry.sourceTabID).toBe(10);
+
+    registry.accept(10, snapshot({
+      sequence: 5,
+      sentAtUnixMs: 1200,
+      track: { ...snapshot().track, trackID: "first" },
+      playback: { ...snapshot().playback, state: "paused" },
+    }), 1200);
+    expect(registry.sourceTabID).toBe(11);
   });
 });

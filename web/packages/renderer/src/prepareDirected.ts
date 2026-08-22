@@ -1,9 +1,11 @@
 import { stableHash32, type LyricDocumentV0, type LyricLineV0 } from "@lyricstage/contracts";
-import type {
-  DirectorLineDirectiveV1,
-  DirectorPlanV1,
-  DirectorSectionV1,
-  PerformanceTypographyV1,
+import {
+  lyricGraphemesV1,
+  type LyricGestureV1,
+  type DirectorLineDirectiveV1,
+  type DirectorPlanV1,
+  type DirectorSectionV1,
+  type PerformanceTypographyV1,
 } from "@lyricstage/performance";
 import type {
   DirectedStagePaletteV1,
@@ -12,6 +14,8 @@ import type {
   PreparedDirectedGlyphV1,
   PreparedDirectedLineV1,
   PreparedDirectedStageV1,
+  PreparedDramaticMomentV1,
+  PreparedLyricGestureV1,
 } from "./directedTypes";
 
 export const directedPalettesV1: DirectedStagePaletteV1[] = [
@@ -236,6 +240,104 @@ const prepareLine = (
   };
 };
 
+const wordWindowForGesture = (
+  source: LyricLineV0,
+  gesture: LyricGestureV1,
+): { fromMs: number; toMs: number } | undefined => {
+  const pieces = lyricGraphemesV1(source.text);
+  let cursor = 0;
+  for (const word of source.words ?? []) {
+    const wordPieces = lyricGraphemesV1(word.text);
+    let start = -1;
+    for (let index = cursor; index <= pieces.length - wordPieces.length; index += 1) {
+      if (wordPieces.every((piece, offset) => pieces[index + offset] === piece)) {
+        start = index;
+        break;
+      }
+    }
+    if (start < 0) continue;
+    const end = start + wordPieces.length;
+    cursor = end;
+    if (gesture.target.fromGrapheme >= start && gesture.target.toGrapheme <= end) {
+      return { fromMs: word.fromMs, toMs: word.toMs };
+    }
+  }
+  return undefined;
+};
+
+const prepareGesture = (
+  gesture: LyricGestureV1,
+  line: PreparedDirectedLineV1,
+  source: LyricLineV0,
+): PreparedLyricGestureV1 | null => {
+  const targetGlyphs = line.glyphs.filter((glyph) => (
+    glyph.index >= gesture.target.fromGrapheme && glyph.index < gesture.target.toGrapheme
+  ));
+  if (targetGlyphs.length === 0) return null;
+  const minimumX = Math.min(...targetGlyphs.map((glyph) => glyph.x));
+  const maximumX = Math.max(...targetGlyphs.map((glyph) => glyph.x + glyph.width));
+  const minimumY = Math.min(...targetGlyphs.map((glyph) => glyph.y - line.fontSize));
+  const maximumY = Math.max(...targetGlyphs.map((glyph) => glyph.y + line.lineHeight * 0.12));
+  const requestedDuration = gesture.envelope.attackMs + gesture.envelope.holdMs + gesture.envelope.releaseMs;
+  const lineDuration = Math.max(1, line.toMs - line.fromMs);
+  const window = gesture.driver === "wordWindow" ? wordWindowForGesture(source, gesture) : undefined;
+  const availableDuration = Math.max(1, Math.min(lineDuration, window ? window.toMs - window.fromMs : requestedDuration));
+  const duration = Math.min(requestedDuration, availableDuration);
+  const attack = Math.min(gesture.envelope.attackMs, duration * 0.48);
+  const release = Math.min(gesture.envelope.releaseMs, Math.max(0, duration - attack));
+  const hold = Math.max(0, duration - attack - release);
+  let fromMs = line.fromMs;
+  if (gesture.driver === "wordWindow" && window) fromMs = window.fromMs;
+  else if (gesture.driver === "lineHold") fromMs = line.fromMs + Math.max(0, (lineDuration - duration) * 0.5);
+  else if (gesture.driver === "lineExit") fromMs = Math.max(line.fromMs, line.toMs - duration);
+  else if (gesture.driver === "structuralMoment") fromMs = line.fromMs;
+  fromMs = Math.min(fromMs, Math.max(line.fromMs, line.toMs - duration));
+  return {
+    gesture,
+    lineIndex: line.lineIndex,
+    fromMs,
+    attackEndMs: fromMs + attack,
+    releaseStartMs: fromMs + attack + hold,
+    toMs: fromMs + duration,
+    targetGlyphIndices: targetGlyphs.map((glyph) => glyph.index),
+    bounds: { x: minimumX, y: minimumY, width: maximumX - minimumX, height: maximumY - minimumY },
+  };
+};
+
+const prepareDramaticMoments = (
+  lyrics: LyricDocumentV0,
+  plan: DirectorPlanV1,
+): PreparedDramaticMomentV1[] => {
+  const lineByIndex = new Map(lyrics.lines.map((line) => [line.lineIndex, line]));
+  const songEndMs = Math.max(1, ...lyrics.lines.map((line) => line.toMs));
+  const prepared = plan.dramaticScore.signatureMoments.map<PreparedDramaticMomentV1 | null>((moment) => {
+    const first = lineByIndex.get(moment.fromLineIndex);
+    const last = lineByIndex.get(moment.toLineIndex);
+    if (!first || !last) return null;
+    const rawDuration = Math.max(1, last.toMs - first.fromMs);
+    const duration = clamp(rawDuration + 6_000, 8_000, 20_000);
+    let fromMs = Math.max(0, first.fromMs - duration * 0.22);
+    let toMs = Math.min(songEndMs, fromMs + duration);
+    if (toMs - fromMs < duration && toMs === songEndMs) fromMs = Math.max(0, toMs - duration);
+    const resolvedDuration = Math.max(1, toMs - fromMs);
+    return {
+      moment,
+      fromMs,
+      anticipationEndMs: fromMs + resolvedDuration * 0.24,
+      eventEndMs: fromMs + resolvedDuration * 0.52,
+      consequenceEndMs: fromMs + resolvedDuration * 0.82,
+      toMs,
+      memoryToMs: Math.min(songEndMs, toMs + 18_000),
+      seed: Number.parseInt(stableHash32([plan.planIdentity, moment.id]), 16) >>> 0,
+    };
+  }).filter((moment): moment is PreparedDramaticMomentV1 => Boolean(moment));
+  prepared.forEach((moment, index) => {
+    const next = prepared[index + 1];
+    if (next) moment.memoryToMs = Math.min(moment.memoryToMs, next.fromMs);
+  });
+  return prepared;
+};
+
 export const prepareDirectedStageV1 = (
   lyrics: LyricDocumentV0,
   plan: DirectorPlanV1,
@@ -267,6 +369,14 @@ export const prepareDirectedStageV1 = (
     repeatSeen.set(key, repetitionIndex + 1);
     return prepareLine(line, section, directive, viewport, measure, repetitionIndex, repeatTotals.get(key) ?? 1);
   });
+  const linesByIndex = new Map(lines.map((line) => [line.lineIndex, line]));
+  const sourceByIndex = new Map(lyrics.lines.map((line) => [line.lineIndex, line]));
+  const gestures = plan.gestures.map((gesture) => {
+    const line = linesByIndex.get(gesture.lineIndex);
+    const source = sourceByIndex.get(gesture.lineIndex);
+    return line && source ? prepareGesture(gesture, line, source) : null;
+  }).filter((gesture): gesture is PreparedLyricGestureV1 => Boolean(gesture));
+  const dramaticMoments = prepareDramaticMoments(lyrics, plan);
   return {
     version: "prepared-directed-stage-v1",
     identity: stableHash32({ plan: plan.planIdentity, rendererVersion: viewport.rendererVersion, viewport: [viewport.width, viewport.height] }),
@@ -274,6 +384,8 @@ export const prepareDirectedStageV1 = (
     lyrics,
     plan,
     lines,
-    linesByIndex: new Map(lines.map((line) => [line.lineIndex, line])),
+    linesByIndex,
+    gestures,
+    dramaticMoments,
   };
 };

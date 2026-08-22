@@ -3,6 +3,15 @@
 export const canEnterEmbeddedFullscreen = (hasMatchingLyrics: boolean): boolean =>
   hasMatchingLyrics;
 
+export const fullscreenOwnershipConfirmed = <T>(
+  candidate: T,
+  documentFullscreenElement: T | null,
+  shadowFullscreenElement: T | null,
+  matchesFullscreenPseudoClass: boolean,
+): boolean => matchesFullscreenPseudoClass
+  || documentFullscreenElement === candidate
+  || shadowFullscreenElement === candidate;
+
 export type EmbeddedFullscreenSurface = "hidden" | "stage" | "transition";
 
 export const embeddedFullscreenSurface = (

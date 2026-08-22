@@ -1,3 +1,6 @@
+import { useMemo, useState } from "react";
+import { artworkCandidates } from "../StageCanvas";
+
 export interface FullscreenTrackTransitionProps {
   active: boolean;
   artworkURL?: string;
@@ -25,6 +28,12 @@ export const FullscreenTrackTransition = ({
   onExit,
 }: FullscreenTrackTransitionProps) => {
   const coverInitial = Array.from(title.trim())[0] || "音";
+  const candidates = useMemo(() => artworkCandidates(artworkURL), [artworkURL]);
+  const artworkIdentity = artworkURL?.trim() ?? "";
+  const [candidateState, setCandidateState] = useState({ artworkIdentity, index: 0 });
+  const candidateIndex = candidateState.artworkIdentity === artworkIdentity ? candidateState.index : 0;
+  const candidateURL = candidates[candidateIndex];
+
   return (
     <div
       className="fullscreen-track-transition"
@@ -33,15 +42,27 @@ export const FullscreenTrackTransition = ({
       aria-live={active ? "polite" : "off"}
       aria-hidden={!active}
     >
-      {artworkURL ? (
-        <img className="fullscreen-track-transition-wash" src={artworkURL} alt="" aria-hidden="true" />
+      {candidateURL ? (
+        <img className="fullscreen-track-transition-wash" src={candidateURL} alt="" aria-hidden="true" />
       ) : null}
       <div className="fullscreen-track-transition-shade" aria-hidden="true" />
       <div className="stage-now-playing-layout fullscreen-track-transition-layout">
         <aside className="stage-now-playing-info" aria-label="正在切换歌曲">
           <div className="stage-artwork-frame">
-            {artworkURL ? (
-              <img className="stage-artwork" src={artworkURL} alt="" aria-hidden="true" />
+            {candidateURL ? (
+              <img
+                className="stage-artwork"
+                src={candidateURL}
+                alt=""
+                aria-hidden="true"
+                onError={() => setCandidateState((state) => {
+                  const index = state.artworkIdentity === artworkIdentity ? state.index : 0;
+                  return {
+                    artworkIdentity,
+                    index: index + 1 < candidates.length ? index + 1 : candidates.length,
+                  };
+                })}
+              />
             ) : (
               <div className="stage-artwork-fallback" aria-hidden="true">{coverInitial}</div>
             )}

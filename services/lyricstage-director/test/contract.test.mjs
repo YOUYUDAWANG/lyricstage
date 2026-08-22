@@ -4,6 +4,7 @@ import test from "node:test";
 import {
   buildFullscreenPromptInput,
   finalizeFullscreenResponse,
+  fullscreenSystemPrompt,
   requestVersion,
   responseVersion,
   sanitizeFullscreenRequest,
@@ -67,6 +68,11 @@ const aiFixture = () => ({
     atmosphere: 0.76,
     rationale: "The paired voices begin apart and physically converge during the repeated hook.",
   },
+  blocking: {
+    version: "song-blocking-v1",
+    baseLayout: "editorialSplit",
+    transitions: [],
+  },
   sections: [
     { fromLineIndex: 0, toLineIndex: 1, artDirection: "paperCut", layout: "editorialSplit", typography: "jpMincho", paletteIndex: 2, intensity: 0.45 },
     { fromLineIndex: 2, toLineIndex: 3, artDirection: "neonRail", layout: "duetDivide", typography: "jpGothic", paletteIndex: 8, intensity: 0.95 },
@@ -91,6 +97,52 @@ const aiFixture = () => ({
       confidence: 0.93,
     },
   }],
+  gestures: [{
+    id: "fixture:phrase:2",
+    lineIndex: 2,
+    scope: "phrase",
+    target: { fromGrapheme: 0, toGrapheme: 2, expectedText: "光へ" },
+    primitive: "phrase.handoff",
+    driver: "lineEnter",
+    space: "lyricLocal",
+    envelope: { attackMs: 320, holdMs: 260, releaseMs: 520 },
+    intensity: 0.66,
+    direction: 1,
+    paletteRole: "accent",
+    evidence: { semanticRole: "repetition", rationale: "The repeated hook hands its contour to the paired voice.", confidence: 0.84 },
+  }],
+  dramaticScore: {
+    version: "dramatic-score-v1",
+    premise: "Two separated voices discover that the repeated light can connect them.",
+    emotionalArc: "A quiet solitary image becomes a shared tension and returns as one remembered line.",
+    acts: [
+      { id: "act:setup", role: "setup", fromLineIndex: 0, toLineIndex: 1, tension: 0.32, visualDensity: 0.28, motifState: "seed", intention: "Establish a thin thread without disturbing reading." },
+      { id: "act:coda", role: "coda", fromLineIndex: 2, toLineIndex: 3, tension: 0.78, visualDensity: 0.54, motifState: "return", intention: "Let the paired voices return the thread as a shared memory." },
+    ],
+    motifActor: {
+      family: "thread",
+      origin: "voice",
+      relationship: "A thread leaves the quiet lyric, crosses the voice boundary and returns as a shared trace.",
+      states: [
+        { state: "seed", meaning: "A single voice releases a narrow promise." },
+        { state: "transform", meaning: "The duet places tension on the same line." },
+        { state: "return", meaning: "The line remains after the voices meet." },
+      ],
+    },
+    signatureMoments: [
+      {
+        id: "moment:seed", fromLineIndex: 0, toLineIndex: 0, anchorLineIndices: [0], purpose: "reveal", motifState: "seed",
+        actorFamily: "thread", stageAction: "thread.connect", coverRole: "origin", consequence: "trace", recallOf: "", intensity: 0.58,
+        evidence: { sectionTriggers: ["section_boundary"], rationale: "The opening releases the first restrained thread before the duet exists.", confidence: 0.78 },
+      },
+      {
+        id: "moment:return", fromLineIndex: 2, toLineIndex: 3, anchorLineIndices: [2, 3], purpose: "connection", motifState: "return",
+        actorFamily: "thread", stageAction: "motif.recall", coverRole: "memory", consequence: "return", recallOf: "moment:seed", intensity: 0.82,
+        evidence: { sectionTriggers: ["duet_overlap", "repeated_hook"], rationale: "The verified overlapping hook recalls the opening line with a second voice attached.", confidence: 0.91 },
+      },
+    ],
+    quietWindows: [{ fromLineIndex: 1, toLineIndex: 1, reason: "Stable reading preserves contrast before the duet return." }],
+  },
 });
 
 const musicIdentityRequestFixture = () => ({
@@ -144,7 +196,9 @@ test("fullscreen contract preserves identity and compiles a complete bounded pla
   const response = finalizeFullscreenResponse(input, aiFixture(), "director-test-v1");
   assert.equal(response.version, responseVersion);
   assert.equal(response.degraded, false);
-  assert.equal(response.sections[1].layout, "duetDivide");
+  assert.equal(response.sections[1].layout, "editorialSplit");
+  assert.equal(response.blocking.transitions.length, 0);
+  assert.equal(response.gestures.length, 1);
   assert.equal(response.effects.length, 1);
   assert.equal(response.world.spatialMode, "splitStage");
   assert.equal(response.effects[0].primary.primitive, "geometry.mirror");
@@ -154,6 +208,31 @@ test("fullscreen contract preserves identity and compiles a complete bounded pla
   assert.equal(JSON.stringify(response).includes("静かな夜"), false);
 });
 
+test("fullscreen prompt treats layouts as evidence-backed dramaturgic positions", () => {
+  assert.match(fullscreenSystemPrompt, /monument is a concentrated proclamation/u);
+  assert.match(fullscreenSystemPrompt, /prefer one or two justified major transitions/u);
+  assert.match(fullscreenSystemPrompt, /why the previous geometry no longer expresses it/u);
+});
+
+test("repairs invalid AI section boundaries without discarding the valid dramatic plan", () => {
+  const input = sanitizeFullscreenRequest(requestFixture());
+  const ai = aiFixture();
+  ai.sections = [
+    { ...ai.sections[0], fromLineIndex: 0, toLineIndex: 2 },
+    { ...ai.sections[1], fromLineIndex: 2, toLineIndex: 3 },
+  ];
+  ai.effects = [{ ...ai.effects[0], sectionIndex: 0 }];
+  const response = finalizeFullscreenResponse(input, ai);
+  assert.equal(response.degraded, false);
+  assert.equal(response.sectionPartition, "repaired");
+  assert.deepEqual(response.sections.map(({ fromLineIndex, toLineIndex }) => ({ fromLineIndex, toLineIndex })), [
+    { fromLineIndex: 0, toLineIndex: 3 },
+  ]);
+  assert.equal(response.effects.length, 1);
+  assert.equal(response.gestures.length, 1);
+  assert.equal(response.dramaticScore.signatureMoments.length, 2);
+});
+
 test("estimated word cues reach the prompt but remain distinct from real timing", () => {
   const input = sanitizeFullscreenRequest(estimatedRequestFixture());
   const prompt = buildFullscreenPromptInput(input);
@@ -161,7 +240,7 @@ test("estimated word cues reach the prompt but remain distinct from real timing"
   assert.equal(prompt.lines[0].realWordTiming, false);
   assert.equal(prompt.lines[0].estimatedWordTiming, true);
   assert.equal(prompt.lines[0].wordTiming.precision, "estimated");
-  assert.deepEqual(prompt.lines[0].wordTiming.cues, [[0, 2.1, "静かな"], [2.1, 4.6, "夜"]]);
+  assert.deepEqual(prompt.lines[0].wordTiming.cues, [[0, 0, 2.1, "静かな", 0, 3], [1, 2.1, 4.6, "夜", 3, 4]]);
   assert.equal(prompt.lines[1].wordTiming, null);
   assert.throws(
     () => sanitizeFullscreenRequest({
@@ -240,6 +319,258 @@ test("an empty visual score cannot claim AI takeover", () => {
   assert.equal(response.degradedReason, "effects");
 });
 
+test("dramatic scenes use lyric order and derive stillness from the AI act when timings overlap", () => {
+  const request = requestFixture();
+  request.lines = request.lines.map((line, index) => index === 1 ? { ...line, from: 4, to: 10 } : line);
+  const input = sanitizeFullscreenRequest(request);
+  const ai = aiFixture();
+  ai.dramaticScore = {
+    ...ai.dramaticScore,
+    signatureMoments: [
+      ai.dramaticScore.signatureMoments[0],
+      { ...ai.dramaticScore.signatureMoments[1], fromLineIndex: 1, anchorLineIndices: [1, 2, 3] },
+    ],
+    quietWindows: [],
+  };
+  const response = finalizeFullscreenResponse(input, ai);
+  assert.equal(response.degraded, false);
+  assert.equal(response.dramaticScore.signatureMoments.length, 2);
+  assert.equal(response.dramaticScore.quietWindows.length, 1);
+  assert.equal(response.dramaticScore.quietWindows[0].fromLineIndex, 0);
+});
+
+test("dramatic scene references normalize model prose while preserving a real return", () => {
+  const input = sanitizeFullscreenRequest(requestFixture());
+  const ai = aiFixture();
+  ai.dramaticScore = {
+    ...ai.dramaticScore,
+    signatureMoments: ai.dramaticScore.signatureMoments.map((moment) => ({
+      ...moment,
+      recallOf: "the image established earlier",
+    })),
+  };
+  const response = finalizeFullscreenResponse(input, ai);
+  assert.equal(response.degraded, false);
+  assert.equal(response.dramaticScore.signatureMoments[0].recallOf, "");
+  assert.equal(
+    response.dramaticScore.signatureMoments.at(-1).recallOf,
+    response.dramaticScore.signatureMoments[0].id,
+  );
+});
+
+test("dramatic score requires the accepted arc to begin with a seed and end with an earlier recall", () => {
+  const input = sanitizeFullscreenRequest(requestFixture());
+
+  const transformedOpening = aiFixture();
+  transformedOpening.dramaticScore = {
+    ...transformedOpening.dramaticScore,
+    signatureMoments: transformedOpening.dramaticScore.signatureMoments.map((moment, index) => index === 0
+      ? { ...moment, motifState: "transform" }
+      : moment),
+  };
+  const invalidOpening = finalizeFullscreenResponse(input, transformedOpening);
+  assert.equal(invalidOpening.degraded, true);
+  assert.match(invalidOpening.degradedReason, /dramaticScore:moments:arc:first/u);
+
+  const transformedEnding = aiFixture();
+  transformedEnding.dramaticScore = {
+    ...transformedEnding.dramaticScore,
+    signatureMoments: transformedEnding.dramaticScore.signatureMoments.map((moment, index) => index === 1
+      ? { ...moment, motifState: "transform" }
+      : moment),
+  };
+  const invalidEnding = finalizeFullscreenResponse(input, transformedEnding);
+  assert.equal(invalidEnding.degraded, true);
+  assert.match(invalidEnding.degradedReason, /dramaticScore/u);
+});
+
+test("non-return dramatic moments discard recall prose while the final return keeps an earlier id", () => {
+  const request = requestFixture();
+  request.lines[1] = { ...request.lines[1], text: "遠くへ" };
+  const input = sanitizeFullscreenRequest(request);
+  const ai = aiFixture();
+  const finalMoment = {
+    ...ai.dramaticScore.signatureMoments[1],
+    evidence: {
+      ...ai.dramaticScore.signatureMoments[1].evidence,
+      sectionTriggers: ["duet_overlap", "final_resolution"],
+    },
+  };
+  ai.dramaticScore = {
+    ...ai.dramaticScore,
+    signatureMoments: [
+      ai.dramaticScore.signatureMoments[0],
+      {
+        id: "moment:middle", fromLineIndex: 1, toLineIndex: 1, anchorLineIndices: [1], purpose: "distance", motifState: "transform",
+        actorFamily: "thread", stageAction: "memory.imprint", coverRole: "boundary", consequence: "reframe", recallOf: "moment:seed", intensity: 0.66,
+        evidence: { sectionTriggers: ["semantic_distance"], rationale: "The anchored lyric names distance before the voices return.", confidence: 0.84 },
+      },
+      finalMoment,
+    ],
+  };
+  const response = finalizeFullscreenResponse(input, ai);
+  assert.equal(response.degraded, false, response.degradedReason);
+  assert.equal(response.dramaticScore.signatureMoments[1].recallOf, "");
+  assert.equal(response.dramaticScore.signatureMoments[2].recallOf, "moment:seed");
+});
+
+test("dramatic purpose, strong-action, and family matrices reject superficially grounded moments", () => {
+  const input = sanitizeFullscreenRequest(requestFixture());
+
+  const wrongPurpose = aiFixture();
+  wrongPurpose.dramaticScore.signatureMoments[1] = {
+    ...wrongPurpose.dramaticScore.signatureMoments[1],
+    purpose: "release",
+  };
+  assert.equal(finalizeFullscreenResponse(input, wrongPurpose).degraded, true);
+
+  const wrongStrongAction = aiFixture();
+  wrongStrongAction.dramaticScore.signatureMoments[1] = {
+    ...wrongStrongAction.dramaticScore.signatureMoments[1],
+    stageAction: "duet.tension",
+    evidence: {
+      ...wrongStrongAction.dramaticScore.signatureMoments[1].evidence,
+      sectionTriggers: ["repeated_hook"],
+    },
+  };
+  assert.equal(finalizeFullscreenResponse(input, wrongStrongAction).degraded, true);
+
+  const wrongFamily = aiFixture();
+  wrongFamily.dramaticScore.signatureMoments[0] = {
+    ...wrongFamily.dramaticScore.signatureMoments[0],
+    stageAction: "window.reveal",
+  };
+  assert.equal(finalizeFullscreenResponse(input, wrongFamily).degraded, true);
+});
+
+test("lyric-local evidence must land on an anchor while structural evidence may bind the moment range", () => {
+  const input = sanitizeFullscreenRequest(requestFixture());
+  const unsupportedAnchor = aiFixture();
+  unsupportedAnchor.dramaticScore.signatureMoments[1] = {
+    ...unsupportedAnchor.dramaticScore.signatureMoments[1],
+    anchorLineIndices: [3],
+    evidence: {
+      ...unsupportedAnchor.dramaticScore.signatureMoments[1].evidence,
+      sectionTriggers: ["repeated_hook"],
+    },
+  };
+  assert.equal(finalizeFullscreenResponse(input, unsupportedAnchor).degraded, true);
+
+  const rangeBound = aiFixture();
+  rangeBound.dramaticScore.signatureMoments[1] = {
+    ...rangeBound.dramaticScore.signatureMoments[1],
+    anchorLineIndices: [2],
+    purpose: "resolution",
+    evidence: {
+      ...rangeBound.dramaticScore.signatureMoments[1].evidence,
+      sectionTriggers: ["final_resolution"],
+    },
+  };
+  const accepted = finalizeFullscreenResponse(input, rangeBound);
+  assert.equal(accepted.degraded, false, accepted.degradedReason);
+  assert.deepEqual(accepted.dramaticScore.signatureMoments[1].evidence.sectionTriggers, ["final_resolution"]);
+});
+
+test("dramatic signature moments reject fabricated structural evidence", () => {
+  const input = sanitizeFullscreenRequest(requestFixture());
+  const ai = aiFixture();
+  ai.dramaticScore = {
+    ...ai.dramaticScore,
+    signatureMoments: [
+      ai.dramaticScore.signatureMoments[0],
+      {
+        ...ai.dramaticScore.signatureMoments[1],
+        evidence: {
+          ...ai.dramaticScore.signatureMoments[1].evidence,
+          sectionTriggers: ["silence_gap"],
+        },
+      },
+    ],
+  };
+  const response = finalizeFullscreenResponse(input, ai);
+  assert.equal(response.degraded, true);
+  assert.match(response.degradedReason, /dramaticScore/u);
+});
+
+test("invalid blocking transitions and lyric gestures fail closed per cue", () => {
+  const input = sanitizeFullscreenRequest(requestFixture());
+  const tooSoon = finalizeFullscreenResponse(input, {
+    ...aiFixture(),
+    blocking: {
+      version: "song-blocking-v1",
+      baseLayout: "editorialSplit",
+      transitions: [{
+        atSectionIndex: 1,
+        toLayout: "duetDivide",
+        purpose: "voiceReframe",
+        strength: "major",
+        evidence: {
+          sectionTriggers: ["section_boundary", "duet_overlap", "density_lift"],
+          lineIndices: [2, 3],
+          audioLandmarkIDs: [],
+          rationale: "The duet requests a new frame too soon after the opening.",
+          confidence: 0.92,
+        },
+      }],
+    },
+  });
+  assert.equal(tooSoon.degraded, false);
+  assert.equal(tooSoon.blocking.transitions.length, 0);
+
+  const separatedInput = sanitizeFullscreenRequest({
+    ...requestFixture(),
+    lines: requestFixture().lines.map((line, index) => index < 2
+      ? { ...line, from: index * 10, to: (index + 1) * 10 }
+      : { ...line, from: 20, to: 25 }),
+  });
+  const wrongReason = finalizeFullscreenResponse(separatedInput, {
+    ...aiFixture(),
+    blocking: {
+      version: "song-blocking-v1",
+      baseLayout: "editorialSplit",
+      transitions: [{
+        atSectionIndex: 1,
+        toLayout: "duetDivide",
+        purpose: "voiceReframe",
+        strength: "major",
+        evidence: {
+          sectionTriggers: ["section_boundary", "density_lift"],
+          lineIndices: [2, 3],
+          audioLandmarkIDs: [],
+          rationale: "The denser section alone cannot prove that the voices need to divide.",
+          confidence: 0.92,
+        },
+      }],
+    },
+  });
+  assert.equal(wrongReason.degraded, false);
+  assert.equal(wrongReason.blocking.transitions.length, 0);
+
+  const rewritten = finalizeFullscreenResponse(input, {
+    ...aiFixture(),
+    gestures: [{
+      ...aiFixture().gestures[0],
+      target: { ...aiFixture().gestures[0].target, expectedText: "not-the-lyric" },
+    }],
+  });
+  assert.equal(rewritten.degraded, true);
+  assert.match(rewritten.degradedReason, /gestures/u);
+
+  const partiallyValid = finalizeFullscreenResponse(input, {
+    ...aiFixture(),
+    gestures: [
+      aiFixture().gestures[0],
+      {
+        ...aiFixture().gestures[0],
+        id: "invalid-rewrite",
+        target: { ...aiFixture().gestures[0].target, expectedText: "not-the-lyric" },
+      },
+    ],
+  });
+  assert.equal(partiallyValid.degraded, false);
+  assert.equal(partiallyValid.gestures.length, 1);
+});
+
 test("HTTP core keeps health public and the director route authenticated", async () => {
   const environment = {
     API_KEY: "client-test",
@@ -273,6 +604,123 @@ test("HTTP core keeps health public and the director route authenticated", async
   const body = await accepted.json();
   assert.equal(body.degraded, false);
   assert.equal(body.cache, "miss");
+});
+
+test("HTTP core retries one rejected AI contract before degrading", async () => {
+  const environment = {
+    API_KEY: "client-test",
+    GCP_API_KEY: "upstream-test",
+    UPSTREAM_BASE_URL: "https://aiplatform.googleapis.com",
+    MODEL: "gemini-3.5-flash",
+    IDENTITY_MODEL: "gemma-4-26b-a4b-it",
+    DIRECTOR_VERSION: "director-test-v1",
+    CACHE_DIR: "/unused",
+  };
+  const prompts = [];
+  const deadlines = [];
+  const response = await handleRequest(new Request("https://director.test/v1/fullscreen/direct", {
+    method: "POST",
+    headers: { "content-type": "application/json", authorization: "Bearer client-test" },
+    body: JSON.stringify(requestFixture()),
+  }), environment, {
+    cache: { get: async () => null, put: async () => undefined },
+    provider: async (_environment, _systemPrompt, prompt, options) => {
+      prompts.push(prompt);
+      deadlines.push(options.deadlineUnixMs);
+      return {
+        value: prompts.length === 1 ? { ...aiFixture(), effects: [] } : aiFixture(),
+        model: "gemini-3.5-flash",
+      };
+    },
+  });
+  const body = await response.json();
+  assert.equal(prompts.length, 2);
+  assert.equal(deadlines.length, 2);
+  assert.equal(deadlines[0], deadlines[1]);
+  assert.equal(prompts[1].retryContext.rejectedReason, "effects");
+  assert.equal(body.degraded, false);
+});
+
+test("director cache failures are best-effort and never discard a valid plan", async () => {
+  const environment = {
+    API_KEY: "client-test",
+    GCP_API_KEY: "upstream-test",
+    UPSTREAM_BASE_URL: "https://aiplatform.googleapis.com",
+    MODEL: "gemini-3.5-flash",
+    IDENTITY_MODEL: "gemma-4-26b-a4b-it",
+    DIRECTOR_VERSION: "director-test-v1",
+    CACHE_DIR: "/unused",
+  };
+  const warnings = [];
+  const response = await handleRequest(new Request("https://director.test/v1/fullscreen/direct", {
+    method: "POST",
+    headers: { "content-type": "application/json", authorization: "Bearer client-test" },
+    body: JSON.stringify(requestFixture()),
+  }), environment, {
+    cache: {
+      get: async () => { throw new Error("read EIO"); },
+      put: async () => { throw new Error("write EIO"); },
+    },
+    warn: (event, detail) => warnings.push([event, detail]),
+    provider: async () => ({ value: aiFixture(), model: "gemini-3.5-flash" }),
+  });
+  const body = await response.json();
+  assert.equal(response.status, 200);
+  assert.equal(body.degraded, false);
+  assert.deepEqual(warnings.map(([event]) => event), ["cache_read_failed", "cache_write_failed"]);
+});
+
+test("aborted clients release upstream slots instead of leaving the service busy", async () => {
+  const environment = {
+    API_KEY: "client-test",
+    GCP_API_KEY: "upstream-test",
+    UPSTREAM_BASE_URL: "https://aiplatform.googleapis.com",
+    MODEL: "gemini-3.5-flash",
+    IDENTITY_MODEL: "gemma-4-26b-a4b-it",
+    DIRECTOR_VERSION: "director-test-v1",
+    CACHE_DIR: "/unused",
+  };
+  const cache = { get: async () => null, put: async () => undefined };
+  const makeRequest = (trackID, controller) => {
+    const body = requestFixture();
+    body.trackID = trackID;
+    body.recordingID = `youtubeMusic:${trackID}`;
+    return new Request("https://director.test/v1/fullscreen/direct", {
+      method: "POST",
+      headers: { "content-type": "application/json", authorization: "Bearer client-test" },
+      body: JSON.stringify(body),
+      signal: controller?.signal,
+    });
+  };
+  const slowProvider = async (_environment, _systemPrompt, _prompt, options) => new Promise((_resolve, reject) => {
+    if (options.signal.aborted) {
+      reject(options.signal.reason);
+      return;
+    }
+    options.signal.addEventListener("abort", () => reject(options.signal.reason), { once: true });
+  });
+  const firstController = new AbortController();
+  const secondController = new AbortController();
+  const first = handleRequest(makeRequest("abort-first", firstController), environment, { cache, provider: slowProvider });
+  const second = handleRequest(makeRequest("abort-second", secondController), environment, { cache, provider: slowProvider });
+  for (let index = 0; index < 6; index += 1) await Promise.resolve();
+
+  const busy = await handleRequest(makeRequest("busy-third"), environment, {
+    cache,
+    provider: async () => ({ value: aiFixture(), model: "gemini-3.5-flash" }),
+  });
+  assert.equal(busy.status, 429);
+
+  firstController.abort(new Error("first client disconnected"));
+  secondController.abort(new Error("second client disconnected"));
+  await Promise.all([first, second]);
+
+  const recovered = await handleRequest(makeRequest("recovered-third"), environment, {
+    cache,
+    provider: async () => ({ value: aiFixture(), model: "gemini-3.5-flash" }),
+  });
+  assert.equal(recovered.status, 200);
+  assert.equal((await recovered.json()).degraded, false);
 });
 
 test("music identity contract accepts only grounded role-separated results", () => {
@@ -324,7 +772,7 @@ test("music identity route is authenticated and returns grounded Gemma evidence"
   });
   assert.equal(response.status, 200);
   const body = await response.json();
-  assert.equal(body.status, "grounded");
+  assert.equal(body.status, "grounded", JSON.stringify(body));
   assert.equal(body.model, "gemma-4-26b-a4b-it");
   assert.equal(body.sources.length, 2);
 });
@@ -347,11 +795,14 @@ test("Gemini provider uses the official Vertex AI Express generateContent protoc
   assert.equal(request.body.contents[0].parts[0].text, JSON.stringify({ song: "fixture" }));
   assert.equal(request.body.generationConfig.responseMimeType, "application/json");
   assert.equal(request.body.generationConfig.responseJsonSchema.type, "object");
+  assert.equal(request.body.generationConfig.responseJsonSchema.properties.dramaticScore.type, "object");
+  assert.doesNotMatch(JSON.stringify(request.body.generationConfig.responseJsonSchema), /"(?:minimum|maximum|minItems|maxItems|uniqueItems)"/u);
   assert.equal(result.value.concept, aiFixture().concept);
 });
 
 test("Gemini provider attaches exact public YouTube context and falls back safely when unsupported", async () => {
   const requests = [];
+  const timeoutBudgets = [];
   const result = await callVertexDirector({
     GCP_API_KEY: "upstream-test",
     UPSTREAM_BASE_URL: "https://aiplatform.googleapis.com",
@@ -367,10 +818,36 @@ test("Gemini provider attaches exact public YouTube context and falls back safel
       modelVersion: "gemini-3.7-flash",
       candidates: [{ content: { parts: [{ text: JSON.stringify(aiFixture()) }] } }],
     }), { status: 200, headers: { "content-type": "application/json" } });
+  }, {
+    timeoutFactory: (milliseconds) => {
+      timeoutBudgets.push(milliseconds);
+      return new AbortController().signal;
+    },
   });
   assert.equal(requests[0].body.contents[0].parts[0].fileData.fileUri, "https://www.youtube.com/watch?v=X9aN34E-f8Q");
   assert.equal(requests[1].body.contents[0].parts.some((part) => part.fileData), false);
+  assert.deepEqual(timeoutBudgets, [96_000, 90_000]);
   assert.equal(result.wholeSongFallback, true);
+});
+
+test("Gemini provider keeps the text fallback inside the shared request deadline", async () => {
+  const timeoutBudgets = [];
+  await callVertexDirector({
+    GCP_API_KEY: "upstream-test",
+    UPSTREAM_BASE_URL: "https://aiplatform.googleapis.com",
+    MODEL: "gemini-3.7-flash",
+  }, "system", { song: "fixture" }, async () => new Response(JSON.stringify({
+    modelVersion: "gemini-3.7-flash",
+    candidates: [{ content: { parts: [{ text: JSON.stringify(aiFixture()) }] } }],
+  }), { status: 200, headers: { "content-type": "application/json" } }), {
+    deadlineUnixMs: 13_000,
+    now: () => 1_000,
+    timeoutFactory: (milliseconds) => {
+      timeoutBudgets.push(milliseconds);
+      return new AbortController().signal;
+    },
+  });
+  assert.deepEqual(timeoutBudgets, [12_000]);
 });
 
 test("Gemma identity provider enables Google Search with minimal thinking and JSON schema", async () => {

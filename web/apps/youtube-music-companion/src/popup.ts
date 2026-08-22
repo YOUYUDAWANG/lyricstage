@@ -28,7 +28,25 @@ const lyricsTokenInput = document.querySelector<HTMLInputElement>("[data-lyrics-
 const lyricsConfigStatus = document.querySelector<HTMLElement>("[data-lyrics-config-status]");
 const saveLyricsConfigButton = document.querySelector<HTMLButtonElement>("[data-save-lyrics-config]");
 const clearLyricsConfigButton = document.querySelector<HTMLButtonElement>("[data-clear-lyrics-config]");
-const directorTokenInput = document.querySelector<HTMLInputElement>("[data-director-token]");
+type DirectorProtocol = "openai-compatible" | "openai-responses" | "gemini" | "anthropic";
+
+interface PublicDirectorProvider {
+  protocol: DirectorProtocol;
+  endpoint: string;
+  model: string;
+  hasApiKey: boolean;
+}
+
+const directorProtocolInput = document.querySelector<HTMLSelectElement>("[data-director-protocol]");
+const directorEndpointInput = document.querySelector<HTMLInputElement>("[data-director-endpoint]");
+const directorModelInput = document.querySelector<HTMLInputElement>("[data-director-model]");
+const directorAPIKeyInput = document.querySelector<HTMLInputElement>("[data-director-api-key]");
+const directorFallbackEnabledInput = document.querySelector<HTMLInputElement>("[data-director-fallback-enabled]");
+const directorFallbackContainer = document.querySelector<HTMLElement>("[data-director-fallback]");
+const directorFallbackProtocolInput = document.querySelector<HTMLSelectElement>("[data-director-fallback-protocol]");
+const directorFallbackEndpointInput = document.querySelector<HTMLInputElement>("[data-director-fallback-endpoint]");
+const directorFallbackModelInput = document.querySelector<HTMLInputElement>("[data-director-fallback-model]");
+const directorFallbackAPIKeyInput = document.querySelector<HTMLInputElement>("[data-director-fallback-api-key]");
 const directorConfigStatus = document.querySelector<HTMLElement>("[data-director-config-status]");
 const saveDirectorConfigButton = document.querySelector<HTMLButtonElement>("[data-save-director-config]");
 const clearDirectorConfigButton = document.querySelector<HTMLButtonElement>("[data-clear-director-config]");
@@ -155,15 +173,67 @@ clearLyricsConfigButton?.addEventListener("click", () => {
   });
 });
 
+const defaultDirectorEndpoint = (protocol: DirectorProtocol): string => {
+  if (protocol === "gemini") return "https://generativelanguage.googleapis.com/v1beta";
+  if (protocol === "anthropic") return "https://api.anthropic.com/v1";
+  return "https://api.openai.com/v1";
+};
+
+const directorProtocols: DirectorProtocol[] = [
+  "openai-compatible", "openai-responses", "gemini", "anthropic",
+];
+const standardEndpoints = new Set(directorProtocols.map(defaultDirectorEndpoint));
+
+const showFallbackConfiguration = (enabled: boolean) => {
+  if (directorFallbackEnabledInput) directorFallbackEnabledInput.checked = enabled;
+  if (directorFallbackContainer) directorFallbackContainer.hidden = !enabled;
+};
+
+const renderProvider = (
+  provider: PublicDirectorProvider | undefined,
+  protocolInput: HTMLSelectElement | null,
+  endpointInput: HTMLInputElement | null,
+  modelInput: HTMLInputElement | null,
+  keyInput: HTMLInputElement | null,
+  fallback = false,
+) => {
+  const protocol = provider?.protocol ?? (fallback ? "openai-compatible" : "openai-responses");
+  if (protocolInput) protocolInput.value = protocol;
+  if (endpointInput) endpointInput.value = provider?.endpoint ?? defaultDirectorEndpoint(protocol);
+  if (modelInput) modelInput.value = provider?.model ?? "";
+  if (keyInput) {
+    keyInput.value = "";
+    keyInput.placeholder = provider?.hasApiKey
+      ? "已保存；留空可继续使用"
+      : fallback ? "本地模型可为空" : "只保存在本机扩展存储";
+  }
+};
+
 const renderDirectorConfiguration = (value: unknown) => {
-  const result = value as { configured?: boolean; reason?: string } | undefined;
-  if (directorTokenInput) directorTokenInput.value = "";
+  const result = value as {
+    configured?: boolean;
+    reason?: string;
+    primary?: PublicDirectorProvider;
+    fallback?: PublicDirectorProvider;
+  } | undefined;
+  if (result?.reason) {
+    if (directorConfigStatus) directorConfigStatus.textContent = result.reason;
+    return;
+  }
+  renderProvider(result?.primary, directorProtocolInput, directorEndpointInput, directorModelInput, directorAPIKeyInput);
+  renderProvider(
+    result?.fallback,
+    directorFallbackProtocolInput,
+    directorFallbackEndpointInput,
+    directorFallbackModelInput,
+    directorFallbackAPIKeyInput,
+    true,
+  );
+  showFallbackConfiguration(Boolean(result?.fallback));
   if (directorConfigStatus) {
-    directorConfigStatus.textContent = result?.reason
-      ? result.reason
-      : result?.configured
-        ? "已启用；歌曲稳定后后台生成，下一结构段接管"
-        : "未配置时全屏仍使用完整本地演出";
+    directorConfigStatus.textContent = result?.configured
+      ? `已启用 ${result.primary?.model ?? "AI"}；模型输出会先通过本地导演合同`
+      : "未配置；旧服务令牌不会迁移为供应商 API Key，本地演出仍可使用";
   }
 };
 
@@ -188,18 +258,86 @@ const resumePendingAudioAnalysis = () => {
     .catch(() => undefined);
 };
 
+const providerFromInputs = (
+  protocolInput: HTMLSelectElement | null,
+  endpointInput: HTMLInputElement | null,
+  modelInput: HTMLInputElement | null,
+  keyInput: HTMLInputElement | null,
+) => ({
+  protocol: protocolInput?.value as DirectorProtocol,
+  endpoint: endpointInput?.value.trim() ?? "",
+  model: modelInput?.value.trim() ?? "",
+  apiKey: keyInput?.value.trim() ?? "",
+});
+
+const providerOrigins = (providers: Array<{ endpoint: string }>): string[] => [...new Set(providers.map((provider) => {
+  const url = new URL(provider.endpoint);
+  return `${url.origin}/*`;
+}))];
+
+const updateEndpointForProtocol = (
+  protocolInput: HTMLSelectElement | null,
+  endpointInput: HTMLInputElement | null,
+) => {
+  if (!protocolInput || !endpointInput) return;
+  if (!endpointInput.value.trim() || standardEndpoints.has(endpointInput.value.trim().replace(/\/+$/u, ""))) {
+    endpointInput.value = defaultDirectorEndpoint(protocolInput.value as DirectorProtocol);
+  }
+};
+
+directorProtocolInput?.addEventListener("change", () => {
+  updateEndpointForProtocol(directorProtocolInput, directorEndpointInput);
+});
+directorFallbackProtocolInput?.addEventListener("change", () => {
+  updateEndpointForProtocol(directorFallbackProtocolInput, directorFallbackEndpointInput);
+});
+directorFallbackEnabledInput?.addEventListener("change", () => {
+  showFallbackConfiguration(directorFallbackEnabledInput.checked);
+  if (directorFallbackEnabledInput.checked) {
+    updateEndpointForProtocol(directorFallbackProtocolInput, directorFallbackEndpointInput);
+  }
+});
+
 saveDirectorConfigButton?.addEventListener("click", () => {
-  const token = directorTokenInput?.value.trim() ?? "";
-  if (!token) {
-    renderDirectorConfiguration({ configured: false, reason: "请输入导演服务令牌" });
+  const primary = providerFromInputs(
+    directorProtocolInput,
+    directorEndpointInput,
+    directorModelInput,
+    directorAPIKeyInput,
+  );
+  const fallback = directorFallbackEnabledInput?.checked
+    ? providerFromInputs(
+      directorFallbackProtocolInput,
+      directorFallbackEndpointInput,
+      directorFallbackModelInput,
+      directorFallbackAPIKeyInput,
+    )
+    : undefined;
+  if (!primary.endpoint || !primary.model) {
+    renderDirectorConfiguration({ configured: false, reason: "请输入主供应商的 API 地址与模型 ID" });
     return;
   }
   saveDirectorConfigButton.disabled = true;
-  void chromeAPI.runtime.sendMessage({
-    type: "youtube-music-save-director-config",
-    token,
-  }).then(renderDirectorConfiguration).catch(() => {
-    renderDirectorConfiguration({ configured: false, reason: "导演配置失败" });
+  void Promise.resolve().then(async () => {
+    const providers = [primary, fallback].filter(Boolean) as Array<typeof primary>;
+    if (providers.some((provider) => !provider.endpoint || !provider.model)) {
+      throw new Error("请完整填写备用供应商");
+    }
+    const granted = await chromeAPI.permissions.request({ origins: providerOrigins(providers) });
+    if (!granted) throw new Error("未授权扩展访问所选模型 API");
+    return chromeAPI.runtime.sendMessage({
+      type: "youtube-music-save-director-config",
+      configuration: {
+        version: "lyricstage-director-byok-v1",
+        primary,
+        ...(fallback ? { fallback } : {}),
+      },
+    });
+  }).then(renderDirectorConfiguration).catch((error) => {
+    renderDirectorConfiguration({
+      configured: false,
+      reason: error instanceof Error ? error.message : "导演配置失败",
+    });
   }).finally(() => {
     saveDirectorConfigButton.disabled = false;
   });
@@ -209,7 +347,7 @@ clearDirectorConfigButton?.addEventListener("click", () => {
   clearDirectorConfigButton.disabled = true;
   void chromeAPI.runtime.sendMessage({
     type: "youtube-music-save-director-config",
-    token: "",
+    configuration: null,
   }).then(renderDirectorConfiguration).catch(() => {
     renderDirectorConfiguration({ configured: false, reason: "停用失败" });
   }).finally(() => {

@@ -6,6 +6,7 @@ import {
   directorPlanForStageEntry,
   directorStatusLabel,
   requestAutomaticDirectorPlan,
+  requestDirectorBridgeWithOneRecovery,
 } from "./performanceDirector";
 
 const track: LyricsLookupTrackV0 = {
@@ -94,8 +95,64 @@ describe("requestAutomaticDirectorPlan", () => {
   it("quietly preserves local fallback when the extension is unavailable", async () => {
     await expect(requestAutomaticDirectorPlan(track, lyricFixtures.wordTimedMixed)).resolves.toMatchObject({
       status: "unavailable",
-      reason: "extension-runtime-unavailable",
+      reason: "extension-bridge-unavailable",
     });
+  });
+
+  it("retries one transient MV3 bridge failure for the same request and then stops", async () => {
+    let calls = 0;
+    const result = await requestDirectorBridgeWithOneRecovery(
+      { type: "fixture-request" },
+      () => ({
+        id: "extension-test",
+        sendMessage: async () => {
+          calls += 1;
+          if (calls === 1) throw new Error("service worker restarted");
+          return { ok: true };
+        },
+      }),
+    );
+    expect(result).toEqual({ ok: true, response: { ok: true }, attempts: 2 });
+    expect(calls).toBe(2);
+  });
+
+  it("does not retry a fatal invalidated extension context", async () => {
+    let calls = 0;
+    const result = await requestDirectorBridgeWithOneRecovery(
+      { type: "fixture-request" },
+      () => ({
+        id: "extension-test",
+        sendMessage: async () => {
+          calls += 1;
+          throw new Error("Extension context invalidated.");
+        },
+      }),
+    );
+    expect(result).toEqual({
+      ok: false,
+      reason: "extension-context-invalidated",
+      attempts: 1,
+    });
+    expect(calls).toBe(1);
+  });
+
+  it("classifies an exhausted sendMessage failure as an extension bridge error", async () => {
+    let calls = 0;
+    (globalThis as typeof globalThis & { chrome?: unknown }).chrome = {
+      runtime: {
+        id: "extension-test",
+        sendMessage: async () => {
+          calls += 1;
+          throw new Error("message channel closed");
+        },
+      },
+    };
+    await expect(requestAutomaticDirectorPlan(track, lyricFixtures.wordTimedMixed)).resolves.toMatchObject({
+      status: "error",
+      source: "local",
+      reason: "extension-bridge-request-failed",
+    });
+    expect(calls).toBe(2);
   });
 
   it("explains generation, queued handoff, active AI and safe fallback states", () => {
@@ -112,6 +169,24 @@ describe("requestAutomaticDirectorPlan", () => {
       source: "local",
       reason: "director-not-configured",
     })).toBe("本地演出 · AI 未配置");
+    expect(directorStatusLabel({
+      type: "director-resolution-v1",
+      status: "error",
+      source: "local",
+      reason: "extension-bridge-request-failed",
+    })).toBe("本地演出 · 扩展桥接中断");
+    expect(directorStatusLabel({
+      type: "director-resolution-v1",
+      status: "error",
+      source: "local",
+      reason: "extension-context-invalidated",
+    })).toBe("本地演出 · 扩展需刷新");
+    expect(directorStatusLabel({
+      type: "director-resolution-v1",
+      status: "unavailable",
+      source: "local",
+      reason: "extension-bridge-unavailable",
+    })).toBe("本地演出 · 扩展桥接不可用");
   });
 });
 
