@@ -25,6 +25,8 @@ npm run build:all
 
 Load `extension-dist` as an unpacked Chrome/Edge extension. The standalone Stage build is emitted to `dist`; Performance Lab is emitted to `performance-dist`.
 
+For Orca development, add this repository with `origin/main` as the worktree base. The committed `orca.yaml` installs locked dependencies automatically; current handoff state, Chrome identity continuity, verification commands, and open work are recorded in [`docs/ORCA_HANDOFF.md`](docs/ORCA_HANDOFF.md).
+
 ## Security and privacy
 
 Provider keys remain in extension-local storage and are never part of source, build output, public status, or plan cache identity. The extension does not read YouTube cookies, download media, persist PCM, or upload raw audio. See `SECURITY.md` for reporting and deployment boundaries.

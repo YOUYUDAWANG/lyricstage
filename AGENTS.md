@@ -6,3 +6,5 @@
 - Use `rg` for exact searches and run the narrowest relevant test during iteration. Before release-bound changes run `npm test`, `npm run build:all`, the Director gateway tests, and a real unpacked-extension reload check.
 - Keep `packages/contracts/schemas` and `packages/contracts/fixtures` portable and backwards-compatible unless a versioned contract change is intentional.
 - Do not make `services/director-gateway` a mandatory browser runtime dependency.
+- Orca/Codex tasks must start from `origin/main`, run the committed `orca.yaml` setup, and read `docs/ORCA_HANDOFF.md`. Keep one task per worktree and never load a temporary worktree's extension build into Chrome.
+- The Bilibili browser provider is deferred. Do not reopen or generalize provider work unless the user explicitly restores that scope.
