@@ -74,7 +74,7 @@ Recheck drift-prone runtime and deployment state before claiming it is still cur
 
 ## Open work
 
-1. Mirror the reviewed build into the stable unpacked-extension directory, reload it, and verify the new popup/settings lifecycle without changing the extension identity.
+1. The reviewed build is mirrored into the stable unpacked-extension directory; reload that existing Chrome extension and verify the new popup/settings lifecycle without changing the extension identity.
 2. After the user restores BYOK configuration, verify one real provider takeover, fallback-provider switching, and deterministic local fallback without recording the key.
 3. Run whole-song subjective A/B for fast, slow, repeated-chorus, duet, and long-line tracks.
 4. Run a bounded multi-tab soak covering authority handoff, pause/seek, artwork fallback, capture ownership, and extension reload recovery.
