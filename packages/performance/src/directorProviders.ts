@@ -13,11 +13,14 @@ export type DirectorProviderProtocolV1 =
   | "gemini"
   | "anthropic";
 
-export interface DirectorProviderConfigurationV1 {
+export interface DirectorProviderConnectionV1 {
   protocol: DirectorProviderProtocolV1;
   endpoint: string;
-  model: string;
   apiKey: string;
+}
+
+export interface DirectorProviderConfigurationV1 extends DirectorProviderConnectionV1 {
+  model: string;
 }
 
 export interface DirectorBYOKConfigurationV1 {
@@ -78,7 +81,7 @@ const isLocalHTTPHost = (hostname: string): boolean => {
     || isPrivateIPv4(normalized);
 };
 
-const normalizeProvider = (value: unknown): DirectorProviderConfigurationV1 | undefined => {
+export const sanitizeDirectorProviderConnectionV1 = (value: unknown): DirectorProviderConnectionV1 | undefined => {
   if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
   const candidate = value as Record<string, unknown>;
   const protocol = typeof candidate.protocol === "string" && protocols.has(candidate.protocol as DirectorProviderProtocolV1)
@@ -86,9 +89,8 @@ const normalizeProvider = (value: unknown): DirectorProviderConfigurationV1 | un
     : undefined;
   if (!protocol) return undefined;
   const endpointValue = typeof candidate.endpoint === "string" ? candidate.endpoint.trim() : "";
-  const model = typeof candidate.model === "string" ? candidate.model.trim() : "";
   const apiKey = typeof candidate.apiKey === "string" ? candidate.apiKey.trim() : "";
-  if (!endpointValue || endpointValue.length > 500 || !model || model.length > 180 || apiKey.length > 4096) return undefined;
+  if (!endpointValue || endpointValue.length > 500 || apiKey.length > 4096) return undefined;
   let url: URL;
   try {
     url = new URL(endpointValue);
@@ -99,7 +101,16 @@ const normalizeProvider = (value: unknown): DirectorProviderConfigurationV1 | un
   if (url.protocol !== "https:" && !(url.protocol === "http:" && isLocalHTTPHost(url.hostname))) return undefined;
   const endpoint = `${url.origin}${url.pathname.replace(/\/+$/u, "")}`;
   if (!apiKey && url.protocol === "https:" && !isLocalHTTPHost(url.hostname)) return undefined;
-  return { protocol, endpoint, model, apiKey };
+  return { protocol, endpoint, apiKey };
+};
+
+const normalizeProvider = (value: unknown): DirectorProviderConfigurationV1 | undefined => {
+  const connection = sanitizeDirectorProviderConnectionV1(value);
+  if (!connection || !value || typeof value !== "object" || Array.isArray(value)) return undefined;
+  const candidate = value as Record<string, unknown>;
+  const model = typeof candidate.model === "string" ? candidate.model.trim() : "";
+  if (!model || model.length > 180) return undefined;
+  return { ...connection, model };
 };
 
 export const sanitizeDirectorBYOKConfigurationV1 = (value: unknown): DirectorBYOKConfigurationV1 | undefined => {

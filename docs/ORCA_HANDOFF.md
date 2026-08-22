@@ -62,11 +62,13 @@ Never inspect, print, or migrate the user's provider key. If a fresh extension i
 
 ## Current verified baseline
 
-- Web: 315/315 tests.
+- Web: 325/325 tests.
 - Director gateway: 27/27 tests.
-- The full-tab extension settings UI is merged; the popup is now limited to status, lyrics activation, and the settings entry.
-- TypeScript, the current extension production build, and Manifest V3 CSP passed after the settings merge.
-- The preceding Vite 8.2.2 extension baseline passed real Chrome lifecycle UAT under the original extension ID; the settings-page build still needs a stable-path reload/UAT before that claim can be extended to the current commit.
+- The settings UI uses a macOS-style floating sidebar/toolbar and standard-material content cards with adaptive light/dark presentation.
+- AI provider setup discovers the account's available models through the provider's Models API; model selection is no longer free text. OpenAI, OpenAI-compatible/local, Gemini, and Anthropic discovery paths have bounded unit and background-integration coverage.
+- The popup owns quick performance preferences and settings navigation. The embedded lyrics column keeps only `More` and fullscreen as persistent toolbar actions; search, timing, versions, import, and vocal timing live under `More`.
+- TypeScript, the full Vite 8.2.2 production build, Manifest V3 CSP, `npm audit`, and the Director gateway suite pass.
+- The reviewed extension build was mirrored into the stable unpacked path and reloaded under the original extension ID. Real Chrome UAT verified the redesigned popup, the settings route, the two-button lyrics toolbar, and the compact lyrics-tools menu without changing BYOK storage.
 - Owner-only Stage deployment: `https://lyricstage.yihanchen617.chatgpt.site`.
 - Frozen extraction tag: `lyricstage-monorepo-v0.3.0`.
 
@@ -74,8 +76,8 @@ Recheck drift-prone runtime and deployment state before claiming it is still cur
 
 ## Open work
 
-1. The reviewed build is mirrored into the stable unpacked-extension directory; reload that existing Chrome extension and verify the new popup/settings lifecycle without changing the extension identity.
-2. After the user restores BYOK configuration, verify one real provider takeover, fallback-provider switching, and deterministic local fallback without recording the key.
+1. Verify a successful real provider model-list refresh and one real provider takeover; the current Gemini key reaches the provider but its project/source restrictions reject `ListModels` with HTTP 403. Never record or inspect the key while diagnosing it.
+2. Verify fallback-provider switching and deterministic local fallback without recording either key.
 3. Run whole-song subjective A/B for fast, slow, repeated-chorus, duet, and long-line tracks.
 4. Run a bounded multi-tab soak covering authority handoff, pause/seek, artwork fallback, capture ownership, and extension reload recovery.
 

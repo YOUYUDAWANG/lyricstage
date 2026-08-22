@@ -2,6 +2,7 @@ import { defaultDirectorProviderEndpointV1 } from "@lyricstage/performance";
 import { describe, expect, it } from "vitest";
 import {
   apiKeyPlaceholder,
+  buildDirectorDiscoveryPayload,
   buildDirectorSavePayload,
   defaultDirectorEndpoint,
   displayLyricsEndpoint,
@@ -71,6 +72,22 @@ describe("extension settings model", () => {
         },
       },
       origins: ["https://api.openai.com/*"],
+    });
+  });
+
+  it("builds model discovery without requiring a model ID", () => {
+    expect(buildDirectorDiscoveryPayload({
+      protocol: "gemini",
+      endpoint: "https://generativelanguage.googleapis.com/v1beta",
+      model: "",
+      apiKey: "secret",
+    })).toEqual({
+      provider: {
+        protocol: "gemini",
+        endpoint: "https://generativelanguage.googleapis.com/v1beta",
+        apiKey: "secret",
+      },
+      origin: "https://generativelanguage.googleapis.com/*",
     });
   });
 

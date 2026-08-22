@@ -1,5 +1,5 @@
 export const MAX_LYRICS_OFFSET_MS = 10_000;
-export const LYRICS_OFFSET_STEP_MS = 500;
+export const LYRICS_OFFSET_STEP_MS = 100;
 
 export const clampLyricsOffsetMs = (value: number): number => {
   if (!Number.isFinite(value)) return 0;
@@ -23,6 +23,11 @@ export const playbackTimeForLyricsMs = (
   Math.max(0, durationMs),
   Math.max(0, lyricsTimeMs + clampLyricsOffsetMs(lyricsOffsetMs)),
 );
+
+export const lyricsOffsetFromLineAnchor = (
+  playbackTimeMs: number,
+  lineFromMs: number,
+): number => clampLyricsOffsetMs(playbackTimeMs - lineFromMs);
 
 export const formatLyricsOffset = (lyricsOffsetMs: number): string => {
   const bounded = clampLyricsOffsetMs(lyricsOffsetMs);

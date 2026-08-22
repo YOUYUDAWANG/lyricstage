@@ -32,7 +32,9 @@ import {
   directorBYOKCacheIdentityV1,
   executeDirectorBYOKV1,
   isDirectorPlanV1ForLyrics,
+  listDirectorProviderModelsV1,
   publicDirectorBYOKConfigurationV1,
+  sanitizeDirectorProviderConnectionV1,
   sanitizeDirectorBYOKConfigurationV1,
   sanitizeMusicMapV1,
   sanitizeVocalTimingMapV1,
@@ -303,6 +305,21 @@ const saveDirectorConfiguration = async (value: unknown): Promise<{ configured: 
     [legacyDirectorCacheStorageKey]: {},
   });
   return { configured: true };
+};
+
+const discoverDirectorModels = async (
+  value: unknown,
+  slotValue: unknown,
+): Promise<{ models: Awaited<ReturnType<typeof listDirectorProviderModelsV1>>["models"] }> => {
+  const slot = slotValue === "fallback" ? "fallback" : "primary";
+  const existing = await directorConfiguration();
+  const merged = mergeStoredProviderKey(value, existing?.[slot]);
+  const provider = sanitizeDirectorProviderConnectionV1(merged);
+  if (!provider) {
+    throw new Error("请检查协议、API 地址与 Key；远程 HTTPS 接口必须提供 Key");
+  }
+  const result = await listDirectorProviderModelsV1(provider);
+  return { models: result.models };
 };
 
 const lyricsFingerprint = (track: LyricsLookupTrackV0): string =>
@@ -1566,6 +1583,8 @@ chromeAPI.runtime.onMessage.addListener((message, sender, sendResponse) => {
     endpoint?: unknown;
     token?: unknown;
     configuration?: unknown;
+    provider?: unknown;
+    slot?: unknown;
     query?: unknown;
     musicMap?: unknown;
     vocalTimingMap?: unknown;
@@ -1871,6 +1890,17 @@ chromeAPI.runtime.onMessage.addListener((message, sender, sendResponse) => {
       (error) => sendResponse({
         configured: false,
         reason: error instanceof Error ? error.message.slice(0, 120) : "导演配置失败",
+      }),
+    );
+    return true;
+  }
+
+  if (request.type === "youtube-music-list-director-models") {
+    void discoverDirectorModels(request.provider, request.slot).then(
+      sendResponse,
+      (error) => sendResponse({
+        models: [],
+        reason: error instanceof Error ? error.message.slice(0, 240) : "连接模型提供商失败",
       }),
     );
     return true;

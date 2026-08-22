@@ -7,29 +7,46 @@
     <link rel="stylesheet" href="/src/popup.css" />
   </head>
   <body>
-    <main>
-      <header>
-        <span class="mark">LS</span>
-        <div><b data-dot></b><span data-status>正在检查</span></div>
+    <main class="popup-shell">
+      <header class="popup-header">
+        <div class="popup-brand"><span class="mark">LS</span><div><strong>LyricStage</strong><small>歌词舞台</small></div></div>
+        <span class="connection-chip"><b data-dot></b><span data-status>正在检查</span></span>
       </header>
-      <section>
+
+      <section class="now-playing">
+        <span class="section-label">正在播放</span>
         <p data-title>先播放一首歌曲</p>
-        <span data-artist>再打开 YouTube Music 歌词</span>
+        <small data-artist>再打开 YouTube Music 歌词</small>
       </section>
-      <button class="primary" type="button" data-open-stage>打开 YouTube Music 歌词</button>
-      <button type="button" data-open-source>打开 YouTube Music</button>
-      <dl class="config-status">
-        <div>
-          <dt>歌词源</dt>
-          <dd data-lyrics-summary>LRCLIB · 酷狗</dd>
-        </div>
-        <div>
-          <dt>AI 导演</dt>
-          <dd data-director-summary>本地确定性演出</dd>
-        </div>
-      </dl>
-      <button type="button" data-open-settings>打开设置</button>
-      <footer>音频不上传 · 导演会发送曲目元数据、歌词正文/时序与本地 MusicMap</footer>
+
+      <div class="launch-actions">
+        <button class="primary" type="button" data-open-stage><span>♫</span>打开歌词舞台</button>
+        <button class="icon-button" type="button" data-open-source title="打开 YouTube Music" aria-label="打开 YouTube Music">↗</button>
+      </div>
+
+      <section class="quick-panel">
+        <header><h2>快捷演出</h2><button type="button" data-open-settings-section="performance">更多</button></header>
+        <label class="quick-toggle">
+          <span><strong>轻量模式</strong><small>减少模糊与动态效果</small></span>
+          <input type="checkbox" data-lightweight-toggle />
+        </label>
+        <label class="quick-toggle">
+          <span><strong>个人 VJ</strong><small>增强全屏环境运动</small></span>
+          <input type="checkbox" data-vj-toggle />
+        </label>
+      </section>
+
+      <section class="config-panel">
+        <button type="button" data-open-settings-section="lyrics">
+          <span><i class="lyrics-dot">♫</i><span><strong>歌词源</strong><small data-lyrics-summary>LRCLIB · 酷狗</small></span></span><b>›</b>
+        </button>
+        <button type="button" data-open-settings-section="director">
+          <span><i class="director-dot">✦</i><span><strong>AI 导演</strong><small data-director-summary>本地确定性演出</small></span></span><b>›</b>
+        </button>
+      </section>
+
+      <button class="settings-button" type="button" data-open-settings>打开全部设置</button>
+      <footer>Key 留在本机 · 音频不上传 · AI 失败自动回到本地演出</footer>
     </main>
     <script type="module" src="/src/popup.ts"></script>
   </body>

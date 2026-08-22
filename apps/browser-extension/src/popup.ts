@@ -4,11 +4,20 @@ import {
   openSettingsPage,
 } from "./settings/settingsClient";
 import { summarizeDirectorConfig, summarizeLyricsConfig } from "./settings/settingsModel";
+import {
+  readExtensionPreferences,
+  saveExtensionPreferences,
+  type ExtensionPreferencesV0,
+} from "../../stage/src/playback/extensionPreferences";
 
 interface PopupChrome {
   runtime: {
+    getURL(path: string): string;
     sendMessage(message: unknown): Promise<unknown>;
     openOptionsPage?: () => Promise<void> | void;
+  };
+  tabs: {
+    create(options: { url: string; active?: boolean }): Promise<unknown>;
   };
 }
 
@@ -28,8 +37,11 @@ const dot = document.querySelector<HTMLElement>("[data-dot]");
 const openStageButton = document.querySelector<HTMLButtonElement>("[data-open-stage]");
 const lyricsSummary = document.querySelector<HTMLElement>("[data-lyrics-summary]");
 const directorSummary = document.querySelector<HTMLElement>("[data-director-summary]");
+const lightweightToggle = document.querySelector<HTMLInputElement>("[data-lightweight-toggle]");
+const vjToggle = document.querySelector<HTMLInputElement>("[data-vj-toggle]");
 let refreshGeneration = 0;
 let activationMessageUntil = 0;
+let preferences: ExtensionPreferencesV0 = { lightweight: false, vjMode: false };
 
 const render = (value: unknown) => {
   const next = value as PopupStatus;
@@ -96,6 +108,34 @@ document.querySelector("[data-open-settings]")?.addEventListener("click", () => 
   });
 });
 
+document.querySelectorAll<HTMLElement>("[data-open-settings-section]").forEach((button) => {
+  button.addEventListener("click", () => {
+    const section = button.getAttribute("data-open-settings-section") || "lyrics";
+    void chromeAPI.tabs.create({
+      url: chromeAPI.runtime.getURL(`settings.html#${section}`),
+      active: true,
+    }).then(() => window.close()).catch(() => {
+      if (statusElement) statusElement.textContent = "无法打开设置";
+    });
+  });
+});
+
+const renderPreferences = () => {
+  if (lightweightToggle) lightweightToggle.checked = preferences.lightweight;
+  if (vjToggle) vjToggle.checked = preferences.vjMode;
+};
+
+const updatePreferences = (patch: Partial<ExtensionPreferencesV0>) => {
+  preferences = { ...preferences, ...patch };
+  renderPreferences();
+  void saveExtensionPreferences(preferences).catch(() => {
+    if (statusElement) statusElement.textContent = "偏好保存失败";
+  });
+};
+
+lightweightToggle?.addEventListener("change", () => updatePreferences({ lightweight: lightweightToggle.checked }));
+vjToggle?.addEventListener("change", () => updatePreferences({ vjMode: vjToggle.checked }));
+
 const resumePendingAudioAnalysis = () => {
   void chromeAPI.runtime.sendMessage({ type: "youtube-music-resume-pending-audio-analysis" })
     .then((value) => {
@@ -117,6 +157,10 @@ const refreshConfigurationSummaries = () => {
   });
   void loadDirectorConfiguration().then((config) => {
     if (directorSummary) directorSummary.textContent = summarizeDirectorConfig(config);
+  });
+  void readExtensionPreferences().then((next) => {
+    preferences = next;
+    renderPreferences();
   });
 };
 

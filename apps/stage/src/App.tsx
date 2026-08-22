@@ -22,7 +22,6 @@ import {
 import { applyNonMusicSegments } from "@lyricstage/lyrics";
 import {
   compileLocalDirectorPlanV1,
-  estimateLyricsOffsetFromVocalTimingV1,
   type DirectorPlanV1,
 } from "@lyricstage/performance";
 import {
@@ -45,13 +44,13 @@ import {
 import {
   readExtensionPreferences,
   readLyricsOffset,
-  saveExtensionPreferences,
   saveLyricsOffset,
   subscribeExtensionPreferences,
 } from "./playback/extensionPreferences";
 import {
   clampLyricsOffsetMs,
   formatLyricsOffset,
+  lyricsOffsetFromLineAnchor,
   lyricsOffsetForIdentity,
   lyricsTimeForPlaybackMs,
 } from "./playback/lyricsTimeOffset";
@@ -168,7 +167,6 @@ export default function App({ embedded = embeddedStageFromLocation, onEmbeddedRe
   const [vjMode, setVJMode] = useState(false);
   const [vocalTimingLocalError, setVocalTimingLocalError] = useState<string | undefined>();
   const [lyricsOffsetMs, setLyricsOffsetMs] = useState(0);
-  const [autoAlignPending, setAutoAlignPending] = useState(false);
   const [installedYouTubeLyricsIdentity, setInstalledYouTubeLyricsIdentity] = useState<string | null>(null);
   const [remoteDirectorPlan, setRemoteDirectorPlan] = useState<DirectorPlanV1 | undefined>();
   const [directorLookupState, setDirectorLookupState] = useState<DirectorLookupState>({ status: "idle" });
@@ -496,7 +494,6 @@ export default function App({ embedded = embeddedStageFromLocation, onEmbeddedRe
     const recordingIdentity = source === "youtubeMusic" ? youtubeLyricsIdentity : null;
     lyricsOffsetIdentityRef.current = recordingIdentity;
     setLyricsOffsetMs(0);
-    setAutoAlignPending(false);
     if (!recordingIdentity) return undefined;
     let cancelled = false;
     void readLyricsOffset(recordingIdentity).then((storedOffset) => {
@@ -1004,79 +1001,21 @@ export default function App({ embedded = embeddedStageFromLocation, onEmbeddedRe
     }
   }, [source, youtubeLyricsIdentity]);
 
-  const autoAlignLyrics = useCallback(async () => {
-    const snapshot = youtubeMusic.snapshot;
-    if (!snapshot || !hasMatchingLyrics) {
+  const alignCurrentLyricsLine = useCallback((lineIndex: number) => {
+    if (!hasMatchingLyrics) {
       setMessage("请先匹配当前歌曲的同步歌词。");
       return;
     }
-    const estimate = estimateLyricsOffsetFromVocalTimingV1(lyrics.lines, youtubeMusic.vocalTimingMap);
-    if (estimate) {
-      setCurrentLyricsOffset(estimate.offsetMs);
-      setMessage(`已按 ${estimate.matchedLineCount} 个本地人声起音自动${formatLyricsOffset(estimate.offsetMs)}。`);
-      setAutoAlignPending(false);
+    const line = lyrics.lines.find((candidate) => candidate.lineIndex === lineIndex);
+    if (!line) {
+      setMessage("当前没有可作为锚点的歌词句。");
       return;
     }
-    setAutoAlignPending(true);
-    const active = youtubeMusic.musicMapStatus === "analyzing" || youtubeMusic.musicMapStatus === "ready";
-    if (!active) {
-      const startResult = await startYouTubeMusicAudioAnalysis(
-        snapshot.track.trackID,
-        snapshot.playback.durationMs,
-      );
-      if (!startResult.ok) {
-        const reason = startResult.reason || "capture-failed";
-        const awaitingInvocation = reason.includes("15 秒");
-        setVocalTimingLocalError(reason);
-        setAutoAlignPending(awaitingInvocation);
-        setMessage(awaitingInvocation
-          ? reason
-          : `自动对齐无法启动本地人声分析：${reason}`);
-        return;
-      }
-      vocalTimingPinnedTrackIDRef.current = pinnedTrackIDAfterCaptureStart({
-        pinnedTrackID: vocalTimingPinnedTrackIDRef.current,
-        requestedTrackID: snapshot.track.trackID,
-        currentTrackID: fullscreenCaptureOwnershipRef.current.trackID,
-        started: true,
-      });
-      setVocalTimingLocalError(undefined);
-    }
-    setMessage("正在收集本地人声起音；获得足够清晰的行首后会自动应用偏移。");
-  }, [
-    hasMatchingLyrics,
-    lyrics.lines,
-    setCurrentLyricsOffset,
-    youtubeMusic.musicMapStatus,
-    youtubeMusic.snapshot,
-    youtubeMusic.vocalTimingMap,
-  ]);
-
-  useEffect(() => {
-    if (!autoAlignPending || !youtubeMusic.vocalTimingMap || !hasMatchingLyrics) return;
-    if (youtubeMusic.musicMapStatus === "analyzing" || youtubeMusic.musicMapStatus === "ready") {
-      vocalTimingPinnedTrackIDRef.current = youtubeMusic.snapshot?.track.trackID ?? null;
-    }
-    const estimate = estimateLyricsOffsetFromVocalTimingV1(lyrics.lines, youtubeMusic.vocalTimingMap);
-    if (estimate) {
-      setCurrentLyricsOffset(estimate.offsetMs);
-      setAutoAlignPending(false);
-      setMessage(`已按 ${estimate.matchedLineCount} 个本地人声起音自动${formatLyricsOffset(estimate.offsetMs)}。`);
-      return;
-    }
-    if (youtubeMusic.vocalTimingMap.toMs - youtubeMusic.vocalTimingMap.fromMs >= 12_000) {
-      setAutoAlignPending(false);
-      setMessage("这段人声起音不够清晰，未改动现有偏移；可继续手动提前或延后。");
-    }
-  }, [
-    autoAlignPending,
-    hasMatchingLyrics,
-    lyrics.lines,
-    setCurrentLyricsOffset,
-    youtubeMusic.musicMapStatus,
-    youtubeMusic.snapshot?.track.trackID,
-    youtubeMusic.vocalTimingMap,
-  ]);
+    const offsetMs = lyricsOffsetFromLineAnchor(displayTimeRef.current, line.fromMs);
+    setCurrentLyricsOffset(offsetMs);
+    const lineLabel = line.text.length > 18 ? `${line.text.slice(0, 18)}…` : line.text;
+    setMessage(`已把“${lineLabel}”的开头对齐到当前播放位置；可用 0.1 秒按钮继续微调。`);
+  }, [hasMatchingLyrics, lyrics.lines, setCurrentLyricsOffset]);
 
   useEffect(() => {
     if (!embeddedStage || presentation !== "fullscreen") return undefined;
@@ -1223,29 +1162,13 @@ export default function App({ embedded = embeddedStageFromLocation, onEmbeddedRe
             playbackState={youtubeMusic.snapshot?.playback.state}
             canEnterFullscreen={canEnterEmbeddedFullscreen(hasMatchingLyrics)}
             lightweight={lightweight}
-            vjMode={vjMode}
             vocalTimingMap={youtubeMusic.vocalTimingMap}
             vocalTimingStatus={youtubeMusic.musicMapStatus}
             vocalTimingError={vocalTimingLocalError || youtubeMusic.musicMapError}
             lyricsOffsetMs={effectiveLyricsOffsetMs}
-            autoAlignPending={autoAlignPending}
-            onToggleLightweight={() => {
-              setLightweight((value) => {
-                const next = !value;
-                void saveExtensionPreferences({ lightweight: next, vjMode }).catch(() => undefined);
-                return next;
-              });
-            }}
-            onToggleVJMode={() => {
-              setVJMode((value) => {
-                const next = !value;
-                void saveExtensionPreferences({ lightweight, vjMode: next }).catch(() => undefined);
-                return next;
-              });
-            }}
             onToggleVocalTiming={() => void toggleVocalTiming()}
             onSetLyricsOffset={setCurrentLyricsOffset}
-            onAutoAlignLyrics={() => void autoAlignLyrics()}
+            onAlignCurrentLine={alignCurrentLyricsLine}
             onSeekLine={(timeMs) => {
               const expectedTrackID = youtubeMusic.snapshot?.track.trackID;
               const operation = expectedTrackID

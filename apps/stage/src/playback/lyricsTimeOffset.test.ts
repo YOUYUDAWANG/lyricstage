@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   clampLyricsOffsetMs,
   formatLyricsOffset,
+  lyricsOffsetFromLineAnchor,
   lyricsOffsetForIdentity,
   lyricsTimeForPlaybackMs,
   playbackTimeForLyricsMs,
@@ -21,6 +22,12 @@ describe("lyrics timeline offset", () => {
   it("converts lyric line timestamps back to host playback time", () => {
     expect(playbackTimeForLyricsMs(10_000, -500, 30_000)).toBe(9_500);
     expect(playbackTimeForLyricsMs(10_000, 1_500, 30_000)).toBe(11_500);
+  });
+
+  it("anchors the highlighted lyric line to the current host playback time", () => {
+    expect(lyricsOffsetFromLineAnchor(12_240, 10_000)).toBe(2_240);
+    expect(lyricsTimeForPlaybackMs(12_240, 2_240, 30_000)).toBe(10_000);
+    expect(lyricsOffsetFromLineAnchor(1_000, 12_000)).toBe(-10_000);
   });
 
   it("clamps malformed, excessive, and edge values", () => {

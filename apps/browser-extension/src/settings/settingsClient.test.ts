@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   clearDirectorConfiguration,
+  discoverDirectorModels,
   loadDirectorConfiguration,
   loadLyricsConfiguration,
   openSettingsPage,
@@ -20,6 +21,9 @@ const fakeChrome = (overrides: Partial<SettingsChrome> = {}): SettingsChrome => 
     }
     if (message.type === "youtube-music-director-config") {
       return { configured: false };
+    }
+    if (message.type === "youtube-music-list-director-models") {
+      return { models: [{ id: "gpt-5", label: "GPT-5" }] };
     }
     if (message.type === "youtube-music-save-director-config") {
       return message.configuration
@@ -101,6 +105,27 @@ describe("extension settings client", () => {
       configuration: { primary: { apiKey: string } };
     };
     expect(message.configuration.primary.apiKey).toBe("sk-live");
+  });
+
+  it("discovers models after requesting the exact provider origin", async () => {
+    const chromeAPI = fakeChrome();
+    await expect(discoverDirectorModels({
+      ...emptyProviderDraft(),
+      endpoint: "https://api.openai.com/v1",
+      apiKey: "sk-live",
+    }, "primary", chromeAPI)).resolves.toEqual({
+      models: [{ id: "gpt-5", label: "GPT-5" }],
+    });
+    expect(chromeAPI.permissions.request).toHaveBeenCalledWith({ origins: ["https://api.openai.com/*"] });
+    expect(chromeAPI.runtime.sendMessage).toHaveBeenCalledWith({
+      type: "youtube-music-list-director-models",
+      slot: "primary",
+      provider: {
+        protocol: "openai-responses",
+        endpoint: "https://api.openai.com/v1",
+        apiKey: "sk-live",
+      },
+    });
   });
 
   it("clears director configuration without requesting permissions", async () => {

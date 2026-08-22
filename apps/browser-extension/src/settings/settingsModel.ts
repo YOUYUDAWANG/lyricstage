@@ -1,4 +1,5 @@
 import type {
+  DirectorModelOptionV1,
   DirectorProviderProtocolV1,
   PublicDirectorBYOKConfigurationV1,
   PublicDirectorProviderConfigurationV1,
@@ -20,6 +21,11 @@ export interface LyricsConfigView {
 }
 
 export interface DirectorConfigView extends Partial<PublicDirectorBYOKConfigurationV1> {
+  reason?: string;
+}
+
+export interface DirectorModelDiscoveryView {
+  models: DirectorModelOptionV1[];
   reason?: string;
 }
 
@@ -102,6 +108,25 @@ export const originPatternFromEndpoint = (endpoint: string): string => `${new UR
 
 export const uniqueOriginPatterns = (endpoints: string[]): string[] =>
   [...new Set(endpoints.map((endpoint) => originPatternFromEndpoint(endpoint)))];
+
+export const buildDirectorDiscoveryPayload = (
+  provider: ProviderDraft,
+): { provider: Omit<ProviderDraft, "model">; origin: string } | { error: string } => {
+  const endpoint = provider.endpoint.trim();
+  if (!endpoint) return { error: "请先填写 API 地址" };
+  try {
+    return {
+      provider: {
+        protocol: provider.protocol,
+        endpoint,
+        apiKey: provider.apiKey.trim(),
+      },
+      origin: originPatternFromEndpoint(endpoint),
+    };
+  } catch {
+    return { error: "API 地址无效" };
+  }
+};
 
 export const apiKeyPlaceholder = (hasApiKey: boolean, fallback = false): string => {
   if (hasApiKey) return "同一接口已保存；留空可继续使用";

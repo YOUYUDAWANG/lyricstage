@@ -83,6 +83,11 @@ if (!offscreenHTML.includes("offscreen.js")) {
 }
 const popupPath = requireBuiltFile(manifest.action?.default_popup, "action popup");
 const popupHTML = readFileSync(popupPath, "utf8");
+if (!popupHTML.includes("data-lightweight-toggle")
+  || !popupHTML.includes("data-vj-toggle")
+  || !popupHTML.includes('data-open-settings-section="performance"')) {
+  throw new Error("Extension popup is missing the relocated performance controls.");
+}
 const popupResources = Array.from(
   popupHTML.matchAll(/(?:src|href)="\.\/([^"?#]+)(?:[?#][^"]*)?"/g),
   (match) => match[1],
@@ -162,8 +167,9 @@ if (!(manifest.optional_host_permissions ?? []).includes("https://*/*")
 }
 if (!settingsSource.includes("data-director-api-key")
   || !settingsSource.includes("data-director-protocol")
-  || !settingsSource.includes("data-save-director-config")) {
-  throw new Error("Extension settings page is missing provider-neutral local AI director controls.");
+  || !settingsSource.includes("data-save-director-config")
+  || !settingsSource.includes("data-discover-director-models")) {
+  throw new Error("Extension settings page is missing provider-neutral model discovery or local AI director controls.");
 }
 if (
   settingsHTML.includes("stage.js")

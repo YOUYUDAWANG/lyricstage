@@ -148,6 +148,7 @@ describe("YouTube Music background routing", () => {
 
   afterEach(() => {
     vi.useRealTimers();
+    vi.unstubAllGlobals();
     Reflect.deleteProperty(globalThis, "chrome");
     onRuntimeMessage = undefined;
     onConnect = undefined;
@@ -259,6 +260,40 @@ describe("YouTube Music background routing", () => {
     expect(storage.get("lyricstage-director-byok-v1")).toMatchObject({
       primary: { model: "gpt-5.1", apiKey: "sk-secret" },
     });
+  });
+
+  it("discovers models with a matching stored provider key without exposing it", async () => {
+    await send({
+      type: "youtube-music-save-director-config",
+      configuration: {
+        version: "lyricstage-director-byok-v1",
+        primary: {
+          protocol: "openai-responses",
+          endpoint: "https://api.openai.com/v1",
+          model: "gpt-5",
+          apiKey: "sk-secret",
+        },
+      },
+    }, sender(10));
+    const fetcher = vi.fn(async (_url: string, init?: RequestInit) => {
+      expect(new Headers(init?.headers).get("Authorization")).toBe("Bearer sk-secret");
+      return new Response(JSON.stringify({ data: [{ id: "gpt-5", owned_by: "openai" }] }), { status: 200 });
+    });
+    vi.stubGlobal("fetch", fetcher);
+
+    const response = await send({
+      type: "youtube-music-list-director-models",
+      slot: "primary",
+      provider: {
+        protocol: "openai-responses",
+        endpoint: "https://api.openai.com/v1",
+        apiKey: "",
+      },
+    }, sender(10));
+    expect(response.response).toEqual({
+      models: [{ id: "gpt-5", label: "gpt-5", detail: "openai" }],
+    });
+    expect(JSON.stringify(response.response)).not.toContain("sk-secret");
   });
 
   it("keeps embedded ports bound to their own YTM tab while standalone follows the authoritative source", async () => {

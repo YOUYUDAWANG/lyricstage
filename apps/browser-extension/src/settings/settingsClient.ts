@@ -1,5 +1,10 @@
-import type { DirectorConfigView, LyricsConfigView, ProviderDraft } from "./settingsModel";
-import { buildDirectorSavePayload } from "./settingsModel";
+import type {
+  DirectorConfigView,
+  DirectorModelDiscoveryView,
+  LyricsConfigView,
+  ProviderDraft,
+} from "./settingsModel";
+import { buildDirectorDiscoveryPayload, buildDirectorSavePayload } from "./settingsModel";
 
 export interface SettingsChrome {
   runtime: {
@@ -72,6 +77,30 @@ export const loadDirectorConfiguration = async (chromeAPI = settingsChrome()): P
     return await chromeAPI.runtime.sendMessage({ type: "youtube-music-director-config" }) as DirectorConfigView;
   } catch {
     return { configured: false };
+  }
+};
+
+export const discoverDirectorModels = async (
+  provider: ProviderDraft,
+  slot: "primary" | "fallback",
+  chromeAPI = settingsChrome(),
+): Promise<DirectorModelDiscoveryView> => {
+  if (!chromeAPI) return { models: [], reason: "扩展运行时不可用" };
+  const payload = buildDirectorDiscoveryPayload(provider);
+  if ("error" in payload) return { models: [], reason: payload.error };
+  try {
+    const granted = await chromeAPI.permissions.request({ origins: [payload.origin] });
+    if (!granted) return { models: [], reason: "未授权扩展访问所选模型 API" };
+    return await chromeAPI.runtime.sendMessage({
+      type: "youtube-music-list-director-models",
+      slot,
+      provider: payload.provider,
+    }) as DirectorModelDiscoveryView;
+  } catch (error) {
+    return {
+      models: [],
+      reason: error instanceof Error ? error.message : "连接模型提供商失败",
+    };
   }
 };
 

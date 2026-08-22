@@ -48,17 +48,13 @@ export interface ColumnStageViewProps {
   onManualSearch: (title: string, artist: string) => void;
   canEnterFullscreen: boolean;
   lightweight: boolean;
-  vjMode: boolean;
   vocalTimingMap?: VocalTimingMapV1;
   vocalTimingStatus: "idle" | "analyzing" | "ready" | "error";
   vocalTimingError?: string;
   lyricsOffsetMs: number;
-  autoAlignPending: boolean;
-  onToggleLightweight: () => void;
-  onToggleVJMode: () => void;
   onToggleVocalTiming: () => void;
   onSetLyricsOffset: (offsetMs: number) => void;
-  onAutoAlignLyrics: () => void;
+  onAlignCurrentLine: (lineIndex: number) => void;
   onSeekLine: (timeMs: number) => void;
 }
 
@@ -129,26 +125,24 @@ export function ColumnStageView({
   onManualSearch,
   canEnterFullscreen,
   lightweight,
-  vjMode,
   vocalTimingMap,
   vocalTimingStatus,
   vocalTimingError,
   lyricsOffsetMs,
-  autoAlignPending,
-  onToggleLightweight,
-  onToggleVJMode,
   onToggleVocalTiming,
   onSetLyricsOffset,
-  onAutoAlignLyrics,
+  onAlignCurrentLine,
   onSeekLine,
 }: ColumnStageViewProps) {
   const streamRef = useRef<HTMLDivElement>(null);
   const activeRef = useRef<HTMLDivElement>(null);
+  const toolbarRef = useRef<HTMLDivElement>(null);
   const lastActiveKeyRef = useRef<string>("");
   const enterFullscreenRef = useRef(onEnterFullscreen);
   enterFullscreenRef.current = onEnterFullscreen;
   const [showManualSearch, setShowManualSearch] = useState(false);
   const [showTimingAdjust, setShowTimingAdjust] = useState(false);
+  const [showToolsMenu, setShowToolsMenu] = useState(false);
   const [manualTitle, setManualTitle] = useState(title);
   const [manualArtist, setManualArtist] = useState(artist);
   const frozen = disconnected || playbackState === "paused" || playbackState === "ended";
@@ -160,7 +154,26 @@ export function ColumnStageView({
     setManualArtist(artist);
     setShowManualSearch(false);
     setShowTimingAdjust(false);
+    setShowToolsMenu(false);
   }, [title, artist]);
+
+  useEffect(() => {
+    if (!showToolsMenu) return;
+    const closeOnOutsidePointer = (event: PointerEvent) => {
+      if (event.target instanceof Node && !toolbarRef.current?.contains(event.target)) {
+        setShowToolsMenu(false);
+      }
+    };
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setShowToolsMenu(false);
+    };
+    window.addEventListener("pointerdown", closeOnOutsidePointer, true);
+    window.addEventListener("keydown", closeOnEscape, true);
+    return () => {
+      window.removeEventListener("pointerdown", closeOnOutsidePointer, true);
+      window.removeEventListener("keydown", closeOnEscape, true);
+    };
+  }, [showToolsMenu]);
 
   const surface = resolveColumnSurfaceState({
     bridgeAvailable,
@@ -295,100 +308,19 @@ export function ColumnStageView({
             {directorStatus}{estimatedTimingLabel}{lyricsOffsetLabel}
           </small>
         </div>
-        <div className="column-toolbar" role="toolbar" aria-label="歌词工具栏">
+        <div ref={toolbarRef} className="column-toolbar" role="toolbar" aria-label="歌词工具栏">
           <button
             type="button"
-            className={`column-tool-button ${lightweight ? "is-active" : ""}`}
-            aria-pressed={lightweight}
-            aria-label="切换轻量模式"
-            title="轻量模式：减少模糊和动态效果"
-            onClick={onToggleLightweight}
+            className={`column-tool-button ${showToolsMenu ? "is-active" : ""}`}
+            aria-expanded={showToolsMenu}
+            aria-label="更多歌词工具"
+            title="更多歌词工具"
+            onClick={() => setShowToolsMenu((value) => !value)}
           >
-            <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" strokeWidth="1.8" aria-hidden="true">
-              <path d="M12 3v3M12 18v3M3 12h3M18 12h3M5.6 5.6l2.1 2.1M16.3 16.3l2.1 2.1M18.4 5.6l-2.1 2.1M7.7 16.3l-2.1 2.1" />
-              <circle cx="12" cy="12" r="4" />
+            <svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor" aria-hidden="true">
+              <circle cx="5" cy="12" r="1.7" /><circle cx="12" cy="12" r="1.7" /><circle cx="19" cy="12" r="1.7" />
             </svg>
           </button>
-          <button
-            type="button"
-            className={`column-tool-button ${vjMode ? "is-active" : ""}`}
-            aria-pressed={vjMode}
-            aria-label="切换个人 VJ 模式"
-            title="个人 VJ 模式：提高全屏环境运动强度"
-            onClick={onToggleVJMode}
-          >
-            <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" strokeWidth="1.8" aria-hidden="true">
-              <path d="m13 2-8 12h6l-1 8 9-13h-6V2Z" />
-            </svg>
-          </button>
-          <button
-            type="button"
-            className={`column-tool-button ${vocalTimingActive ? "is-active" : ""}`}
-            aria-pressed={vocalTimingActive}
-            aria-label="切换人声感知逐字"
-            title={vocalTimingStatus === "error"
-              ? `人声分析启动失败：${vocalTimingError || "请重试"}`
-              : vocalTimingActive
-              ? "停止本地人声感知节奏分析"
-              : "人声感知：用本地音频起音、停顿和中置人声修正估算逐字"}
-            disabled={!bridgeAvailable || !hasSnapshot || !usesEstimatedTiming}
-            onClick={onToggleVocalTiming}
-          >
-            <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" strokeWidth="1.8" aria-hidden="true">
-              <path d="M3 12h2l1.5-5 3 10 2.5-13 3 16 2.5-9 1.5 4H21" />
-            </svg>
-          </button>
-          <button
-            type="button"
-            className={`column-tool-button ${showTimingAdjust || lyricsOffsetMs !== 0 ? "is-active" : ""}`}
-            aria-pressed={showTimingAdjust}
-            aria-label="调整歌词时间轴"
-            title={`调整歌词时间轴 · ${formatLyricsOffset(lyricsOffsetMs)}`}
-            disabled={!hasMatchingLyrics}
-            onClick={() => setShowTimingAdjust((value) => !value)}
-          >
-            <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" strokeWidth="1.8" aria-hidden="true">
-              <circle cx="12" cy="12" r="8" />
-              <path d="M12 7v5l3 2M4 5l2.4 2.4M20 5l-2.4 2.4" />
-            </svg>
-          </button>
-          <button
-            type="button"
-            className={`column-tool-button ${showManualSearch ? "is-active" : ""}`}
-            aria-label="手动搜索歌词"
-            title="手动搜索歌词"
-            onClick={() => setShowManualSearch((value) => !value)}
-          >
-            <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" strokeWidth="1.8" aria-hidden="true">
-              <circle cx="10.5" cy="10.5" r="6.5" />
-              <path d="m15.5 15.5 5 5" />
-            </svg>
-          </button>
-          <button
-            type="button"
-            className={`column-tool-button ${showVersionPicker ? "is-active" : ""}`}
-            aria-label="选择歌词版本"
-            title="选择歌词版本"
-            onClick={onShowVersions}
-          >
-            <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" strokeWidth="1.8" aria-hidden="true">
-              <path d="m12 4 7 4-7 4-7-4 7-4Z" />
-              <path d="m5 12 7 4 7-4M5 16l7 4 7-4" />
-            </svg>
-          </button>
-          <label className="column-tool-button column-import-tool" title="导入本地 LRC 或 JSON 歌词" aria-label="导入本地歌词">
-            <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" strokeWidth="1.8" aria-hidden="true">
-              <path d="M12 15V4M8 8l4-4 4 4M5 14v5h14v-5" />
-            </svg>
-            <input
-              type="file"
-              accept=".lrc,.json,text/plain,application/json"
-              onChange={(event) => {
-                onImportLyrics(event.target.files?.[0]);
-                event.currentTarget.value = "";
-              }}
-            />
-          </label>
           <button
             type="button"
             className="column-tool-button column-fullscreen-tool"
@@ -401,6 +333,40 @@ export function ColumnStageView({
               <path d="M7 14H5v5h5v-2H7v-3zm-2-4h2V7h3V5H5v5zm12 7h-3v2h5v-5h-2v3zM14 5v2h3v3h2V5h-5z" />
             </svg>
           </button>
+          {showToolsMenu && (
+            <div className="column-tools-menu" role="group" aria-label="更多歌词工具">
+              <button
+                type="button"
+                className={vocalTimingActive ? "is-active" : ""}
+                disabled={!bridgeAvailable || !hasSnapshot || !usesEstimatedTiming}
+                onClick={() => { onToggleVocalTiming(); setShowToolsMenu(false); }}
+              >
+                <span>≈</span><div><strong>人声增强</strong><small>{vocalTimingStatus === "error" ? vocalTimingError || "启动失败" : vocalTimingActive ? "正在本机分析" : "修正估算逐字"}</small></div>
+              </button>
+              <button
+                type="button"
+                className={showTimingAdjust || lyricsOffsetMs !== 0 ? "is-active" : ""}
+                disabled={!hasMatchingLyrics}
+                onClick={() => { setShowTimingAdjust((value) => !value); setShowToolsMenu(false); }}
+              >
+                <span>◷</span><div><strong>歌词时间轴</strong><small>{formatLyricsOffset(lyricsOffsetMs)}</small></div>
+              </button>
+              <button type="button" className={showManualSearch ? "is-active" : ""} onClick={() => { setShowManualSearch((value) => !value); setShowToolsMenu(false); }}>
+                <span>⌕</span><div><strong>手动搜索</strong><small>按歌名和歌手重搜</small></div>
+              </button>
+              <button type="button" className={showVersionPicker ? "is-active" : ""} onClick={() => { onShowVersions(); setShowToolsMenu(false); }}>
+                <span>▱</span><div><strong>歌词版本</strong><small>查看其他匹配结果</small></div>
+              </button>
+              <label className="column-menu-import">
+                <span>⇧</span><div><strong>导入歌词</strong><small>LRC / LyricStage JSON</small></div>
+                <input type="file" accept=".lrc,.json,text/plain,application/json" onChange={(event) => {
+                  onImportLyrics(event.target.files?.[0]);
+                  event.currentTarget.value = "";
+                  setShowToolsMenu(false);
+                }} />
+              </label>
+            </div>
+          )}
         </div>
       </header>
 
@@ -409,23 +375,24 @@ export function ColumnStageView({
           <button
             type="button"
             className="column-timing-auto"
-            disabled={autoAlignPending}
-            onClick={onAutoAlignLyrics}
+            disabled={primaryActiveIndex < 0 || disconnected || playbackState === "ended"}
+            title="听到当前高亮句真正开唱时点击；也可以先暂停再对齐"
+            onClick={() => onAlignCurrentLine(primaryActiveIndex)}
           >
-            {autoAlignPending ? "分析中…" : "自动对齐"}
+            当前句对齐
           </button>
           <button
             type="button"
             onClick={() => onSetLyricsOffset(clampLyricsOffsetMs(lyricsOffsetMs - LYRICS_OFFSET_STEP_MS))}
           >
-            提前 0.5s
+            提前 0.1s
           </button>
           <strong aria-live="polite">{formatLyricsOffset(lyricsOffsetMs)}</strong>
           <button
             type="button"
             onClick={() => onSetLyricsOffset(clampLyricsOffsetMs(lyricsOffsetMs + LYRICS_OFFSET_STEP_MS))}
           >
-            延后 0.5s
+            延后 0.1s
           </button>
           <button
             type="button"
