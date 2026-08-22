@@ -16,13 +16,15 @@ LyricStage owns the Web Performance Runtime, Manifest V3 browser extension, YouT
 
 The Bilibili browser provider is explicitly deferred. Do not start it or generalize the YouTube Music protocol unless the user reopens that scope.
 
-The current product line is `0.3.0`:
+The current product line is `0.3.1`:
 
 - YouTube Music retains playback, account state, transport, and the authoritative clock.
 - The extension owns only its Shadow DOM and bounded performance state.
 - BYOK supports OpenAI Responses, OpenAI-compatible/local chat completions, Gemini, and Anthropic, with an optional fallback provider.
 - Provider keys stay in `chrome.storage.local`; never copy them into a worktree, prompt, log, fixture, commit, or deployment.
 - AI failure must preserve the complete deterministic local performance.
+- BYOK generation uses compact Director intent, a 45-second total budget, at most three HTTP attempts, and one in-flight request per track/lyrics identity. Late MusicMap data is fused locally without a second provider call.
+- Settings exposes only sanitized last-run phase timing; provider keys, endpoints, lyric text and response bodies are not diagnostic data.
 
 ## Commands
 
@@ -62,11 +64,11 @@ Never inspect, print, or migrate the user's provider key. If a fresh extension i
 
 ## Current verified baseline
 
-- Web: 315/315 tests.
+- Web: `0.3.1` low-latency Director branch passed 321/321 tests, typecheck, `build:all`, deterministic extension artifact comparison, Manifest V3 CSP, and `npm audit` with zero vulnerabilities.
 - Director gateway: 27/27 tests.
 - The full-tab extension settings UI is merged; the popup is now limited to status, lyrics activation, and the settings entry.
 - TypeScript, the current extension production build, and Manifest V3 CSP passed after the settings merge.
-- The preceding Vite 8.2.2 extension baseline passed real Chrome lifecycle UAT under the original extension ID; the settings-page build still needs a stable-path reload/UAT before that claim can be extended to the current commit.
+- The reviewed `0.3.1` extension build is mirrored byte-for-byte to `/Users/chaoyiliu/Desktop/bilibili-music/web/extension-dist`. A refreshed real YouTube Music tab reported `data-lyricstage-content-script="isolated-v3"`, one visible LyricStage lyrics toolbar/director status and no captured warning/error loop. Chrome's automation boundary cannot operate `chrome://extensions` or `chrome-extension://` pages, so the internal-page reload click and settings timing-row visual check remain manual gates.
 - Owner-only Stage deployment: `https://lyricstage.yihanchen617.chatgpt.site`.
 - Frozen extraction tag: `lyricstage-monorepo-v0.3.0`.
 
@@ -74,8 +76,8 @@ Recheck drift-prone runtime and deployment state before claiming it is still cur
 
 ## Open work
 
-1. The reviewed build is mirrored into the stable unpacked-extension directory; reload that existing Chrome extension and verify the new popup/settings lifecycle without changing the extension identity.
-2. After the user restores BYOK configuration, verify one real provider takeover, fallback-provider switching, and deterministic local fallback without recording the key.
+1. In `chrome://extensions`, reload the existing stable-path LyricStage instance, then verify the settings timing row plus normal popup/settings lifecycle without changing the extension identity.
+2. Verify one real compact-intent provider takeover, the 45-second/three-attempt fallback boundary, and deterministic local fallback without recording the key.
 3. Run whole-song subjective A/B for fast, slow, repeated-chorus, duet, and long-line tracks.
 4. Run a bounded multi-tab soak covering authority handoff, pause/seek, artwork fallback, capture ownership, and extension reload recovery.
 

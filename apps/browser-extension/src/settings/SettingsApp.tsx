@@ -16,6 +16,7 @@ import {
   apiKeyPlaceholder,
   directorProtocolOptions,
   directorStatusCopy,
+  directorTimingCopy,
   displayLyricsEndpoint,
   draftFromPublicProvider,
   emptyProviderDraft,
@@ -381,6 +382,7 @@ export const SettingsApp = () => {
               <button type="button" data-clear-director-config="" disabled={busy === "director"} onClick={() => void onClearDirector()}>停用</button>
             </div>
             <small className="settings-status" data-director-config-status="">{directorStatusCopy(director)}</small>
+            <small className="settings-status" data-director-last-timing="">{directorTimingCopy(director)}</small>
           </form>
         )}
 

@@ -11,6 +11,7 @@ import {
   adaptFullscreenDirectorResponseV3,
   adaptFullscreenDirectorResponseV4,
   adaptLegacyDirectorResponseV1,
+  applyMusicMapToDirectorPlanV1,
   compileLocalDirectorPlanV1,
   directorSectionAtV1,
   directorPlanToRecipeV0,
@@ -189,6 +190,22 @@ describe("DirectorPlanV1", () => {
       hook.sections.some((section) => section.id === effect.sectionID
         && lineIndex >= section.fromLineIndex && lineIndex <= section.toLineIndex)
     )))).toBe(true);
+  });
+
+  it("applies a late MusicMap locally without changing blocking or layout", () => {
+    const plan = compileLocalDirectorPlanV1(lyricFixtures.longSongStructure);
+    const map: MusicMapV1 = {
+      version: "music-map-v1", source: "tab-capture", durationMs: lyricFixtures.longSongStructure.durationMs,
+      analyzedMs: lyricFixtures.longSongStructure.durationMs, featureRateHz: 30, tempo: null,
+      summary: { dynamicRange: 0.8, meanEnergy: 0.8, peakEnergy: 1, silenceRatio: 0 },
+      segments: [{ fromMs: 0, toMs: lyricFixtures.longSongStructure.durationMs, energy: 1, bass: 0.5, mid: 0.5, treble: 0.5, brightness: 0.5, flux: 0.5, onsetDensity: 0.5, stereoWidth: 0.5 }],
+      landmarks: [],
+    };
+    const adapted = applyMusicMapToDirectorPlanV1(plan, map);
+    expect(adapted.blocking).toEqual(plan.blocking);
+    expect(adapted.sections.map((section) => section.layout)).toEqual(plan.sections.map((section) => section.layout));
+    expect(adapted.sections.some((section, index) => section.intensity !== plan.sections[index]!.intensity)).toBe(true);
+    expect(adapted.planIdentity).not.toBe(plan.planIdentity);
   });
 
   it("adapts only a matching non-degraded bounded AI response", () => {

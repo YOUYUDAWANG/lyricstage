@@ -25,6 +25,7 @@ import {
   sanitizeDramaticScoreV1,
   type DramaticScoreV1,
 } from "./dramaticScore";
+import type { MusicMapV1 } from "./musicMap";
 
 export type PerformanceArtDirectionV1 =
   | "editorialKinetic"
@@ -143,12 +144,40 @@ export interface DirectorPlanV1 {
   dramaticScore: DramaticScoreV1;
 }
 
+export interface DirectorAttemptTimingV1 {
+  sequence: number;
+  protocol: string;
+  model: string;
+  format: string;
+  status?: number;
+  firstByteMs?: number;
+  elapsedMs: number;
+  responseBytes: number;
+  outcome: "ready" | "http-error" | "parse-error" | "contract-degraded" | "timeout" | "network-error";
+}
+
+export interface DirectorTimingV1 {
+  version: "director-timing-v1";
+  cache: "hit" | "miss" | "disabled";
+  totalMs: number;
+  cacheMs: number;
+  requestBuildMs: number;
+  providerMs: number;
+  contractMs: number;
+  adaptationMs: number;
+  inputBytes: number;
+  outputBytes: number;
+  attempts: DirectorAttemptTimingV1[];
+  completedAt: string;
+}
+
 export interface DirectorResolutionResponseV1 {
   type: "director-resolution-v1";
   status: "ready" | "unavailable" | "error";
   source: "cache" | "network" | "local";
   plan?: DirectorPlanV1;
   reason?: string;
+  timing?: DirectorTimingV1;
 }
 
 export interface LegacyDirectorWireV1 {
@@ -420,6 +449,32 @@ export const compileLocalDirectorPlanV1 = (lyrics: LyricDocumentV0): DirectorPla
     gestures: compileLocalLyricGesturesV1(lyrics),
     dramaticScore: compileLocalDramaticScoreV1(lyrics, blockedSections),
   });
+};
+
+export const applyMusicMapToDirectorPlanV1 = (
+  plan: DirectorPlanV1,
+  musicMap: MusicMapV1 | undefined,
+): DirectorPlanV1 => {
+  if (!musicMap?.segments.length) return plan;
+  const sections = plan.sections.map((section) => {
+    let weightedEnergy = 0;
+    let overlapTotal = 0;
+    for (const segment of musicMap.segments) {
+      const overlap = Math.max(0, Math.min(section.toMs, segment.toMs) - Math.max(section.fromMs, segment.fromMs));
+      if (overlap <= 0) continue;
+      weightedEnergy += segment.energy * overlap;
+      overlapTotal += overlap;
+    }
+    if (overlapTotal <= 0) return section;
+    const energy = weightedEnergy / overlapTotal;
+    return { ...section, intensity: clamp(section.intensity * 0.82 + energy * 0.18, 0, 1) };
+  });
+  const adapted = {
+    ...plan,
+    sections,
+    directorVersion: `${plan.directorVersion}+musicmap-local-v1`,
+  };
+  return { ...adapted, planIdentity: planIdentity(adapted) };
 };
 
 const finite = (value: unknown, fallback: number): number =>

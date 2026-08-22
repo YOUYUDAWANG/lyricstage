@@ -6,6 +6,7 @@ import {
   defaultDirectorEndpoint,
   displayLyricsEndpoint,
   draftFromPublicProvider,
+  directorTimingCopy,
   emptyProviderDraft,
   endpointForChangedProtocol,
   settingsSectionFromHash,
@@ -106,5 +107,15 @@ describe("extension settings model", () => {
     expect(uniqueOriginPatterns(["http://127.0.0.1:11434/v1", "http://127.0.0.1:11434/v1/chat"])).toEqual([
       "http://127.0.0.1:11434/*",
     ]);
+  });
+
+  it("summarizes the last Director timing without endpoint or key data", () => {
+    expect(directorTimingCopy({ configured: true, lastTiming: {
+      version: "director-timing-v1", cache: "miss", totalMs: 8_400, cacheMs: 2,
+      requestBuildMs: 3, providerMs: 8_350, contractMs: 6, adaptationMs: 1,
+      inputBytes: 12_000, outputBytes: 4_000,
+      attempts: [{ sequence: 1, protocol: "gemini", model: "flash", format: "json-schema", status: 200, elapsedMs: 8_350, responseBytes: 4_000, outcome: "ready" }],
+      completedAt: "2026-08-23T00:00:00.000Z",
+    } })).toBe("最近一次：总计 8400ms · 模型 8350ms · 合同 6ms · 1 次 · gemini / flash");
   });
 });

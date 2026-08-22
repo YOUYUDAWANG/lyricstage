@@ -1,5 +1,6 @@
 import type {
   DirectorProviderProtocolV1,
+  DirectorTimingV1,
   PublicDirectorBYOKConfigurationV1,
   PublicDirectorProviderConfigurationV1,
 } from "@lyricstage/performance";
@@ -21,6 +22,7 @@ export interface LyricsConfigView {
 
 export interface DirectorConfigView extends Partial<PublicDirectorBYOKConfigurationV1> {
   reason?: string;
+  lastTiming?: DirectorTimingV1;
 }
 
 export const defaultPrivateLyricsEndpoint = "http://100.108.23.60:8788/";
@@ -121,6 +123,15 @@ export const directorStatusCopy = (config: DirectorConfigView | undefined): stri
   return config?.configured
     ? `已启用 ${config.primary?.model ?? "AI"}；模型输出会先通过本地导演合同`
     : "未配置；旧服务令牌不会迁移为供应商 API Key，本地演出仍可使用";
+};
+
+export const directorTimingCopy = (config: DirectorConfigView | undefined): string => {
+  const timing = config?.lastTiming;
+  if (!timing) return "尚无导演生成记录";
+  if (timing.cache === "hit") return `最近一次：缓存命中 · ${timing.totalMs}ms`;
+  const provider = timing.attempts.at(-1);
+  const providerLabel = provider ? `${provider.protocol} / ${provider.model}` : "未发起模型请求";
+  return `最近一次：总计 ${timing.totalMs}ms · 模型 ${timing.providerMs}ms · 合同 ${timing.contractMs}ms · ${timing.attempts.length} 次 · ${providerLabel}`;
 };
 
 export const summarizeLyricsConfig = (config: LyricsConfigView | undefined): string =>

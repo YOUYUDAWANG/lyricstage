@@ -1,12 +1,14 @@
 import { describe, expect, it, vi } from "vitest";
 
 import {
+  directorBYOKDiagnosticsFromErrorV1,
   directorBYOKCacheIdentityV1,
   executeDirectorBYOKV1,
   sanitizeDirectorBYOKConfigurationV1,
   type DirectorBYOKConfigurationV1,
   type DirectorProviderProtocolV1,
 } from "./directorProviders";
+import { compactDirectorPromptInputV1, directorIntentSchemaV1, directorIntentSystemPromptV1 } from "./directorIntent";
 
 const requestFixture = () => ({
   version: "lyricstage-fullscreen-director-request-v1",
@@ -130,6 +132,27 @@ describe("Director BYOK configuration", () => {
     expect(identity).not.toContain("secret-fixture-key");
     expect(identity).toContain("fixture-model");
   });
+
+  it("keeps a representative 50-line intent request below 25KB", () => {
+    const compact = compactDirectorPromptInputV1({
+      track: { title: "Fixture", artist: "Artist", durationSeconds: 204 },
+      sectionHints: Array.from({ length: 10 }, (_, index) => ({ fromLineIndex: index * 5, toLineIndex: index * 5 + 4 })),
+      lines: Array.from({ length: 50 }, (_, lineIndex) => ({
+        lineIndex,
+        fromSeconds: lineIndex * 4,
+        toSeconds: lineIndex * 4 + 3.5,
+        exactText: lineIndex % 2 === 0 ? "まだ見えない光を探して歩いてゆく" : "I keep moving through the quiet night",
+        voiceRole: "lead",
+        overlapGroup: null,
+        timingPrecision: "estimated",
+        repetitionCount: 1,
+      })),
+    });
+    const bytes = new TextEncoder().encode(
+      directorIntentSystemPromptV1 + JSON.stringify(directorIntentSchemaV1) + JSON.stringify(compact),
+    ).byteLength;
+    expect(bytes).toBeLessThan(25_000);
+  });
 });
 
 describe("Director BYOK provider adapters", () => {
@@ -153,6 +176,9 @@ describe("Director BYOK provider adapters", () => {
       expect(result.provider.protocol).toBe(protocol);
       expect(result.provider.hasApiKey).toBe(true);
       expect(JSON.stringify(result)).not.toContain("secret-fixture-key");
+      expect(result.diagnostics.attempts).toHaveLength(1);
+      expect(result.diagnostics.inputBytes).toBeGreaterThan(0);
+      expect(result.diagnostics.outputBytes).toBeGreaterThan(0);
     });
   }
 
@@ -198,8 +224,42 @@ describe("Director BYOK provider adapters", () => {
 
     const startedAt = Date.now();
     await expect(executeDirectorBYOKV1(config, requestFixture(), fetchMock as typeof fetch, 25))
-      .rejects.toThrow(/Abort|deadline/iu);
+      .rejects.toThrow(/Abort|deadline|超时/iu);
     expect(Date.now() - startedAt).toBeLessThan(500);
     expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("expands sparse AI directives locally before applying the strict V4 contract", async () => {
+    const sparse = aiFixture();
+    sparse.directives = sparse.directives.slice(0, 1);
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify({
+      output_text: JSON.stringify(sparse),
+    }), { status: 200, headers: { "Content-Type": "application/json" } }));
+    const result = await executeDirectorBYOKV1(
+      configuration("openai-responses", "https://primary.test/v1"),
+      requestFixture(),
+      fetchMock as typeof fetch,
+    );
+    expect((result.response as { degraded?: boolean; directives?: unknown[] }).degraded).toBe(false);
+    expect((result.response as { directives: unknown[] }).directives).toHaveLength(4);
+  });
+
+  it("never exceeds three HTTP attempts across primary repair and fallback", async () => {
+    const config = configuration("openai-responses", "https://primary.test/v1");
+    config.fallback = { protocol: "anthropic", endpoint: "https://fallback.test/v1", model: "backup", apiKey: "backup-key" };
+    const fetchMock = vi.fn(async (input: string | URL | Request) => new Response(JSON.stringify(
+      String(input).includes("fallback.test")
+        ? { content: [{ type: "text", text: "{}" }] }
+        : { output_text: "{}" },
+    ), { status: 200, headers: { "Content-Type": "application/json" } }));
+    let failure: unknown;
+    try {
+      await executeDirectorBYOKV1(config, requestFixture(), fetchMock as typeof fetch);
+    } catch (error) {
+      failure = error;
+    }
+    expect(fetchMock).toHaveBeenCalledTimes(3);
+    expect(directorBYOKDiagnosticsFromErrorV1(failure)?.attempts).toHaveLength(3);
+    expect(JSON.stringify(directorBYOKDiagnosticsFromErrorV1(failure))).not.toContain("secret-fixture-key");
   });
 });

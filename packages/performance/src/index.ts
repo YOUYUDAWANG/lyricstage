@@ -2,6 +2,7 @@ export * from "./directorPlan";
 export * from "./effectGrammar";
 export * from "./directorRequest";
 export * from "./directorProviders";
+export * from "./directorIntent";
 export * from "./environmentScene";
 export * from "./estimatedWordTiming";
 export * from "./motionClip";

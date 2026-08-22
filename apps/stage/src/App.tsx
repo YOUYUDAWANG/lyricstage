@@ -21,6 +21,7 @@ import {
 } from "@lyricstage/lyrics";
 import { applyNonMusicSegments } from "@lyricstage/lyrics";
 import {
+  applyMusicMapToDirectorPlanV1,
   compileLocalDirectorPlanV1,
   estimateLyricsOffsetFromVocalTimingV1,
   type DirectorPlanV1,
@@ -138,6 +139,8 @@ export default function App({ embedded = embeddedStageFromLocation, onEmbeddedRe
   const objectURLRef = useRef<string | null>(null);
   const displayTimeRef = useRef(demoTimeMs);
   const youtubeMusic = useYouTubeMusicBridge();
+  const musicMapAtRenderRef = useRef(youtubeMusic.musicMap);
+  musicMapAtRenderRef.current = youtubeMusic.musicMap;
   const [source, setSource] = useState<PlaybackSource>(() =>
     isYouTubeMusicExtensionContext() ? "youtubeMusic" : "local",
   );
@@ -334,6 +337,12 @@ export default function App({ embedded = embeddedStageFromLocation, onEmbeddedRe
         : base.effects,
     };
   }, [lyrics]);
+  const displayedRemoteDirectorPlan = useMemo(
+    () => remoteDirectorPlan
+      ? applyMusicMapToDirectorPlanV1(remoteDirectorPlan, youtubeMusic.musicMap)
+      : undefined,
+    [remoteDirectorPlan, youtubeMusic.musicMap],
+  );
   const timeline = useMemo(() => prepareTimeline(plan), [plan]);
 
   useEffect(() => {
@@ -349,7 +358,7 @@ export default function App({ embedded = embeddedStageFromLocation, onEmbeddedRe
     const generation = ++directorLookupGenerationRef.current;
     let cancelled = false;
     setDirectorLookupState({ status: "requesting" });
-    void requestAutomaticDirectorPlan(track, lyrics, youtubeMusic.musicMap).then((response) => {
+    void requestAutomaticDirectorPlan(track, lyrics, musicMapAtRenderRef.current).then((response) => {
       if (
         cancelled
         || generation !== directorLookupGenerationRef.current
@@ -379,7 +388,6 @@ export default function App({ embedded = embeddedStageFromLocation, onEmbeddedRe
     localDirectorPlan.lyricsIdentity,
     source,
     youtubeMusic.snapshot?.track.trackID,
-    youtubeMusic.musicMap,
   ]);
   const activeLineText = useMemo(() => {
     const active = sampleTimeline(timeline, stageLyricTimeMs);
@@ -1289,7 +1297,7 @@ export default function App({ embedded = embeddedStageFromLocation, onEmbeddedRe
               <StageCanvas
                 lyrics={lyrics}
                 localDirectorPlan={localDirectorPlan}
-                remoteDirectorPlan={remoteDirectorPlan}
+                remoteDirectorPlan={displayedRemoteDirectorPlan}
                 directorLookupState={directorLookupState}
                 clock={youtubeMusic.clock}
                 continuous={selectedPlaying || benchmarkStage}
@@ -1485,7 +1493,7 @@ export default function App({ embedded = embeddedStageFromLocation, onEmbeddedRe
           <StageCanvas
             lyrics={lyrics}
             localDirectorPlan={localDirectorPlan}
-            remoteDirectorPlan={remoteDirectorPlan}
+            remoteDirectorPlan={displayedRemoteDirectorPlan}
             directorLookupState={directorLookupState}
             clock={selectedClock}
             continuous={selectedPlaying || benchmarkStage}
