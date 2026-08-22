@@ -68,7 +68,7 @@ Never inspect, print, or migrate the user's provider key. If a fresh extension i
 - Director gateway: 27/27 tests.
 - The full-tab extension settings UI is merged; the popup is now limited to status, lyrics activation, and the settings entry.
 - TypeScript, the current extension production build, and Manifest V3 CSP passed after the settings merge.
-- The reviewed `0.3.1` extension build is mirrored byte-for-byte to `/Users/chaoyiliu/Desktop/bilibili-music/web/extension-dist`. A refreshed real YouTube Music tab reported `data-lyricstage-content-script="isolated-v3"`, one visible LyricStage lyrics toolbar/director status and no captured warning/error loop. Chrome's automation boundary cannot operate `chrome://extensions` or `chrome-extension://` pages, so the internal-page reload click and settings timing-row visual check remain manual gates.
+- The reviewed `0.3.1` extension build is mirrored byte-for-byte to `/Users/chaoyiliu/Desktop/bilibili-music/web/extension-dist`. A refreshed real YouTube Music tab reported `data-lyricstage-content-script="isolated-v3"`, one visible LyricStage lyrics toolbar/director status and no captured warning/error loop. Browser automation cannot claim Chrome internal pages, but the user explicitly authorizes Computer Use for `chrome://extensions` reloads and `chrome-extension://` settings; use it instead of asking for a manual click. The 0.3.1 instance and YouTube Music were reloaded this way, and Settings showed the sanitized last-run timing row without exposing the stored key.
 - Owner-only Stage deployment: `https://lyricstage.yihanchen617.chatgpt.site`.
 - Frozen extraction tag: `lyricstage-monorepo-v0.3.0`.
 
@@ -76,7 +76,7 @@ Recheck drift-prone runtime and deployment state before claiming it is still cur
 
 ## Open work
 
-1. In `chrome://extensions`, reload the existing stable-path LyricStage instance, then verify the settings timing row plus normal popup/settings lifecycle without changing the extension identity.
+1. Diagnose the current real Gemini attempt: Settings recorded 320 ms total / 307 ms provider / two attempts, then Stage returned to `AI 暂不可用`; do not read or record the key.
 2. Verify one real compact-intent provider takeover, the 45-second/three-attempt fallback boundary, and deterministic local fallback without recording the key.
 3. Run whole-song subjective A/B for fast, slow, repeated-chorus, duet, and long-line tracks.
 4. Run a bounded multi-tab soak covering authority handoff, pause/seek, artwork fallback, capture ownership, and extension reload recovery.
