@@ -93,6 +93,43 @@ if (popupResources.length === 0) {
 for (const resource of popupResources) {
   requireBuiltFile(resource, "popup resource");
 }
+if (!popupHTML.includes("data-open-settings")) {
+  throw new Error("Extension popup is missing the dedicated settings page entry.");
+}
+const popupJavaScriptBytes = popupResources
+  .filter((resource) => resource.endsWith(".js"))
+  .reduce((total, resource) => total + statSync(join(extensionRoot, resource)).size, 0);
+if (popupJavaScriptBytes > 80_000) {
+  throw new Error(`Extension popup JavaScript exceeded 80KB (${popupJavaScriptBytes} bytes); it must not load the performance engine.`);
+}
+const popupJavaScript = popupResources
+  .filter((resource) => resource.endsWith(".js"))
+  .map((resource) => readFileSync(join(extensionRoot, resource), "utf8"))
+  .join("\n");
+if (popupJavaScript.includes("director-plan-v1") || popupJavaScript.includes("environment-scene-v1")) {
+  throw new Error("Extension popup must stay free of the Stage/performance engine.");
+}
+const settingsPage = manifest.options_ui?.page;
+if (manifest.options_ui?.open_in_tab !== true) {
+  throw new Error("Extension settings page must open as a full-tab Web UI.");
+}
+const settingsPath = requireBuiltFile(settingsPage, "options settings page");
+const settingsHTML = readFileSync(settingsPath, "utf8");
+const settingsResources = Array.from(
+  settingsHTML.matchAll(/(?:src|href)="\.\/([^"?#]+)(?:[?#][^"]*)?"/g),
+  (match) => match[1],
+);
+if (settingsResources.length === 0) {
+  throw new Error("Extension settings page has no packaged script or stylesheet resources.");
+}
+for (const resource of settingsResources) {
+  requireBuiltFile(resource, "settings resource");
+}
+const settingsSource = settingsResources
+  .filter((resource) => resource.endsWith(".js") || resource.endsWith(".html"))
+  .map((resource) => readFileSync(join(extensionRoot, resource), "utf8"))
+  .concat(settingsHTML)
+  .join("\n");
 const contentScripts = manifest.content_scripts?.[0]?.js ?? [];
 if (
   contentScripts.length !== 2 ||
@@ -123,10 +160,16 @@ if (!(manifest.optional_host_permissions ?? []).includes("https://*/*")
   || !(manifest.optional_host_permissions ?? []).includes("http://*/*")) {
   throw new Error("Extension manifest cannot request exact custom or local AI provider origins.");
 }
-if (!popupHTML.includes("data-director-api-key")
-  || !popupHTML.includes("data-director-protocol")
-  || !popupHTML.includes("data-save-director-config")) {
-  throw new Error("Extension popup is missing provider-neutral local AI director controls.");
+if (!settingsSource.includes("data-director-api-key")
+  || !settingsSource.includes("data-director-protocol")
+  || !settingsSource.includes("data-save-director-config")) {
+  throw new Error("Extension settings page is missing provider-neutral local AI director controls.");
+}
+if (
+  settingsHTML.includes("stage.js")
+  || settingsResources.some((resource) => resource.endsWith("stage.js") || resource.includes("Geometry-"))
+) {
+  throw new Error("Extension settings page must not load the Stage renderer.");
 }
 const exposedStage = (manifest.web_accessible_resources ?? []).some((entry) =>
   (entry.resources ?? []).some((resource) => resource === "stage.html" || resource === "assets/*"),

@@ -25,6 +25,10 @@
     "default_title": "LyricStage",
     "default_popup": "popup.html"
   },
+  "options_ui": {
+    "page": "settings.html",
+    "open_in_tab": true
+  },
   "content_scripts": [
     {
       "matches": ["https://music.youtube.com/*"],

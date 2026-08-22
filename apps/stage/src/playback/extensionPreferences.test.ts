@@ -4,6 +4,7 @@ import {
   readExtensionPreferences,
   saveLyricsOffset,
   saveExtensionPreferences,
+  subscribeExtensionPreferences,
 } from "./extensionPreferences";
 
 describe("extension appearance preferences", () => {
@@ -26,6 +27,36 @@ describe("extension appearance preferences", () => {
     });
     await saveExtensionPreferences({ lightweight: true, vjMode: true });
     await expect(readExtensionPreferences()).resolves.toEqual({ lightweight: true, vjMode: true });
+  });
+
+  it("notifies when appearance preferences change in extension storage", async () => {
+    const listeners = new Set<(changes: Record<string, { newValue?: unknown }>, areaName: string) => void>();
+    vi.stubGlobal("chrome", {
+      storage: {
+        local: {
+          get: vi.fn(async () => ({})),
+          set: vi.fn(async () => undefined),
+        },
+        onChanged: {
+          addListener: (listener: (changes: Record<string, { newValue?: unknown }>, areaName: string) => void) => {
+            listeners.add(listener);
+          },
+          removeListener: (listener: (changes: Record<string, { newValue?: unknown }>, areaName: string) => void) => {
+            listeners.delete(listener);
+          },
+        },
+      },
+    });
+    const received: Array<{ lightweight: boolean; vjMode: boolean }> = [];
+    const unsubscribe = subscribeExtensionPreferences((preferences) => received.push(preferences));
+    listeners.forEach((listener) => listener({
+      "lyricstage-preferences-v0": { newValue: { lightweight: true, vjMode: false } },
+    }, "local"));
+    unsubscribe();
+    listeners.forEach((listener) => listener({
+      "lyricstage-preferences-v0": { newValue: { lightweight: false, vjMode: true } },
+    }, "local"));
+    expect(received).toEqual([{ lightweight: true, vjMode: false }]);
   });
 
   it("stores a bounded per-track lyrics offset and clears zero", async () => {

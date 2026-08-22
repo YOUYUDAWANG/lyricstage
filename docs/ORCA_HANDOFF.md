@@ -58,7 +58,7 @@ Do not load an Orca worktree's `extension-dist` directly and do not replace the 
 - a denied Fullscreen API request remains in Column and leaves no viewport canvas;
 - there is no LyricStage warning/error loop.
 
-Never inspect, print, or migrate the user's provider key. If a fresh extension install reports AI unconfigured, the user re-enters it in the popup.
+Never inspect, print, or migrate the user's provider key. If a fresh extension install reports AI unconfigured, the user re-enters it in the extension settings page.
 
 ## Current verified baseline
 
