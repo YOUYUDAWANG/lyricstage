@@ -36,7 +36,7 @@ Build artifact: `extension-dist`
 
 ## Manual Chrome gates
 
-- [x] Reloaded the latest unpacked `extension-dist` and refreshed YouTube Music. The page reported `data-lyricstage-content-script="isolated-v3"`; Lyrics mounted exactly one v2 host and zero legacy hosts; Related removed it and Lyrics remounted one host without a recorded mount failure. Multi-tab seek isolation, pause/resume and artwork fallback were also exercised. In automation where Fullscreen API ownership was denied, the UI stayed in Column instead of rendering a false viewport stage.
+- [x] After deleting duplicate unpacked instances, installed the final Vite 8.2.2 `extension-dist` as one fresh instance under the original Chrome ID `majlfdidelchofnfodcijoppcgpmbelc` and refreshed YouTube Music. The page reported `data-lyricstage-content-script="isolated-v3"`; Lyrics mounted exactly one v2 host and zero legacy hosts; Related removed it and Lyrics remounted one host without a recorded mount failure. Multi-tab seek isolation, pause/resume and artwork fallback were also exercised on the release line. In automation where Fullscreen API ownership was denied, the UI stayed in Column, created no viewport canvas, and emitted no LyricStage warning/error loop.
 
 - [x] A previous `web/extension-dist` 0.2.1 build was reloaded and established the baseline YTM UI gates below; these are historical evidence, not validation of the current candidate.
 - [x] Native Lyrics Column mounts exactly once; Related hides the extension and restores native content, then Lyrics remounts once.
