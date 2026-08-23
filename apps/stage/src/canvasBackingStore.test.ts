@@ -19,4 +19,13 @@ describe("canvasBackingStoreForV1", () => {
       scaleY: 2,
     });
   });
+
+  it("caps 5K Retina canvases to a bounded 4K-class backing store", () => {
+    const backing = canvasBackingStoreForV1(5120, 2880, 2);
+
+    expect(backing.pixelWidth).toBeLessThanOrEqual(4096);
+    expect(backing.pixelHeight).toBeLessThanOrEqual(4096);
+    expect(backing.pixelWidth * backing.pixelHeight).toBeLessThanOrEqual((3840 * 2160) + 4096);
+    expect(backing.scaleX).toBeCloseTo(backing.scaleY, 3);
+  });
 });

@@ -7,6 +7,7 @@
   text-rendering: optimizeLegibility;
   --accent: #4169e1;
   --accent-hover: #3158ce;
+  --focus-ring: #264fbf;
   --label: #191a1c;
   --secondary: #696c73;
   --tertiary: #92949a;
@@ -25,7 +26,7 @@ html, body, #root { min-width: 320px; min-height: 100%; margin: 0; }
 body { min-height: 100vh; color: var(--label); background: var(--canvas); }
 button, input, select { font: inherit; }
 button:focus-visible, input:focus-visible, select:focus-visible, summary:focus-visible, a:focus-visible {
-  outline: 3px solid rgba(65, 105, 225, 0.22);
+  outline: 3px solid var(--focus-ring);
   outline-offset: 2px;
 }
 
@@ -107,7 +108,7 @@ button:focus-visible, input:focus-visible, select:focus-visible, summary:focus-v
 .form-row small, .provider-row small, .settings-switch small { color: var(--secondary); font-size: 11px; font-weight: 450; line-height: 1.35; }
 input[type="url"], input[type="password"], select { width: 100%; min-width: 0; min-height: 38px; border: 1px solid var(--separator-strong); border-radius: 8px; padding: 0 11px; color: var(--label); background: var(--surface); box-shadow: 0 1px 1px rgba(24, 25, 28, 0.02); font-size: 12px; transition: border-color 140ms ease, box-shadow 140ms ease, background-color 140ms ease; }
 input:hover, select:hover { border-color: #b9bbb5; }
-input:focus, select:focus { border-color: var(--accent); box-shadow: 0 0 0 3px rgba(65, 105, 225, 0.12); outline: 0; }
+input:focus, select:focus { border-color: var(--accent); box-shadow: 0 0 0 3px rgba(65, 105, 225, 0.12); }
 
 .provider-panel { display: grid; background: var(--surface-muted); }
 .provider-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 20px; padding: 15px 14px; background: var(--surface); }
@@ -118,7 +119,7 @@ input:focus, select:focus { border-color: var(--accent); box-shadow: 0 0 0 3px r
 .connection-state[data-phase="error"] i { background: var(--red); }
 .provider-rows { border-top: 1px solid var(--separator); border-bottom: 1px solid var(--separator); }
 .provider-connect-row { grid-template-columns: minmax(180px, 0.8fr) minmax(260px, 1.2fr); }
-.connect-button, .settings-actions button { min-height: 38px; border: 1px solid var(--separator-strong); border-radius: 8px; padding: 0 13px; color: var(--label); background: var(--surface); box-shadow: 0 1px 1px rgba(24, 25, 28, 0.03); font-size: 12px; font-weight: 620; cursor: pointer; transition: color 140ms ease, background-color 140ms ease, border-color 140ms ease, transform 100ms ease-out; }
+.connect-button, .settings-actions button, .config-load-notice button { min-height: 38px; border: 1px solid var(--separator-strong); border-radius: 8px; padding: 0 13px; color: var(--label); background: var(--surface); box-shadow: 0 1px 1px rgba(24, 25, 28, 0.03); font-size: 12px; font-weight: 620; cursor: pointer; transition: color 140ms ease, background-color 140ms ease, border-color 140ms ease, transform 100ms ease-out; }
 .connect-button { justify-self: start; color: var(--accent); border-color: #bdc9ef; background: #f8f9ff; }
 .provider-footnote { margin: 0; padding: 10px 14px; color: var(--secondary); background: var(--surface); font-size: 11px; line-height: 1.45; }
 .provider-footnote[data-phase="connected"] { color: var(--green); }
@@ -127,6 +128,13 @@ input:focus, select:focus { border-color: var(--accent); box-shadow: 0 0 0 3px r
 .advanced-disclosure summary { padding: 11px 14px; color: var(--secondary); font-size: 11px; font-weight: 600; cursor: pointer; list-style-position: inside; }
 .advanced-endpoint { display: grid; gap: 7px; border-top: 1px solid var(--separator); padding: 13px 14px 15px; }
 .advanced-endpoint > span { color: var(--secondary); font-size: 11px; font-weight: 600; }
+
+.config-load-notice { display: flex; align-items: center; justify-content: space-between; gap: 14px; border: 1px solid var(--separator); border-radius: 9px; padding: 10px 12px; color: var(--secondary); background: var(--surface-muted); font-size: 11px; line-height: 1.45; }
+.config-load-notice[data-phase="error"] { border-color: #e4b7bc; color: var(--red); background: #fff6f7; }
+.config-load-notice button { min-height: 32px; flex: 0 0 auto; color: var(--red); background: #fff; }
+.operation-error, .validation-message { margin: 0; border-left: 3px solid; padding: 9px 11px; font-size: 11px; line-height: 1.5; }
+.operation-error { border-color: #dc8e97; color: var(--red); background: #fff6f7; }
+.validation-message { border-color: #c5a45a; color: #75530e; background: #fff9e9; }
 
 .settings-toggle { display: flex; align-items: center; justify-content: space-between; gap: 20px; }
 .fallback-toggle { border: 1px solid var(--separator); border-radius: 10px; padding: 13px 14px; background: var(--surface-muted); }
@@ -163,8 +171,9 @@ button:disabled, input:disabled, select:disabled { opacity: 0.48; cursor: not-al
   .settings-actions button:hover { border-color: #b7b9b3; background: var(--surface-muted); }
   .settings-actions button.primary:hover { border-color: var(--accent-hover); background: var(--accent-hover); }
   .settings-actions button.danger:hover { border-color: #f0d4d7; background: #fff5f6; }
+  .config-load-notice button:hover { border-color: #d49ca3; background: #fff9fa; }
 }
-.settings-sidebar a:active, .connect-button:active, .settings-actions button:active { transform: scale(0.98); }
+.settings-sidebar a:active, .connect-button:active, .settings-actions button:active, .config-load-notice button:active { transform: scale(0.98); }
 .settings-missing { display: grid; gap: 14px; width: min(520px, calc(100% - 36px)); margin: 14vh auto; border: 1px solid var(--separator); border-radius: 12px; padding: 26px; background: var(--surface); box-shadow: 0 8px 30px rgba(24, 25, 28, 0.08); }
 .settings-missing h1 { margin: 0; font-size: 24px; }
 .settings-missing p { margin: 0; color: var(--secondary); line-height: 1.6; }
@@ -173,12 +182,13 @@ button:disabled, input:disabled, select:disabled { opacity: 0.48; cursor: not-al
   .settings-window { grid-template-columns: 1fr; }
   .settings-sidebar { position: relative; z-index: 5; min-height: 0; border-right: 0; border-bottom: 1px solid var(--separator); padding: 14px; }
   .settings-brand { padding: 0 4px 13px; }
-  .settings-sidebar nav { display: flex; gap: 5px; overflow-x: auto; }
+  .settings-sidebar nav { display: grid; grid-template-columns: repeat(auto-fit, minmax(128px, 1fr)); gap: 5px; }
   .sidebar-label, .sidebar-runtime { display: none; }
-  .settings-sidebar a { flex: 0 0 auto; }
+  .settings-sidebar a { min-width: 0; }
   .settings-content { padding: 30px 20px 64px; }
 }
 @media (max-width: 620px) {
+  .settings-sidebar nav { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .settings-page-header { display: grid; gap: 12px; }
   .page-status { justify-self: start; }
   .settings-card { padding: 16px; }
@@ -189,9 +199,23 @@ button:disabled, input:disabled, select:disabled { opacity: 0.48; cursor: not-al
 }
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { scroll-behavior: auto !important; transition-duration: 0.01ms !important; }
-  .settings-sidebar a:active, .connect-button:active, .settings-actions button:active { transform: none; }
+  .settings-sidebar a:active, .connect-button:active, .settings-actions button:active, .config-load-notice button:active { transform: none; }
 }
 /* director-review-start */
+.developer-disclosure { border: 1px solid var(--separator); border-radius: 10px; overflow: hidden; background: var(--surface-muted); }
+.settings-card.developer-disclosure { display: block; padding: 0; }
+.developer-summary { display: flex; align-items: center; justify-content: space-between; gap: 14px; min-height: 60px; padding: 12px 14px; cursor: pointer; list-style: none; }
+.developer-summary::-webkit-details-marker { display: none; }
+.developer-summary > span { display: grid; gap: 3px; }
+.developer-summary strong { font-size: 13px; font-weight: 650; }
+.developer-summary small { color: var(--secondary); font-size: 11px; line-height: 1.4; }
+.developer-summary::after { content: "+"; color: var(--tertiary); font-size: 18px; font-weight: 400; }
+.developer-disclosure[open] > .developer-summary::after { content: "−"; }
+.developer-body { display: grid; gap: 18px; border-top: 1px solid var(--separator); padding: 20px; background: var(--surface); }
+.embedded-disclosure { margin-top: 4px; }
+.embedded-disclosure .developer-body { padding: 0; }
+.embedded-disclosure .settings-switch { background: var(--surface); }
+
 .director-review-summary {
   margin: 0 0 14px;
   color: var(--muted, #756f67);

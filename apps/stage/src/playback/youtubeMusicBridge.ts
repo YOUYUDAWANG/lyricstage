@@ -52,13 +52,18 @@ interface YouTubeMusicBridgePortSessionOptions {
   clearTimer?: typeof globalThis.clearTimeout;
 }
 
+export interface YouTubeMusicBridgePortSessionController {
+  (): void;
+  retry(): boolean;
+}
+
 export const startYouTubeMusicBridgePortSession = ({
   resolveRuntime = extensionRuntime,
   onMessage,
   onDisconnected,
   setTimer = globalThis.setTimeout.bind(globalThis),
   clearTimer = globalThis.clearTimeout.bind(globalThis),
-}: YouTubeMusicBridgePortSessionOptions): (() => void) => {
+}: YouTubeMusicBridgePortSessionOptions): YouTubeMusicBridgePortSessionController => {
   let disposed = false;
   let activePort: RuntimePort | undefined;
   let reconnectAttempt = 0;
@@ -144,8 +149,7 @@ export const startYouTubeMusicBridgePortSession = ({
     }
   }
 
-  connect();
-  return () => {
+  const cleanup = (() => {
     disposed = true;
     if (reconnectTimer !== undefined) clearTimer(reconnectTimer);
     reconnectTimer = undefined;
@@ -157,7 +161,17 @@ export const startYouTubeMusicBridgePortSession = ({
     } catch {
       // The extension context may already be gone during React cleanup.
     }
+  }) as YouTubeMusicBridgePortSessionController;
+  cleanup.retry = () => {
+    if (disposed || activePort) return false;
+    if (reconnectTimer !== undefined) clearTimer(reconnectTimer);
+    reconnectTimer = undefined;
+    reconnectAttempt = 0;
+    connect();
+    return true;
   };
+  connect();
+  return cleanup;
 };
 
 export const isYouTubeMusicExtensionContext = (): boolean =>
@@ -355,6 +369,7 @@ export const youtubeMusicBridgeModelForSourceOwnershipReset = (
 
 export const useYouTubeMusicBridge = () => {
   const clockRef = useRef(new YouTubeMusicPlaybackClockV0());
+  const sessionRef = useRef<YouTubeMusicBridgePortSessionController | undefined>(undefined);
   const [model, setModel] = useState<YouTubeMusicBridgeModel>(() => ({
     available: isYouTubeMusicExtensionContext(),
     connected: false,
@@ -399,7 +414,7 @@ export const useYouTubeMusicBridge = () => {
         }
       }
     };
-    return startYouTubeMusicBridgePortSession({
+    const session = startYouTubeMusicBridgePortSession({
       resolveRuntime: () => extensionRuntime() ?? runtime,
       onMessage: handleMessage,
       onDisconnected: (reason) => {
@@ -413,7 +428,14 @@ export const useYouTubeMusicBridge = () => {
         });
       },
     });
+    sessionRef.current = session;
+    return () => {
+      if (sessionRef.current === session) sessionRef.current = undefined;
+      session();
+    };
   }, []);
+
+  const retryConnection = useCallback(() => sessionRef.current?.retry() ?? false, []);
 
   const openYouTubeMusic = useCallback(async () => {
     const runtime = extensionRuntime();
@@ -430,5 +452,6 @@ export const useYouTubeMusicBridge = () => {
     ...model,
     clock: clockRef.current,
     openYouTubeMusic,
+    retryConnection,
   };
 };

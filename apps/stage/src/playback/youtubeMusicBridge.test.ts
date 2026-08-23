@@ -139,6 +139,40 @@ describe("YouTube Music MV3 Port recovery", () => {
     cleanup();
   });
 
+  it("allows one user-triggered bounded recovery cycle after automatic retries stop", () => {
+    vi.useFakeTimers();
+    const ports: FakePort[] = [];
+    const runtime: ExtensionRuntime = {
+      id: "extension-test",
+      connect: () => {
+        const port = new FakePort();
+        ports.push(port);
+        return port;
+      },
+      sendMessage: async () => undefined,
+    };
+    const session = startYouTubeMusicBridgePortSession({
+      resolveRuntime: () => runtime,
+      onMessage: vi.fn(),
+      onDisconnected: vi.fn(),
+    });
+
+    for (const delay of youtubeMusicBridgeReconnectDelaysMs) {
+      ports.at(-1)!.emitDisconnect();
+      vi.advanceTimersByTime(delay);
+    }
+    ports.at(-1)!.emitDisconnect();
+    vi.advanceTimersByTime(10_000);
+    expect(ports).toHaveLength(4);
+
+    expect(session.retry()).toBe(true);
+    expect(ports).toHaveLength(5);
+    ports.at(-1)!.emitDisconnect();
+    vi.advanceTimersByTime(250);
+    expect(ports).toHaveLength(6);
+    session();
+  });
+
   it("stops immediately when Chrome reports a fatal invalidated context", () => {
     vi.useFakeTimers();
     const ports: FakePort[] = [];

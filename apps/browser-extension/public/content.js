@@ -10,8 +10,13 @@
   const STAGE_FAILURE_ATTR = "data-lyricstage-last-mount-failure";
   const STAGE_FAILURE_COUNT_ATTR = "data-lyricstage-mount-failure-count";
   const SOURCE_LEASE_MS = 3000;
+  const SOURCE_HEARTBEAT_MS = 1000;
+  const SNAPSHOT_PROGRESS_INTERVAL_MS = 250;
+  const SNAPSHOT_KEEPALIVE_MS = 1500;
+  const MUTATION_RECONCILE_MS = 50;
   const TRACK_CHANGE_STABILITY_MS = 250;
   const TRACK_CHANGE_MAX_HOLD_MS = 1500;
+  const TRACK_METADATA_ENRICHMENT_WINDOW_MS = 3000;
   const STAGE_MOUNT_MAX_FAILURES = 3;
   const STAGE_MOUNT_RETRY_DELAYS_MS = [250, 750];
   document.documentElement.dispatchEvent(new Event(CONTENT_SCRIPT_STOP_EVENT));
@@ -25,6 +30,7 @@
     "seeked",
     "durationchange",
     "ratechange",
+    "timeupdate",
     "ended",
   ];
   let sequence = 0;
@@ -34,7 +40,15 @@
   let stopped = false;
   let pendingSend = null;
   let heartbeat = null;
-  let observer = null;
+  let rootObserver = null;
+  let playerObserver = null;
+  let stageObserver = null;
+  let observedPlayerRoot = null;
+  let observedStageRoot = null;
+  let pendingMutationReconcile = null;
+  let reconcileRoots = false;
+  let reconcilePlayer = false;
+  let reconcileStage = false;
   let inPageStageHost = null;
   let stageUIDispose = null;
   let stageReadyTimeout = null;
@@ -51,9 +65,15 @@
   let sponsorBlockTitleCompat = null;
   let lastKnownVideoID = "";
   let lastPlayerVideoID = "";
-  let lastLocationVideoID = "";
+  let pendingPlayerVideoID = "";
   let acceptedTrackTuple = null;
   let pendingTrackTuple = null;
+  let metadataEnrichmentUntilUnixMs = Number.NEGATIVE_INFINITY;
+  let trackTransitionEpoch = 0;
+  let lastSentSnapshotSignature = "";
+  let lastSentSnapshotStateSignature = "";
+  let lastSnapshotSentAtUnixMs = Number.NEGATIVE_INFINITY;
+  const retiredTrackIDs = new Set();
   const savedNativeRenderers = new Map();
 
   const clean = (value) => (typeof value === "string" ? value.trim() : "");
@@ -111,6 +131,17 @@
     return highResolutionArtworkURL(preferred?.src);
   };
 
+  const artworkVideoID = (value) => {
+    const source = clean(value);
+    if (!source) return "";
+    try {
+      const match = new URL(source).pathname.match(/^\/vi(?:_webp)?\/([^/]+)\//u);
+      return match?.[1] ?? "";
+    } catch {
+      return "";
+    }
+  };
+
   const videoArtworkURL = (trackID) => {
     const safeTrackID = clean(trackID);
     if (!/^[A-Za-z0-9_-]{11}$/u.test(safeTrackID)) return "";
@@ -163,27 +194,40 @@
         'ytmusic-player-queue-item[selected] a[href*="watch?v="], ytmusic-player-queue-item[selected] a[href*="watch?"][href*="v="]',
       )?.getAttribute?.("href"),
     ];
-    for (const href of hrefs) {
-      const videoID = videoIDFromHref(href);
-      if (videoID) {
-        lastPlayerVideoID = videoID;
-        if (locationVideoID) lastLocationVideoID = locationVideoID;
-        lastKnownVideoID = videoID;
-        return videoID;
-      }
+    const playerVideoIDs = [...new Set(hrefs.map(videoIDFromHref).filter(Boolean))];
+    const primaryPlayerVideoID = playerVideoIDs[0] ?? "";
+    const playerIdentityChanged = Boolean(
+      primaryPlayerVideoID && primaryPlayerVideoID !== lastPlayerVideoID
+    );
+    if (primaryPlayerVideoID) lastPlayerVideoID = primaryPlayerVideoID;
+    const evidence = [...new Set([
+      ...playerVideoIDs,
+      locationVideoID,
+    ].filter(Boolean))];
+    const acceptedTrackID = acceptedTrackTuple?.trackID ?? "";
+    if (playerIdentityChanged) {
+      pendingPlayerVideoID = primaryPlayerVideoID === acceptedTrackID ? "" : primaryPlayerVideoID;
+    } else if (pendingPlayerVideoID && primaryPlayerVideoID !== pendingPlayerVideoID) {
+      pendingPlayerVideoID = "";
     }
-    if (locationVideoID && locationVideoID !== lastLocationVideoID) {
-      lastLocationVideoID = locationVideoID;
-      lastKnownVideoID = locationVideoID;
-      return locationVideoID;
+    if (pendingPlayerVideoID === acceptedTrackID) pendingPlayerVideoID = "";
+    let selected = "";
+    if (acceptedTrackID) {
+      const nonRetiredChange = evidence.find((trackID) =>
+        trackID !== acceptedTrackID && !retiredTrackIDs.has(trackID)
+      );
+      selected = (pendingPlayerVideoID && primaryPlayerVideoID === pendingPlayerVideoID
+        ? pendingPlayerVideoID
+        : "")
+        || nonRetiredChange
+        || (evidence.includes(acceptedTrackID) ? acceptedTrackID : "")
+        || evidence.find((trackID) => trackID !== acceptedTrackID)
+        || acceptedTrackID;
+    } else {
+      selected = evidence[0] || lastPlayerVideoID || locationVideoID || lastKnownVideoID;
     }
-    if (lastPlayerVideoID) return lastPlayerVideoID;
-    if (locationVideoID) {
-      lastLocationVideoID = locationVideoID;
-      lastKnownVideoID = locationVideoID;
-      return locationVideoID;
-    }
-    return lastKnownVideoID;
+    if (selected) lastKnownVideoID = selected;
+    return selected;
   };
 
   const mediaSeekTarget = (media, barClock, requestedTimeMs) => {
@@ -351,6 +395,91 @@
     !control.hasAttribute?.("disabled")
   );
 
+  const comparableText = (value) => clean(value).normalize("NFKC").toLocaleLowerCase();
+
+  const linkHref = (link) => clean(link?.getAttribute?.("href") || link?.href);
+
+  const isAlbumLink = (link) => {
+    const href = linkHref(link);
+    return /\/browse\/(?:MPRE|OLAK)/iu.test(href)
+      || href.includes("FEmusic_library_privately_owned_release_detail");
+  };
+
+  const isArtistLink = (link) => {
+    const href = linkHref(link);
+    return /\/(?:channel|browse)\/UC[A-Za-z0-9_-]+/u.test(href)
+      || /\/artist\//iu.test(href);
+  };
+
+  const uniqueText = (values) => [...new Set(values.map(clean).filter(Boolean))];
+
+  const trackCredits = (playerBar, metadata, title) => {
+    const links = Array.from(playerBar?.querySelectorAll?.(".byline a, .subtitle a") ?? []);
+    const linkEntries = links.map((link) => ({
+      link,
+      text: clean(link?.textContent),
+    })).filter(({ text }) => text);
+    const metadataArtist = clean(metadata?.artist);
+    const metadataAlbum = clean(metadata?.album);
+    const metadataMatchesTitle = comparableText(metadata?.title) === comparableText(title);
+    const explicitAlbum = linkEntries.find(({ link }) => isAlbumLink(link))?.text ?? "";
+    const album = (metadataMatchesTitle ? metadataAlbum : "") || explicitAlbum;
+    const explicitArtists = uniqueText(
+      linkEntries.filter(({ link }) => isArtistLink(link)).map(({ text }) => text),
+    );
+    const genericArtists = uniqueText(linkEntries
+      .filter(({ link, text }) =>
+        !isAlbumLink(link)
+        && comparableText(text) !== comparableText(title)
+        && comparableText(text) !== comparableText(album)
+        && !/^\d{4}$/u.test(text)
+      )
+      .map(({ text }) => text));
+    const bylineText = firstText(playerBar, [".byline", ".subtitle"]);
+    const bylineFallback = bylineText.split(/\s+•\s+/u).map(clean).find((part) =>
+      part
+      && comparableText(part) !== comparableText(title)
+      && comparableText(part) !== comparableText(album)
+      && !/^\d{4}$/u.test(part)
+    ) ?? "";
+    const mediaSessionArtist = metadataMatchesTitle
+      && comparableText(metadataArtist) !== comparableText(title)
+      ? metadataArtist
+      : "";
+    return {
+      artist: mediaSessionArtist
+        || (explicitArtists.length > 0 ? explicitArtists.join("、") : "")
+        || (genericArtists.length > 0 ? genericArtists.join("、") : "")
+        || bylineFallback,
+      album,
+    };
+  };
+
+  const coherentArtworkURL = (trackID, playerArtworkURL, metadataURL) => {
+    const candidates = uniqueText([
+      highResolutionArtworkURL(playerArtworkURL),
+      highResolutionArtworkURL(metadataURL),
+    ]);
+    const changingTrack = Boolean(
+      acceptedTrackTuple && acceptedTrackTuple.trackID !== trackID
+    );
+    if (!changingTrack) {
+      const candidate = candidates.find((url) => {
+        const embeddedTrackID = artworkVideoID(url);
+        return !embeddedTrackID || embeddedTrackID === trackID;
+      });
+      if (candidate) return candidate;
+    } else {
+      const exact = candidates.find((url) => artworkVideoID(url) === trackID);
+      if (exact) return exact;
+      const unverified = candidates.find((url) =>
+        !artworkVideoID(url) && url !== acceptedTrackTuple.artworkURL
+      );
+      if (unverified) return unverified;
+    }
+    return videoArtworkURL(trackID);
+  };
+
   const trackTupleKey = (tuple) => JSON.stringify([
     tuple.trackID,
     tuple.title,
@@ -363,21 +492,36 @@
     tuple.artist,
   ]);
 
+  const rememberRetiredTrackID = (trackID) => {
+    if (!trackID) return;
+    retiredTrackIDs.delete(trackID);
+    retiredTrackIDs.add(trackID);
+    while (retiredTrackIDs.size > 4) {
+      retiredTrackIDs.delete(retiredTrackIDs.values().next().value);
+    }
+  };
+
   const acceptsTrackTuple = (tuple, nowUnixMs = Date.now()) => {
     if (!acceptedTrackTuple) {
       acceptedTrackTuple = tuple;
       pendingTrackTuple = null;
+      metadataEnrichmentUntilUnixMs = nowUnixMs + TRACK_METADATA_ENRICHMENT_WINDOW_MS;
       return true;
     }
-    if (acceptedTrackTuple.trackID === tuple.trackID) {
+    const matchesAcceptedIdentity =
+      acceptedTrackTuple.trackID === tuple.trackID
+      && trackIdentityMetadataKey(acceptedTrackTuple) === trackIdentityMetadataKey(tuple);
+    if (matchesAcceptedIdentity) {
       acceptedTrackTuple = tuple;
       pendingTrackTuple = null;
       return true;
     }
 
     const key = trackTupleKey(tuple);
+    if (!pendingTrackTuple) trackTransitionEpoch += 1;
     if (pendingTrackTuple?.key !== key) {
       pendingTrackTuple = {
+        epoch: pendingTrackTuple?.epoch ?? trackTransitionEpoch,
         key,
         tuple,
         firstSeenAtUnixMs: nowUnixMs,
@@ -392,24 +536,45 @@
       trackIdentityMetadataKey(tuple) !== trackIdentityMetadataKey(acceptedTrackTuple);
     const stableChangedTuple =
       identityMetadataChanged &&
+      tuple.trackID !== acceptedTrackTuple.trackID &&
       pendingTrackTuple.observations >= 2 &&
       stableForMs >= TRACK_CHANGE_STABILITY_MS;
-    const boundedHoldExpired = stableForMs >= TRACK_CHANGE_MAX_HOLD_MS;
-    if (!stableChangedTuple && !boundedHoldExpired) return false;
+    const boundedHoldExpired =
+      tuple.trackID !== acceptedTrackTuple.trackID
+      && stableForMs >= TRACK_CHANGE_MAX_HOLD_MS;
+    const stableMetadataEnrichment =
+      tuple.trackID === acceptedTrackTuple.trackID
+      && identityMetadataChanged
+      && nowUnixMs <= metadataEnrichmentUntilUnixMs
+      && pendingTrackTuple.observations >= 2
+      && stableForMs >= TRACK_CHANGE_STABILITY_MS;
+    if (!stableChangedTuple && !boundedHoldExpired && !stableMetadataEnrichment) return false;
 
+    if (stableMetadataEnrichment) {
+      acceptedTrackTuple = tuple;
+      pendingTrackTuple = null;
+      metadataEnrichmentUntilUnixMs = Number.NEGATIVE_INFINITY;
+      return true;
+    }
+
+    const changedTrackID = tuple.trackID !== acceptedTrackTuple.trackID;
+    rememberRetiredTrackID(acceptedTrackTuple.trackID);
     acceptedTrackTuple = tuple;
     pendingTrackTuple = null;
+    metadataEnrichmentUntilUnixMs = changedTrackID
+      ? nowUnixMs + TRACK_METADATA_ENRICHMENT_WINDOW_MS
+      : Number.NEGATIVE_INFINITY;
     playbackClockAnchor = null;
     return true;
   };
 
-  const buildSnapshot = () => {
-    const playerBar = document.querySelector("ytmusic-player-bar");
+  const readTrackObservation = (playerBar) => {
     const media = selectPlaybackMedia(playerBar);
     if (!(media instanceof HTMLMediaElement)) return null;
-    const barClock = playerBarClock(playerBar);
-    const trackID = currentVideoID(playerBar);
     const metadata = mediaSessionMetadata();
+    const artwork = playerBar?.querySelector?.("img.image, img");
+    const playerArtworkURL = clean(artwork?.currentSrc || artwork?.src);
+    const trackID = currentVideoID(playerBar);
     const title = firstText(playerBar, [".title", "yt-formatted-string.title"])
       || clean(metadata?.title)
       || firstText(document, [
@@ -419,18 +584,28 @@
       ])
       || documentTitleTrack();
     if (!trackID || !title) return null;
-    const bylineLinks = Array.from(playerBar?.querySelectorAll?.(".byline a, .subtitle a") ?? []);
-    const artist = clean(bylineLinks[0]?.textContent)
-      || firstText(playerBar, [".byline", ".subtitle"])
-      || clean(metadata?.artist);
-    const album = clean(bylineLinks[1]?.textContent);
-    const artwork = playerBar?.querySelector?.("img.image, img");
-    const artworkURL = highResolutionArtworkURL(artwork?.currentSrc || artwork?.src)
-      || metadataArtworkURL(metadata)
-      || videoArtworkURL(trackID);
+    const { artist, album } = trackCredits(playerBar, metadata, title);
+    const barClock = playerBarClock(playerBar);
     const durationMs = barClock?.durationMs
       ?? (Number.isFinite(media.duration) ? Math.max(0, media.duration * 1000) : 0);
-    if (!acceptsTrackTuple({ trackID, title, artist, durationMs })) return null;
+    const artworkURL = coherentArtworkURL(
+      trackID,
+      playerArtworkURL,
+      metadataArtworkURL(metadata),
+    );
+    return {
+      media,
+      barClock,
+      tuple: { trackID, title, artist, album, artworkURL, durationMs },
+    };
+  };
+
+  const buildSnapshot = () => {
+    const playerBar = document.querySelector("ytmusic-player-bar");
+    const observation = readTrackObservation(playerBar);
+    if (!observation || !acceptsTrackTuple(observation.tuple)) return null;
+    const { media, barClock, tuple } = observation;
+    const { trackID, title, artist, album, artworkURL, durationMs } = tuple;
     return {
       type: "youtube-music-snapshot",
       version: protocolVersion,
@@ -461,6 +636,28 @@
       },
     };
   };
+
+  const snapshotStateSignature = (snapshot) => JSON.stringify([
+    snapshot.track.provider,
+    snapshot.track.trackID,
+    snapshot.track.title,
+    snapshot.track.artist,
+    snapshot.track.album ?? "",
+    snapshot.track.artworkURL ?? "",
+    snapshot.track.pageURL,
+    snapshot.playback.durationMs,
+    snapshot.playback.playbackRate,
+    snapshot.playback.state,
+    snapshot.controls.seek,
+    snapshot.controls.playPause,
+    snapshot.controls.previous,
+    snapshot.controls.next,
+  ]);
+
+  const snapshotFieldSignature = (snapshot, stateSignature) => JSON.stringify([
+    stateSignature,
+    Math.round(snapshot.playback.currentTimeMs),
+  ]);
 
   const updateSponsorBlockCompatibility = () => {
     const playerBar = document.querySelector("ytmusic-player-bar");
@@ -635,6 +832,9 @@
     if (!sourceWasAvailable) return;
     sourceWasAvailable = false;
     sourceMissingSince = null;
+    lastSentSnapshotSignature = "";
+    lastSentSnapshotStateSignature = "";
+    lastSnapshotSentAtUnixMs = Number.NEGATIVE_INFINITY;
     try {
       if (!runtimeAvailable()) return;
       chrome.runtime.sendMessage({ type: "youtube-music-source-disconnect" }, () => {
@@ -655,8 +855,16 @@
     notifySourceDisconnect();
     queued = false;
     if (pendingSend !== null) clearTimeout(pendingSend);
+    if (pendingMutationReconcile !== null) clearTimeout(pendingMutationReconcile);
+    pendingSend = null;
+    pendingMutationReconcile = null;
+    reconcileRoots = false;
+    reconcilePlayer = false;
+    reconcileStage = false;
     if (heartbeat !== null) clearInterval(heartbeat);
-    observer?.disconnect();
+    rootObserver?.disconnect();
+    playerObserver?.disconnect();
+    stageObserver?.disconnect();
     document.documentElement.removeEventListener(CONTENT_SCRIPT_STOP_EVENT, stop);
     if (document.documentElement.getAttribute(CONTENT_SCRIPT_MARKER_ATTR) === CONTENT_SCRIPT_MARKER) {
       document.documentElement.removeAttribute(CONTENT_SCRIPT_MARKER_ATTR);
@@ -669,7 +877,7 @@
     if (observedMedia instanceof HTMLMediaElement) {
       mediaEvents.forEach((event) => observedMedia.removeEventListener(event, queueSend));
     }
-    window.removeEventListener("yt-navigate-finish", updateStageMount);
+    window.removeEventListener("yt-navigate-finish", handleNavigation);
     try {
       chrome.runtime.onMessage.removeListener(onRuntimeMessage);
     } catch {
@@ -680,9 +888,18 @@
     stageMountState = "idle";
     stageMountFailure = "";
     observedMedia = null;
+    observedPlayerRoot = null;
+    observedStageRoot = null;
     playbackClockAnchor = null;
     acceptedTrackTuple = null;
     pendingTrackTuple = null;
+    pendingPlayerVideoID = "";
+    metadataEnrichmentUntilUnixMs = Number.NEGATIVE_INFINITY;
+    trackTransitionEpoch = 0;
+    retiredTrackIDs.clear();
+    lastSentSnapshotSignature = "";
+    lastSentSnapshotStateSignature = "";
+    lastSnapshotSentAtUnixMs = Number.NEGATIVE_INFINITY;
   };
 
   const updateStageMount = () => {
@@ -904,12 +1121,13 @@
       sendResponse({ ok: false, reason: "missing-track-identity" });
       return false;
     }
-    if (pendingTrackTuple) {
+    const observation = readTrackObservation(playerBar);
+    if (!observation || !acceptsTrackTuple(observation.tuple) || pendingTrackTuple) {
       queueSend();
       sendResponse({ ok: false, reason: "track-transition" });
       return false;
     }
-    const actualTrackID = currentVideoID(playerBar);
+    const actualTrackID = observation.tuple.trackID;
     if (actualTrackID === expectedTrackID) return true;
     queueSend();
     sendResponse({
@@ -1049,6 +1267,10 @@
     }
     const snapshot = buildSnapshot();
     if (!snapshot) {
+      if (pendingTrackTuple) {
+        sourceMissingSince = null;
+        return;
+      }
       if (!sourceWasAvailable) return;
       if (sourceMissingSince === null) sourceMissingSince = Date.now();
       if (Date.now() - sourceMissingSince < SOURCE_LEASE_MS) return;
@@ -1057,6 +1279,22 @@
     }
     sourceWasAvailable = true;
     sourceMissingSince = null;
+    const nowUnixMs = Date.now();
+    const stateSignature = snapshotStateSignature(snapshot);
+    const fieldSignature = snapshotFieldSignature(snapshot, stateSignature);
+    const elapsedSinceLastSend = nowUnixMs - lastSnapshotSentAtUnixMs;
+    if (
+      fieldSignature === lastSentSnapshotSignature &&
+      elapsedSinceLastSend < SNAPSHOT_KEEPALIVE_MS
+    ) return;
+    if (
+      stateSignature === lastSentSnapshotStateSignature &&
+      fieldSignature !== lastSentSnapshotSignature &&
+      elapsedSinceLastSend < SNAPSHOT_PROGRESS_INTERVAL_MS
+    ) {
+      scheduleSend(SNAPSHOT_PROGRESS_INTERVAL_MS - elapsedSinceLastSend);
+      return;
+    }
     try {
       chrome.runtime.sendMessage(
         { type: "youtube-music-source-snapshot", snapshot },
@@ -1068,16 +1306,21 @@
           }
         },
       );
+      lastSentSnapshotSignature = fieldSignature;
+      lastSentSnapshotStateSignature = stateSignature;
+      lastSnapshotSentAtUnixMs = nowUnixMs;
     } catch {
       stop();
     }
   };
 
-  const queueSend = () => {
+  const scheduleSend = (delayMs) => {
     if (stopped || queued) return;
     queued = true;
-    pendingSend = setTimeout(send, 40);
+    pendingSend = setTimeout(send, Math.max(0, delayMs));
   };
+
+  const queueSend = () => scheduleSend(40);
 
   const observeMedia = () => {
     const next = selectPlaybackMedia(document.querySelector("ytmusic-player-bar"));
@@ -1093,19 +1336,99 @@
     queueSend();
   };
 
-  observer = new MutationObserver(() => {
-    updateStageMount();
-    observeMedia();
-    queueSend();
-  });
-  observer.observe(document.documentElement, {
-    childList: true,
-    subtree: true,
-    attributes: true,
-    attributeFilter: ["href", "src", "selected", "aria-selected", "page-type"],
-  });
+  const observationRootSelector = [
+    "ytmusic-player-bar",
+    "ytmusic-player-page#player-page #side-panel",
+    "#side-panel",
+    "video",
+    "audio",
+  ].join(", ");
 
-  window.addEventListener("yt-navigate-finish", updateStageMount);
+  const nodeTouchesObservationRoot = (node) => Boolean(
+    node?.matches?.(observationRootSelector) || node?.querySelector?.(observationRootSelector)
+  );
+
+  const rootMutationsNeedReconcile = (records) => {
+    if (observedPlayerRoot?.isConnected === false || observedStageRoot?.isConnected === false) {
+      return true;
+    }
+    return records.some((record) =>
+      [...(record.addedNodes ?? []), ...(record.removedNodes ?? [])]
+        .some(nodeTouchesObservationRoot)
+    );
+  };
+
+  const refreshObservationRoots = () => {
+    const nextPlayerRoot = document.querySelector("ytmusic-player-bar");
+    if (nextPlayerRoot !== observedPlayerRoot) {
+      playerObserver?.disconnect();
+      observedPlayerRoot = nextPlayerRoot;
+      if (observedPlayerRoot) {
+        playerObserver?.observe(observedPlayerRoot, {
+          childList: true,
+          subtree: true,
+          characterData: true,
+          attributes: true,
+          attributeFilter: ["href", "src", "disabled", "aria-disabled"],
+        });
+      }
+    }
+
+    const nextStageRoot = document.querySelector("ytmusic-player-page#player-page #side-panel");
+    if (nextStageRoot !== observedStageRoot) {
+      stageObserver?.disconnect();
+      observedStageRoot = nextStageRoot;
+      if (observedStageRoot) {
+        stageObserver?.observe(observedStageRoot, {
+          childList: true,
+          subtree: true,
+          attributes: true,
+          attributeFilter: ["selected", "aria-selected", "page-type"],
+        });
+      }
+    }
+  };
+
+  const flushMutationReconcile = () => {
+    pendingMutationReconcile = null;
+    const shouldRefreshRoots = reconcileRoots;
+    let shouldRefreshPlayer = reconcilePlayer;
+    let shouldRefreshStage = reconcileStage;
+    reconcileRoots = false;
+    reconcilePlayer = false;
+    reconcileStage = false;
+    if (shouldRefreshRoots) {
+      refreshObservationRoots();
+      shouldRefreshPlayer = true;
+      shouldRefreshStage = true;
+    }
+    if (shouldRefreshStage) updateStageMount();
+    if (shouldRefreshPlayer) {
+      observeMedia();
+      if (!shouldRefreshStage) updateSponsorBlockCompatibility();
+      queueSend();
+    }
+  };
+
+  const queueMutationReconcile = ({ roots = false, player = false, stage = false }) => {
+    reconcileRoots ||= roots;
+    reconcilePlayer ||= player;
+    reconcileStage ||= stage;
+    if (stopped || pendingMutationReconcile !== null) return;
+    pendingMutationReconcile = setTimeout(flushMutationReconcile, MUTATION_RECONCILE_MS);
+  };
+
+  const handleNavigation = () => queueMutationReconcile({ roots: true });
+
+  rootObserver = new MutationObserver((records) => {
+    if (rootMutationsNeedReconcile(records)) queueMutationReconcile({ roots: true });
+  });
+  playerObserver = new MutationObserver(() => queueMutationReconcile({ player: true }));
+  stageObserver = new MutationObserver(() => queueMutationReconcile({ stage: true }));
+  rootObserver.observe(document.documentElement, { childList: true, subtree: true });
+  refreshObservationRoots();
+
+  window.addEventListener("yt-navigate-finish", handleNavigation);
   document.documentElement.addEventListener(CONTENT_SCRIPT_STOP_EVENT, stop);
   document.addEventListener?.("click", rememberClickedVideo, true);
   chrome.runtime.onMessage.addListener(onRuntimeMessage);
@@ -1113,10 +1436,11 @@
   observeMedia();
   updateSponsorBlockCompatibility();
   heartbeat = setInterval(() => {
+    refreshObservationRoots();
     updateStageMount();
     observeMedia();
     updateSponsorBlockCompatibility();
     send();
-  }, 500);
+  }, SOURCE_HEARTBEAT_MS);
   window.addEventListener("pagehide", stop, { once: true });
 })();

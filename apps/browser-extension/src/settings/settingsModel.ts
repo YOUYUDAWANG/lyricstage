@@ -5,6 +5,7 @@ import type {
   PublicDirectorBYOKConfigurationV1,
   PublicDirectorProviderConfigurationV1,
 } from "@lyricstage/performance";
+import { sanitizeProviderEndpointV1 } from "../../../../packages/performance/src/providerEndpoint";
 
 export type DirectorProtocol = DirectorProviderProtocolV1;
 
@@ -106,7 +107,11 @@ export const endpointForChangedProtocol = (protocol: DirectorProtocol, current: 
   return current;
 };
 
-export const originPatternFromEndpoint = (endpoint: string): string => `${new URL(endpoint).origin}/*`;
+export const originPatternFromEndpoint = (endpoint: string): string => {
+  const sanitized = sanitizeProviderEndpointV1(endpoint);
+  if (!sanitized) throw new Error("unsafe-provider-endpoint");
+  return `${new URL(sanitized).origin}/*`;
+};
 
 export const uniqueOriginPatterns = (endpoints: string[]): string[] =>
   [...new Set(endpoints.map((endpoint) => originPatternFromEndpoint(endpoint)))];
@@ -114,8 +119,10 @@ export const uniqueOriginPatterns = (endpoints: string[]): string[] =>
 export const buildDirectorDiscoveryPayload = (
   provider: ProviderDraft,
 ): { provider: Omit<ProviderDraft, "model">; origin: string } | { error: string } => {
-  const endpoint = provider.endpoint.trim();
-  if (!endpoint) return { error: "请先填写 API 地址" };
+  const rawEndpoint = provider.endpoint.trim();
+  if (!rawEndpoint) return { error: "请先填写 API 地址" };
+  const endpoint = sanitizeProviderEndpointV1(rawEndpoint);
+  if (!endpoint) return { error: "API 地址不安全；远程服务必须使用 HTTPS，HTTP 仅限本机或私有网络" };
   try {
     return {
       provider: {
@@ -181,31 +188,47 @@ export const summarizeDirectorConfig = (config: DirectorConfigView | undefined):
 export const displayLyricsEndpoint = (config: LyricsConfigView | undefined): string =>
   (typeof config?.endpoint === "string" && config.endpoint) || defaultPrivateLyricsEndpoint;
 
+export const directorDraftValidationMessage = (input: {
+  primary: ProviderDraft;
+  fallbackEnabled: boolean;
+  fallback: ProviderDraft;
+}): string | undefined => {
+  if (!input.primary.endpoint.trim()) return "请先填写主要提供商的 API 地址";
+  if (!input.primary.model.trim()) return "请先连接主要提供商并选择模型";
+  if (!input.fallbackEnabled) return undefined;
+  if (!input.fallback.endpoint.trim()) return "备用提供商已开启，请先填写 API 地址";
+  if (!input.fallback.model.trim()) return "备用提供商已开启，请连接并选择备用模型";
+  return undefined;
+};
+
 export const buildDirectorSavePayload = (input: {
   primary: ProviderDraft;
   fallbackEnabled: boolean;
   fallback: ProviderDraft;
 }): { configuration: unknown; origins: string[] } | { error: string } => {
+  const validationMessage = directorDraftValidationMessage(input);
+  if (validationMessage) return { error: validationMessage };
+  const primaryEndpoint = sanitizeProviderEndpointV1(input.primary.endpoint);
+  const fallbackEndpoint = input.fallbackEnabled
+    ? sanitizeProviderEndpointV1(input.fallback.endpoint)
+    : undefined;
+  if (!primaryEndpoint || (input.fallbackEnabled && !fallbackEndpoint)) {
+    return { error: "API 地址不安全；远程服务必须使用 HTTPS，HTTP 仅限本机或私有网络" };
+  }
   const primary = {
     protocol: input.primary.protocol,
-    endpoint: input.primary.endpoint.trim(),
+    endpoint: primaryEndpoint,
     model: input.primary.model.trim(),
     apiKey: input.primary.apiKey.trim(),
   };
-  if (!primary.endpoint || !primary.model) {
-    return { error: "请输入主供应商的 API 地址与模型 ID" };
-  }
   const fallback = input.fallbackEnabled
     ? {
         protocol: input.fallback.protocol,
-        endpoint: input.fallback.endpoint.trim(),
+        endpoint: fallbackEndpoint!,
         model: input.fallback.model.trim(),
         apiKey: input.fallback.apiKey.trim(),
       }
     : undefined;
-  if (fallback && (!fallback.endpoint || !fallback.model)) {
-    return { error: "请完整填写备用供应商" };
-  }
   try {
     return {
       configuration: {

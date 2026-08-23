@@ -33,6 +33,7 @@ import {
 } from "./rollingDirector";
 import { stableHash32, type LyricDocumentV0 } from "@lyricstage/contracts";
 import type { DirectorAttemptTimingV1 } from "./directorPlan";
+import { isLocalProviderHostV1, sanitizeProviderEndpointV1 } from "./providerEndpoint";
 
 export interface DirectorRequestProfileV1<TResponse = unknown> {
   version: "director-request-profile-v1";
@@ -490,34 +491,6 @@ export const defaultDirectorProviderEndpointV1 = (protocol: DirectorProviderProt
   return "https://api.openai.com/v1";
 };
 
-const isPrivateIPv4 = (hostname: string): boolean => {
-  const parts = hostname.split(".").map(Number);
-  if (parts.length !== 4 || parts.some((part) => !Number.isInteger(part) || part < 0 || part > 255)) return false;
-  return parts[0] === 10
-    || parts[0] === 127
-    || (parts[0] === 169 && parts[1] === 254)
-    || (parts[0] === 172 && parts[1] >= 16 && parts[1] <= 31)
-    || (parts[0] === 192 && parts[1] === 168)
-    || (parts[0] === 100 && parts[1] >= 64 && parts[1] <= 127);
-};
-
-const isPrivateIPv6 = (hostname: string): boolean => {
-  const normalized = hostname.toLowerCase().replace(/^\[|\]$/gu, "");
-  return normalized === "::1"
-    || normalized.startsWith("fc")
-    || normalized.startsWith("fd")
-    || /^fe[89ab]/u.test(normalized);
-};
-
-const isLocalHTTPHost = (hostname: string): boolean => {
-  const normalized = hostname.toLowerCase().replace(/^\[|\]$/gu, "");
-  return normalized === "localhost"
-    || normalized.endsWith(".localhost")
-    || normalized.endsWith(".local")
-    || isPrivateIPv4(normalized)
-    || isPrivateIPv6(normalized);
-};
-
 export const sanitizeDirectorProviderConnectionV1 = (value: unknown): DirectorProviderConnectionV1 | undefined => {
   if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
   const candidate = value as Record<string, unknown>;
@@ -525,19 +498,11 @@ export const sanitizeDirectorProviderConnectionV1 = (value: unknown): DirectorPr
     ? candidate.protocol as DirectorProviderProtocolV1
     : undefined;
   if (!protocol) return undefined;
-  const endpointValue = typeof candidate.endpoint === "string" ? candidate.endpoint.trim() : "";
+  const endpoint = sanitizeProviderEndpointV1(candidate.endpoint);
   const apiKey = typeof candidate.apiKey === "string" ? candidate.apiKey.trim() : "";
-  if (!endpointValue || endpointValue.length > 500 || apiKey.length > 4096) return undefined;
-  let url: URL;
-  try {
-    url = new URL(endpointValue);
-  } catch {
-    return undefined;
-  }
-  if (url.username || url.password || url.search || url.hash) return undefined;
-  if (url.protocol !== "https:" && !(url.protocol === "http:" && isLocalHTTPHost(url.hostname))) return undefined;
-  const endpoint = `${url.origin}${url.pathname.replace(/\/+$/u, "")}`;
-  if (!apiKey && url.protocol === "https:" && !isLocalHTTPHost(url.hostname)) return undefined;
+  if (!endpoint || apiKey.length > 4096) return undefined;
+  const url = new URL(endpoint);
+  if (!apiKey && url.protocol === "https:" && !isLocalProviderHostV1(url.hostname)) return undefined;
   return { protocol, endpoint, apiKey };
 };
 
@@ -599,6 +564,7 @@ class DirectorAttemptBudgetError extends Error {}
 interface AttemptContext {
   deadlineUnixMs: number;
   maxAttempts: number;
+  signal?: AbortSignal;
   attempts: DirectorAttemptTimingV1[];
   inputBytes: number;
   outputBytes: number;
@@ -667,7 +633,10 @@ const requestJSON = async (
   if (context.attempts.length >= context.maxAttempts) throw new DirectorAttemptBudgetError("导演网络尝试已达到本次上限");
   const remaining = remainingBudgetMs(context);
   if (remaining <= 0) throw new DirectorAttemptBudgetError("导演生成超过 45 秒总预算");
+  if (context.signal?.aborted) throw new DOMException("导演请求已取消", "AbortError");
   const controller = new AbortController();
+  const abortFromCaller = () => controller.abort();
+  context.signal?.addEventListener("abort", abortFromCaller, { once: true });
   const timeout = setTimeout(() => controller.abort(), Math.min(35_000, remaining));
   const startedAt = Date.now();
   const attempt: DirectorAttemptTimingV1 = {
@@ -748,6 +717,10 @@ const requestJSON = async (
     }
   } catch (error) {
     attempt.elapsedMs = Date.now() - startedAt;
+    if (context.signal?.aborted) {
+      attempt.outcome = "network-error";
+      throw new DOMException("导演请求已取消", "AbortError");
+    }
     if (error instanceof Error && (error.name === "AbortError" || error.message.toLowerCase().includes("abort"))) {
       attempt.outcome = "timeout";
       throw new Error("导演供应商请求超时");
@@ -758,6 +731,7 @@ const requestJSON = async (
     throw error;
   } finally {
     clearTimeout(timeout);
+    context.signal?.removeEventListener("abort", abortFromCaller);
   }
 };
 
@@ -1148,11 +1122,13 @@ export const executeDirectorBYOKProfileV1 = async <TResponse>(
   fetchImplementation: typeof fetch = fetch,
   budgetMs = 45_000,
   maxAttempts = 3,
+  signal?: AbortSignal,
 ): Promise<DirectorProviderExecutionV1 & { response: TResponse }> => {
   const providerPromptInput = profile.compactInput(requestValue) as Record<string, unknown>;
   const context: AttemptContext = {
     deadlineUnixMs: Date.now() + Math.max(1, Math.min(45_000, budgetMs)),
     maxAttempts: Math.max(1, Math.min(3, Math.floor(maxAttempts))),
+    signal,
     attempts: [],
     inputBytes: 0,
     outputBytes: 0,
@@ -1189,6 +1165,9 @@ export const executeDirectorBYOKProfileV1 = async <TResponse>(
         retryContext = `The previous response failed the local ${profile.kind} contract: ${String(adapted.reason ?? "unknown").slice(0, 260)}. Return one complete corrected JSON object.`;
         failures.push(`${provider.protocol}:${provider.model}:contract:${String(adapted.reason ?? "invalid").slice(0, 120)}`);
       } catch (error) {
+        if (signal?.aborted) {
+          throw new DirectorBYOKExecutionErrorV1("导演请求已取消", diagnostics(context, contractMs));
+        }
         failures.push(`${provider.protocol}:${provider.model}:${error instanceof Error ? error.message : "request failed"}`);
         const retryable = !(error instanceof ProviderHTTPError)
           || error.status === 408

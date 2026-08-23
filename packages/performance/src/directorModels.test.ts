@@ -13,6 +13,10 @@ describe("director provider model discovery", () => {
     const fetcher = vi.fn(async () => new Response(JSON.stringify({
       data: [
         { id: "gpt-5", owned_by: "openai" },
+        { id: "text-embedding-3-large", owned_by: "openai" },
+        { id: "gpt-4o-realtime-preview", owned_by: "openai" },
+        { id: "gpt-image-1", owned_by: "openai" },
+        { id: "omni-moderation-latest", owned_by: "openai" },
         { id: "local-model", owned_by: "self" },
       ],
     }), { status: 200, headers: { "Content-Type": "application/json" } }));
@@ -48,7 +52,7 @@ describe("director provider model discovery", () => {
     expect(result.models).toEqual([{ id: "gemini-3.6-flash", label: "Gemini 3.6 Flash" }]);
   });
 
-  it("probes Vertex AI Express because its API key cannot list publisher models", async () => {
+  it("only returns the Vertex AI Express model that the connection probe verified", async () => {
     const fetcher = vi.fn(async () => new Response(JSON.stringify({ candidates: [{ content: { parts: [{ text: "OK" }] } }] }), { status: 200 }));
     const result = await listDirectorProviderModelsV1(
       connection("gemini", "https://aiplatform.googleapis.com/v1beta1/publishers/google"),
@@ -62,9 +66,11 @@ describe("director provider model discovery", () => {
       }),
     );
     expect(result.models).toEqual([
-      { id: "gemini-3.7-flash", label: "Gemini 3.7 Flash", detail: "Vertex AI Express · verified probe" },
-      { id: "gemini-2.5-flash", label: "Gemini 2.5 Flash", detail: "Vertex AI Express · verified probe" },
-      { id: "gemini-3.5-flash", label: "Gemini 3.5 Flash", detail: "Vertex AI Express" },
+      {
+        id: "gemini-3.7-flash",
+        label: "Gemini 3.7 Flash（已验证）",
+        detail: "Vertex AI Express · 本次连接已成功生成文本",
+      },
     ]);
   });
 

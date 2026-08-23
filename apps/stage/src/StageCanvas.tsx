@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 import type { YouTubeMusicSnapshotV0, YouTubeMusicTransportActionV0 } from "@lyricstage/companion";
 import type { LyricDocumentV0 } from "@lyricstage/contracts";
 import type { PlaybackClockV0 } from "@lyricstage/core";
@@ -52,6 +52,7 @@ interface StageCanvasProps {
   displayTimeMs: number;
   lyricsOffsetMs: number;
   reduceMotion: boolean;
+  lightweight: boolean;
   vjMode: boolean;
   showGuides: boolean;
   onMetrics: (summary: { count: number; p95: number; p99: number; max: number }) => void;
@@ -63,6 +64,7 @@ interface StageCanvasProps {
   controls?: YouTubeMusicSnapshotV0["controls"];
   onSeek?: (timeMs: number) => void | Promise<void>;
   onTransport?: (action: YouTubeMusicTransportActionV0) => void | Promise<void>;
+  onExit?: () => void;
 }
 
 const formatPlaybackTime = (timeMs: number): string => {
@@ -70,6 +72,16 @@ const formatPlaybackTime = (timeMs: number): string => {
   const minutes = Math.floor(totalSeconds / 60);
   const seconds = totalSeconds % 60;
   return `${minutes}:${seconds.toString().padStart(2, "0")}`;
+};
+
+const seekKeys = new Set(["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown", "PageUp", "PageDown", "Home", "End"]);
+
+const setDatasetValue = (host: HTMLElement, key: string, value?: string) => {
+  if (value === undefined) {
+    if (host.dataset[key] !== undefined) delete host.dataset[key];
+  } else if (host.dataset[key] !== value) {
+    host.dataset[key] = value;
+  }
 };
 
 function TransportIcon({ kind }: { kind: "previous" | "next" | "play" | "pause" }) {
@@ -98,6 +110,7 @@ export function StageCanvas({
   displayTimeMs,
   lyricsOffsetMs,
   reduceMotion,
+  lightweight,
   vjMode,
   showGuides,
   onMetrics,
@@ -109,6 +122,7 @@ export function StageCanvas({
   controls,
   onSeek,
   onTransport,
+  onExit,
 }: StageCanvasProps) {
   const entryDirectorPlan = directorPlanForStageEntry(localDirectorPlan, remoteDirectorPlan);
   const hostRef = useRef<HTMLDivElement>(null);
@@ -119,6 +133,7 @@ export function StageCanvas({
   const remainingRef = useRef<HTMLSpanElement>(null);
   const scrubbingRef = useRef(false);
   const renderFrameRef = useRef<(() => void) | null>(null);
+  const environmentRenderRef = useRef<(() => void) | null>(null);
   const preparedRef = useRef<PreparedDirectedStageV1 | null>(null);
   const samplerRef = useRef(new FrameSamplerV0(240));
   const displayTimeRef = useRef(displayTimeMs);
@@ -140,6 +155,12 @@ export function StageCanvas({
     lyrics,
   ));
   const presentationRef = useRef(presentation);
+  const registerEnvironmentRenderer = useCallback((render: () => void) => {
+    environmentRenderRef.current = render;
+    return () => {
+      if (environmentRenderRef.current === render) environmentRenderRef.current = null;
+    };
+  }, []);
   displayTimeRef.current = displayTimeMs;
   const normalizedArtworkCandidates = useMemo(() => artworkCandidates(artworkURL), [artworkURL]);
   const normalizedArtworkURL = normalizedArtworkCandidates[artworkCandidateIndex];
@@ -243,7 +264,7 @@ export function StageCanvas({
       if (disposed) return;
       const rect = host.getBoundingClientRect();
       if (rect.width < 2 || rect.height < 2) return;
-      const dpr = Math.min(window.devicePixelRatio || 1, 2);
+      const dpr = lightweight ? 1 : Math.min(window.devicePixelRatio || 1, 2);
       const backing = canvasBackingStoreForV1(rect.width, rect.height, dpr);
       canvas.width = backing.pixelWidth;
       canvas.height = backing.pixelHeight;
@@ -285,7 +306,7 @@ export function StageCanvas({
       disposed = true;
       observer.disconnect();
     };
-  }, [activeDirectorPlan, durationMs, lyrics, lyricsOffsetMs, paletteForTime, reduceMotion, rendererIdentity, showGuides]);
+  }, [activeDirectorPlan, durationMs, lightweight, lyrics, lyricsOffsetMs, paletteForTime, reduceMotion, rendererIdentity, showGuides]);
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -302,11 +323,16 @@ export function StageCanvas({
       if (progressRef.current) {
         progressRef.current.value = String(bounded);
         progressRef.current.style.setProperty("--stage-progress", `${progress * 100}%`);
+        progressRef.current.setAttribute(
+          "aria-valuetext",
+          `${formatPlaybackTime(bounded)} / ${formatPlaybackTime(durationMs)}`,
+        );
       }
       if (elapsedRef.current) elapsedRef.current.textContent = formatPlaybackTime(bounded);
       if (remainingRef.current) remainingRef.current.textContent = `−${formatPlaybackTime(Math.max(0, durationMs - bounded))}`;
     };
     const render = () => {
+      const frameStartedAt = performance.now();
       frameID = 0;
       const sample = clock.sample();
       const playbackTimeMs = !continuous || sample.state === "unavailable"
@@ -341,29 +367,28 @@ export function StageCanvas({
       const sceneCoverage = activeScene
         ? Math.max(0, activeScene.toMs - timeMs)
         : 0;
-      if (hostRef.current) {
-        hostRef.current.dataset.directorSource = handoff.active.source;
-        hostRef.current.dataset.directorLayout = activeSection.layout;
-        hostRef.current.dataset.directorArtDirection = activeSection.artDirection;
-        hostRef.current.dataset.directorTypography = activeSection.typography;
+      const host = hostRef.current;
+      if (host) {
+        setDatasetValue(host, "directorSource", handoff.active.source);
+        setDatasetValue(host, "directorLayout", activeSection.layout);
+        setDatasetValue(host, "directorArtDirection", activeSection.artDirection);
+        setDatasetValue(host, "directorTypography", activeSection.typography);
         if (activeEffect) {
-          hostRef.current.dataset.directorEffect = activeEffect.primary.primitive;
+          setDatasetValue(host, "directorEffect", activeEffect.primary.primitive);
           const uses = [activeEffect.primary, ...activeEffect.support];
-          if (uses.some((use) => use.primitive === "cover.portal")) hostRef.current.dataset.directorCoverEffect = "portal";
-          else if (uses.some((use) => use.primitive === "cover.island")) hostRef.current.dataset.directorCoverEffect = "island";
-          else delete hostRef.current.dataset.directorCoverEffect;
+          setDatasetValue(host, "directorCoverEffect", uses.some((use) => use.primitive === "cover.portal")
+            ? "portal"
+            : uses.some((use) => use.primitive === "cover.island") ? "island" : undefined);
         } else {
-          delete hostRef.current.dataset.directorEffect;
-          delete hostRef.current.dataset.directorCoverEffect;
+          setDatasetValue(host, "directorEffect");
+          setDatasetValue(host, "directorCoverEffect");
         }
-        if (activeDirective) hostRef.current.dataset.directorBehavior = activeDirective.behavior;
-        else delete hostRef.current.dataset.directorBehavior;
-        hostRef.current.dataset.directorMode = directorMode;
-        hostRef.current.dataset.bibleSource = bibleSource ?? "local";
-        hostRef.current.dataset.sceneCoverageMs = String(Math.round(sceneCoverage));
-        hostRef.current.dataset.sceneCount = String(rollingCards.length);
-        if (activeScene) hostRef.current.dataset.sceneId = activeScene.sceneID;
-        else delete hostRef.current.dataset.sceneId;
+        setDatasetValue(host, "directorBehavior", activeDirective?.behavior);
+        setDatasetValue(host, "directorMode", directorMode);
+        setDatasetValue(host, "bibleSource", bibleSource ?? "local");
+        setDatasetValue(host, "sceneCoverageMs", String(Math.round(sceneCoverage / 250) * 250));
+        setDatasetValue(host, "sceneCount", String(rollingCards.length));
+        setDatasetValue(host, "sceneId", activeScene?.sceneID);
       }
       const nextPalette = paletteForTime(timeMs);
       if (paletteRef.current !== nextPalette) {
@@ -376,21 +401,22 @@ export function StageCanvas({
         setPresentation(nextPresentation);
       }
       updateProgress(playbackTimeMs);
-      const duration = drawDirectedStageV1(context, prepared, {
+      environmentRenderRef.current?.();
+      drawDirectedStageV1(context, prepared, {
         timeMs,
         reduceMotion,
         showGuides,
         palette: paletteRef.current,
       });
-      samplerRef.current.push(duration);
+      samplerRef.current.push(performance.now() - frameStartedAt);
       frameCount += 1;
       if (frameCount % 60 === 0) {
         const summary = samplerRef.current.summary();
-        if (hostRef.current) {
-          hostRef.current.dataset.frameCount = String(summary.count);
-          hostRef.current.dataset.frameP95 = summary.p95.toFixed(3);
-          hostRef.current.dataset.frameP99 = summary.p99.toFixed(3);
-          hostRef.current.dataset.frameMax = summary.max.toFixed(3);
+        if (host) {
+          setDatasetValue(host, "frameCount", String(summary.count));
+          setDatasetValue(host, "frameP95", summary.p95.toFixed(3));
+          setDatasetValue(host, "frameP99", summary.p99.toFixed(3));
+          setDatasetValue(host, "frameMax", summary.max.toFixed(3));
         }
         onMetrics(summary);
       }
@@ -428,7 +454,13 @@ export function StageCanvas({
   const previewScrub = (timeMs: number) => {
     const bounded = Math.min(Math.max(0, durationMs), Math.max(0, timeMs));
     const progress = durationMs > 0 ? bounded / durationMs : 0;
-    if (progressRef.current) progressRef.current.style.setProperty("--stage-progress", `${progress * 100}%`);
+    if (progressRef.current) {
+      progressRef.current.style.setProperty("--stage-progress", `${progress * 100}%`);
+      progressRef.current.setAttribute(
+        "aria-valuetext",
+        `${formatPlaybackTime(bounded)} / ${formatPlaybackTime(durationMs)}`,
+      );
+    }
     if (elapsedRef.current) elapsedRef.current.textContent = formatPlaybackTime(bounded);
     if (remainingRef.current) remainingRef.current.textContent = `−${formatPlaybackTime(Math.max(0, durationMs - bounded))}`;
   };
@@ -510,6 +542,7 @@ export function StageCanvas({
       data-shell-layout="lower-leading-dock"
       data-presentation={presentation}
       data-reduce-motion={reduceMotion || undefined}
+      data-lightweight={lightweight || undefined}
       data-palette-source={artworkPalette
         ? activeDirectorPlan.source === "local" ? "artwork" : "artwork-directed"
         : "fallback"}
@@ -530,12 +563,19 @@ export function StageCanvas({
       <PerformanceEnvironment
         plan={activeDirectorPlan}
         timeMsRef={frameTimeRef}
-        continuous={continuous}
         displayTimeMs={lyricsTimeForPlaybackMs(displayTimeMs, lyricsOffsetMs, durationMs)}
         reduceMotion={reduceMotion}
+        lightweight={lightweight}
         vjMode={vjMode}
         palette={palette}
+        registerFrameRenderer={registerEnvironmentRenderer}
       />
+      {onExit ? (
+        <button type="button" className="stage-exit-button" onClick={onExit} aria-label="退出全屏舞台">
+          <span aria-hidden="true">×</span>
+          <span>退出全屏</span>
+        </button>
+      ) : null}
       <div className="stage-now-playing-layout" data-layout-transition-phase={layoutTransitionPhase}>
         <aside className="stage-now-playing-info" aria-label="正在播放">
           <div className="stage-artwork-frame">
@@ -581,12 +621,29 @@ export function StageCanvas({
               step={100}
               defaultValue={Math.min(displayTimeMs, Math.max(1, durationMs))}
               aria-label="播放进度"
+              aria-valuetext={`${formatPlaybackTime(displayTimeMs)} / ${formatPlaybackTime(durationMs)}`}
               disabled={!controls?.seek || !onSeek}
               onPointerDown={() => { scrubbingRef.current = true; }}
-              onInput={(event) => previewScrub(event.currentTarget.valueAsNumber)}
+              onInput={(event) => {
+                scrubbingRef.current = true;
+                previewScrub(event.currentTarget.valueAsNumber);
+              }}
               onPointerUp={(event) => commitScrub(event.currentTarget.valueAsNumber)}
               onPointerCancel={cancelScrub}
-              onKeyUp={(event) => commitScrub(event.currentTarget.valueAsNumber)}
+              onKeyDown={(event) => {
+                if (event.key === "Escape") {
+                  event.preventDefault();
+                  cancelScrub();
+                  event.currentTarget.blur();
+                } else if (seekKeys.has(event.key)) {
+                  scrubbingRef.current = true;
+                }
+              }}
+              onKeyUp={(event) => {
+                if (seekKeys.has(event.key) && scrubbingRef.current) {
+                  commitScrub(event.currentTarget.valueAsNumber);
+                }
+              }}
               onBlur={(event) => {
                 if (scrubbingRef.current) commitScrub(event.currentTarget.valueAsNumber);
               }}

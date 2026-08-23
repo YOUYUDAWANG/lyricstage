@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState, type FormEvent, type ReactNode } from "react";
+import { useCallback, useEffect, useRef, useState, type FormEvent, type ReactNode } from "react";
 import type { DirectorModelOptionV1 } from "@lyricstage/performance";
 import {
   readExtensionPreferences,
@@ -10,6 +10,7 @@ import {
   discoverDirectorModels,
   loadDirectorConfiguration,
   loadLyricsConfiguration,
+  releaseTransientDirectorPermissions,
   saveDirectorConfiguration,
   saveLyricsConfiguration,
   settingsChrome,
@@ -19,6 +20,7 @@ import {
   apiKeyPlaceholder,
   canReuseSavedProviderKey,
   directorProtocolOptions,
+  directorDraftValidationMessage,
   directorStatusCopy,
   directorTimingCopy,
   displayLyricsEndpoint,
@@ -50,6 +52,13 @@ type ModelDiscoveryPhase = "idle" | "saved" | "connecting" | "connected" | "erro
 interface ModelDiscoveryState {
   phase: ModelDiscoveryPhase;
   models: DirectorModelOptionV1[];
+  reason?: string;
+}
+
+type ConfigLoadPhase = "loading" | "ready" | "empty" | "error";
+
+interface ConfigLoadState {
+  phase: ConfigLoadPhase;
   reason?: string;
 }
 
@@ -97,6 +106,34 @@ const discoveryCopy = (state: ModelDiscoveryState): string => {
   if (state.phase === "saved") return "当前为已保存模型；连接后可刷新列表";
   if (state.phase === "error") return state.reason ?? "连接失败";
   return "连接提供商后选择模型";
+};
+
+const ConfigLoadNotice = ({
+  state,
+  noun,
+  onRetry,
+}: {
+  state: ConfigLoadState;
+  noun: string;
+  onRetry(): void;
+}) => {
+  if (state.phase === "ready") return null;
+  const message = state.phase === "loading"
+    ? `正在读取${noun}…`
+    : state.phase === "error"
+      ? state.reason ?? `无法读取${noun}`
+      : `没有已保存的${noun}，可以直接开始配置。`;
+  return (
+    <div
+      className="config-load-notice"
+      data-phase={state.phase}
+      role={state.phase === "error" ? "alert" : "status"}
+      aria-live={state.phase === "error" ? "assertive" : "polite"}
+    >
+      <span>{message}</span>
+      {state.phase === "error" && <button type="button" onClick={onRetry}>重试</button>}
+    </div>
+  );
 };
 
 const sectionDescription = (section: SettingsSection): string => {
@@ -209,7 +246,7 @@ const ProviderFields = ({
               <option value="">请选择模型</option>
               {modelOptions.map((model) => (
                 <option key={model.id} value={model.id}>
-                  {model.label === model.id ? model.id : `${model.label} · ${model.id}`}
+                  {[model.label === model.id ? model.id : `${model.label} · ${model.id}`, model.detail].filter(Boolean).join(" · ")}
                 </option>
               ))}
             </select>
@@ -247,10 +284,14 @@ export const SettingsApp = () => {
     artist: "再打开 YouTube Music 歌词",
   });
   const [lyrics, setLyrics] = useState<LyricsConfigView>({ configured: false });
+  const [lyricsLoad, setLyricsLoad] = useState<ConfigLoadState>({ phase: "loading" });
+  const [lyricsOperationError, setLyricsOperationError] = useState<string>();
   const [lyricsEndpoint, setLyricsEndpoint] = useState(displayLyricsEndpoint(undefined));
   const [lyricsToken, setLyricsToken] = useState("");
   const [lyricsDirty, setLyricsDirty] = useState(false);
   const [director, setDirector] = useState<DirectorConfigView>({ configured: false });
+  const [directorLoad, setDirectorLoad] = useState<ConfigLoadState>({ phase: "loading" });
+  const [directorOperationError, setDirectorOperationError] = useState<string>();
   const [directorReview, setDirectorReview] = useState<DirectorReviewStateV1>({ status: "loading", summaries: [] });
   const [primary, setPrimary] = useState<ProviderDraft>(emptyProviderDraft());
   const [primaryDiscovery, setPrimaryDiscovery] = useState<ModelDiscoveryState>(emptyDiscovery);
@@ -262,12 +303,10 @@ export const SettingsApp = () => {
   const [preferenceStatus, setPreferenceStatus] = useState("修改后立即保存在本机");
   const [busy, setBusy] = useState<"lyrics" | "director" | "performance" | undefined>();
   const available = runtimeAvailable();
+  const retainedPermissionEndpointsRef = useRef<Array<string | undefined>>([]);
+  retainedPermissionEndpointsRef.current = [lyrics.endpoint, director.primary?.endpoint, director.fallback?.endpoint];
 
   const applyLyrics = useCallback((next: LyricsConfigView) => {
-    if (next.reason) {
-      setLyrics((current) => ({ ...current, reason: next.reason }));
-      return;
-    }
     setLyrics(next);
     setLyricsEndpoint(displayLyricsEndpoint(next));
     setLyricsToken("");
@@ -275,10 +314,6 @@ export const SettingsApp = () => {
   }, []);
 
   const applyDirector = useCallback((next: DirectorConfigView) => {
-    if (next.reason) {
-      setDirector((current) => ({ ...current, reason: next.reason }));
-      return;
-    }
     setDirector(next);
     const nextPrimary = draftFromPublicProvider(next.primary);
     const nextFallback = draftFromPublicProvider(next.fallback, true);
@@ -289,6 +324,30 @@ export const SettingsApp = () => {
     setFallbackEnabled(Boolean(next.fallback));
     setDirectorDirty(false);
   }, []);
+
+  const reloadLyricsConfiguration = useCallback(async () => {
+    setLyricsLoad({ phase: "loading" });
+    const next = await loadLyricsConfiguration();
+    if (next.reason) {
+      setLyricsLoad({ phase: "error", reason: next.reason });
+      return;
+    }
+    applyLyrics(next);
+    setLyricsOperationError(undefined);
+    setLyricsLoad({ phase: next.configured ? "ready" : "empty" });
+  }, [applyLyrics]);
+
+  const reloadDirectorConfiguration = useCallback(async () => {
+    setDirectorLoad({ phase: "loading" });
+    const next = await loadDirectorConfiguration();
+    if (next.reason) {
+      setDirectorLoad({ phase: "error", reason: next.reason });
+      return;
+    }
+    applyDirector(next);
+    setDirectorOperationError(undefined);
+    setDirectorLoad({ phase: next.configured ? "ready" : "empty" });
+  }, [applyDirector]);
 
   useEffect(() => {
     if (!lyricsDirty && !directorDirty) return undefined;
@@ -318,8 +377,8 @@ export const SettingsApp = () => {
         if (!cancelled) setConnection({ connected: false, title: "先播放一首歌曲", artist: "再打开 YouTube Music 歌词" });
       }
     };
-    void loadLyricsConfiguration().then((next) => { if (!cancelled) applyLyrics(next); });
-    void loadDirectorConfiguration().then((next) => { if (!cancelled) applyDirector(next); });
+    void reloadLyricsConfiguration();
+    void reloadDirectorConfiguration();
     void loadDirectorCacheSummariesV1().then((next) => { if (!cancelled) setDirectorReview(next); });
     void readExtensionPreferences().then((next) => { if (!cancelled) setPreferences(next); });
     void refreshConnection();
@@ -328,7 +387,16 @@ export const SettingsApp = () => {
       cancelled = true;
       window.clearInterval(timer);
     };
-  }, [available, applyDirector, applyLyrics]);
+  }, [available, reloadDirectorConfiguration, reloadLyricsConfiguration]);
+
+  useEffect(() => {
+    const release = () => void releaseTransientDirectorPermissions(retainedPermissionEndpointsRef.current);
+    window.addEventListener("pagehide", release);
+    return () => {
+      window.removeEventListener("pagehide", release);
+      release();
+    };
+  }, []);
 
   const openSection = (next: SettingsSection) => {
     setSection(next);
@@ -339,15 +407,35 @@ export const SettingsApp = () => {
   const onSaveLyrics = async (event: FormEvent) => {
     event.preventDefault();
     setBusy("lyrics");
-    applyLyrics(await saveLyricsConfiguration(lyricsEndpoint, lyricsToken));
-    setBusy(undefined);
+    setLyricsOperationError(undefined);
+    try {
+      const next = await saveLyricsConfiguration(lyricsEndpoint, lyricsToken);
+      if (next.reason) {
+        setLyricsOperationError(next.reason);
+        return;
+      }
+      applyLyrics(next);
+      setLyricsLoad({ phase: next.configured ? "ready" : "empty" });
+    } finally {
+      setBusy(undefined);
+    }
   };
 
   const onClearLyrics = async () => {
     if (!window.confirm("删除私有歌词服务地址和本机保存的 Bearer 令牌？公开歌词来源不会受影响。")) return;
     setBusy("lyrics");
-    applyLyrics(await saveLyricsConfiguration("", ""));
-    setBusy(undefined);
+    setLyricsOperationError(undefined);
+    try {
+      const next = await saveLyricsConfiguration("", "");
+      if (next.reason) {
+        setLyricsOperationError(next.reason);
+        return;
+      }
+      applyLyrics(next);
+      setLyricsLoad({ phase: "empty" });
+    } finally {
+      setBusy(undefined);
+    }
   };
 
   const onDiscover = async (slot: "primary" | "fallback") => {
@@ -355,6 +443,7 @@ export const SettingsApp = () => {
     const setDiscovery = slot === "primary" ? setPrimaryDiscovery : setFallbackDiscovery;
     const setDraft = slot === "primary" ? setPrimary : setFallback;
     setDiscovery({ phase: "connecting", models: [] });
+    setDirectorOperationError(undefined);
     const result = await discoverDirectorModels(draft, slot);
     if (result.reason || result.models.length === 0) {
       setDiscovery({ phase: "error", models: [], reason: result.reason ?? "没有找到可用模型" });
@@ -371,15 +460,35 @@ export const SettingsApp = () => {
   const onSaveDirector = async (event: FormEvent) => {
     event.preventDefault();
     setBusy("director");
-    applyDirector(await saveDirectorConfiguration({ primary, fallbackEnabled, fallback }));
-    setBusy(undefined);
+    setDirectorOperationError(undefined);
+    try {
+      const next = await saveDirectorConfiguration({ primary, fallbackEnabled, fallback });
+      if (next.reason) {
+        setDirectorOperationError(next.reason);
+        return;
+      }
+      applyDirector(next);
+      setDirectorLoad({ phase: "ready" });
+    } finally {
+      setBusy(undefined);
+    }
   };
 
   const onClearDirector = async () => {
     if (!window.confirm("删除 AI 导演配置和本机保存的提供商 Key？删除后仍会继续使用本地确定性演出。")) return;
     setBusy("director");
-    applyDirector(await clearDirectorConfiguration());
-    setBusy(undefined);
+    setDirectorOperationError(undefined);
+    try {
+      const next = await clearDirectorConfiguration();
+      if (next.reason) {
+        setDirectorOperationError(next.reason);
+        return;
+      }
+      applyDirector(next);
+      setDirectorLoad({ phase: "empty" });
+    } finally {
+      setBusy(undefined);
+    }
   };
 
   const onTogglePreference = async (patch: Partial<ExtensionPreferencesV0>) => {
@@ -403,11 +512,14 @@ export const SettingsApp = () => {
     setLyricsEndpoint(displayLyricsEndpoint(lyrics));
     setLyricsToken("");
     setLyricsDirty(false);
+    setLyricsOperationError(undefined);
   };
 
   const resetDirectorDraft = () => {
+    void releaseTransientDirectorPermissions(retainedPermissionEndpointsRef.current);
     const { reason: _reason, ...saved } = director;
     applyDirector(saved);
+    setDirectorOperationError(undefined);
   };
 
   if (!available) {
@@ -426,6 +538,11 @@ export const SettingsApp = () => {
     : section === "director"
       ? summarizeDirectorConfig(director)
       : section === "performance" ? preferenceStatus : "本机优先";
+  const lyricsUnavailable = lyricsLoad.phase === "loading" || lyricsLoad.phase === "error";
+  const directorUnavailable = directorLoad.phase === "loading" || directorLoad.phase === "error";
+  const canReuseLyricsToken = lyrics.configured
+    && lyricsEndpoint.trim().replace(/\/+$/u, "") === displayLyricsEndpoint(lyrics).trim().replace(/\/+$/u, "");
+  const directorValidation = directorDraftValidationMessage({ primary, fallbackEnabled, fallback });
 
   return (
     <div className="settings-window">
@@ -461,13 +578,15 @@ export const SettingsApp = () => {
           {section === "lyrics" && (
             <form className="settings-card" onSubmit={(event) => void onSaveLyrics(event)}>
               <div className="section-intro"><h2>私有多源歌词</h2><p>接入自己的 LDDC；LRCLIB 与酷狗仍作为公开只读来源。</p></div>
+              <ConfigLoadNotice state={lyricsLoad} noun="歌词配置" onRetry={() => void reloadLyricsConfiguration()} />
               <div className="grouped-form">
-                <label className="form-row"><span><strong>后端地址</strong><small>支持本机、局域网或 Tailscale 地址</small></span><input data-lyrics-endpoint="" type="url" value={lyricsEndpoint} disabled={busy === "lyrics"} placeholder="http://100.x.x.x:8788/" autoComplete="off" onChange={(event) => { setLyricsEndpoint(event.target.value); setLyricsDirty(true); }} /></label>
-                <label className="form-row"><span><strong>Bearer 令牌</strong><small>{lyrics.configured ? "原地址已配置时可留空" : "仅保存在本机扩展存储"}</small></span><input data-lyrics-token="" type="password" value={lyricsToken} disabled={busy === "lyrics"} placeholder="可选" autoComplete="new-password" onChange={(event) => { setLyricsToken(event.target.value); setLyricsDirty(true); }} /></label>
+                <label className="form-row"><span><strong>后端地址</strong><small>支持本机、局域网或 Tailscale 地址</small></span><input data-lyrics-endpoint="" type="url" value={lyricsEndpoint} disabled={busy === "lyrics" || lyricsUnavailable} placeholder="http://100.x.x.x:8788/" autoComplete="off" onChange={(event) => { setLyricsEndpoint(event.target.value); setLyricsDirty(true); setLyricsOperationError(undefined); }} /></label>
+                <label className="form-row"><span><strong>Bearer 令牌</strong><small>{canReuseLyricsToken ? "原地址已配置，可留空复用" : "新地址必填，仅保存在本机"}</small></span><input data-lyrics-token="" type="password" value={lyricsToken} disabled={busy === "lyrics" || lyricsUnavailable} placeholder={canReuseLyricsToken ? "原地址可留空" : "必填"} required={Boolean(lyricsEndpoint.trim()) && !canReuseLyricsToken} autoComplete="new-password" onChange={(event) => { setLyricsToken(event.target.value); setLyricsDirty(true); setLyricsOperationError(undefined); }} /></label>
               </div>
+              {lyricsOperationError && <p className="operation-error" role="alert">{lyricsOperationError}</p>}
               <footer className="settings-card-footer">
                 <small className="settings-status" data-lyrics-config-status="">{lyricsDirty ? "有未保存修改" : lyricsStatusCopy(lyrics)}</small>
-                <div className="settings-actions"><button type="button" className="danger" data-clear-lyrics-config="" disabled={busy === "lyrics" || !lyrics.configured} onClick={() => void onClearLyrics()}>删除配置与令牌</button>{lyricsDirty && <button type="button" disabled={busy === "lyrics"} onClick={resetLyricsDraft}>取消修改</button>}<button className="primary" type="submit" data-save-lyrics-config="" disabled={busy === "lyrics" || (lyrics.configured && !lyricsDirty)}>{busy === "lyrics" ? "正在保存…" : "保存"}</button></div>
+                <div className="settings-actions"><button type="button" className="danger" data-clear-lyrics-config="" disabled={busy === "lyrics" || lyricsUnavailable || !lyrics.configured} onClick={() => void onClearLyrics()}>删除配置与令牌</button>{lyricsDirty && <button type="button" disabled={busy === "lyrics"} onClick={resetLyricsDraft}>取消修改</button>}<button className="primary" type="submit" data-save-lyrics-config="" disabled={busy === "lyrics" || lyricsUnavailable || (lyrics.configured && !lyricsDirty)}>{busy === "lyrics" ? "正在保存…" : "保存"}</button></div>
               </footer>
             </form>
           )}
@@ -475,50 +594,57 @@ export const SettingsApp = () => {
           {section === "director" && (
             <>
             <form className="settings-card director-card" onSubmit={(event) => void onSaveDirector(event)}>
-              <ProviderFields draft={primary} discovery={primaryDiscovery} hasApiKey={canReuseSavedProviderKey(director.primary, primary)} disabled={busy === "director"} onChange={(next) => { setPrimary(next); setDirectorDirty(true); }} onDiscoveryReset={() => setPrimaryDiscovery(emptyDiscovery())} onDiscover={() => void onDiscover("primary")} />
+              <ConfigLoadNotice state={directorLoad} noun="AI 导演配置" onRetry={() => void reloadDirectorConfiguration()} />
+              <ProviderFields draft={primary} discovery={primaryDiscovery} hasApiKey={canReuseSavedProviderKey(director.primary, primary)} disabled={busy === "director" || directorUnavailable} onChange={(next) => { setPrimary(next); setDirectorDirty(true); setDirectorOperationError(undefined); }} onDiscoveryReset={() => { setPrimaryDiscovery(emptyDiscovery()); void releaseTransientDirectorPermissions(retainedPermissionEndpointsRef.current); }} onDiscover={() => void onDiscover("primary")} />
               <label className="settings-toggle fallback-toggle">
                 <span><strong>备用提供商</strong><small>主模型失败时自动切换，然后再回到本地确定性演出。</small></span>
-                <input data-director-fallback-enabled="" type="checkbox" checked={fallbackEnabled} disabled={busy === "director"} onChange={(event) => {
+                <input data-director-fallback-enabled="" type="checkbox" checked={fallbackEnabled} disabled={busy === "director" || directorUnavailable} onChange={(event) => {
                   setFallbackEnabled(event.target.checked);
                   setDirectorDirty(true);
+                  setDirectorOperationError(undefined);
                   if (event.target.checked) setFallback((current) => ({ ...current, endpoint: endpointForChangedProtocol(current.protocol, current.endpoint) }));
                 }} />
               </label>
-              {fallbackEnabled && <ProviderFields draft={fallback} discovery={fallbackDiscovery} hasApiKey={canReuseSavedProviderKey(director.fallback, fallback)} fallback disabled={busy === "director"} onChange={(next) => { setFallback(next); setDirectorDirty(true); }} onDiscoveryReset={() => setFallbackDiscovery(emptyDiscovery())} onDiscover={() => void onDiscover("fallback")} />}
+              {fallbackEnabled && <ProviderFields draft={fallback} discovery={fallbackDiscovery} hasApiKey={canReuseSavedProviderKey(director.fallback, fallback)} fallback disabled={busy === "director" || directorUnavailable} onChange={(next) => { setFallback(next); setDirectorDirty(true); setDirectorOperationError(undefined); }} onDiscoveryReset={() => { setFallbackDiscovery(emptyDiscovery()); void releaseTransientDirectorPermissions(retainedPermissionEndpointsRef.current); }} onDiscover={() => void onDiscover("fallback")} />}
+              {directorDirty && directorValidation && <p className="validation-message" role="status">{directorValidation}</p>}
+              {directorOperationError && <p className="operation-error" role="alert">{directorOperationError}</p>}
               <div className="privacy-banner"><span aria-hidden="true">i</span><p>请求直接发往所选 API。Key 只保存在本机，模型列表与导演计划都不会包含 Key。</p></div>
               <footer className="settings-card-footer">
                 <div className="settings-status-stack"><small className="settings-status" data-director-config-status="">{directorDirty ? "有未保存修改" : directorStatusCopy(director)}</small><small className="settings-status" data-director-last-timing="">{directorTimingCopy(director)}</small></div>
-                <div className="settings-actions"><button type="button" className="danger" data-clear-director-config="" disabled={busy === "director" || !director.configured} onClick={() => void onClearDirector()}>删除配置与 Key</button>{directorDirty && <button type="button" disabled={busy === "director"} onClick={resetDirectorDraft}>取消修改</button>}<button className="primary" type="submit" data-save-director-config="" disabled={busy === "director" || !directorDirty || !primary.model}>{busy === "director" ? "正在保存…" : "保存并启用"}</button></div>
+                <div className="settings-actions"><button type="button" className="danger" data-clear-director-config="" disabled={busy === "director" || directorUnavailable || !director.configured} onClick={() => void onClearDirector()}>删除配置与 Key</button>{directorDirty && <button type="button" disabled={busy === "director"} onClick={resetDirectorDraft}>取消修改</button>}<button className="primary" type="submit" data-save-director-config="" disabled={busy === "director" || directorUnavailable || !directorDirty || Boolean(directorValidation)}>{busy === "director" ? "正在保存…" : "保存并启用"}</button></div>
               </footer>
             </form>
-            <section className="settings-card director-review" data-director-review-state={directorReview.status}>
-              <div className="section-intro"><h2>Director 审片</h2><p>只读取本机缓存的安全摘要；不会返回歌词、提示词、完整计划、Key 或 API 地址。</p></div>
-              <p className="director-review-summary" aria-live="polite">{directorReviewAggregateV1(directorReview)}</p>
-              {directorReview.status === "ready" && (
-                <div className="director-review-list">
-                  {directorReview.summaries.map((summary) => (
-                    <details className="director-review-row" key={`${summary.trackIDDisplay}:${summary.createdAtUnixMs}`}>
-                      <summary>
-                        <span><strong>{summary.trackTitle}</strong><small>{summary.trackArtist} · {summary.trackIDDisplay}</small></span>
-                        <span className="review-metrics">{summary.coveragePercent}% · M{summary.signatureMomentCount} G{summary.gestureCounts.total} E{summary.effectCount} L{summary.layoutTransitionCount}</span>
-                        <span className="review-motif">{summary.motifFamily}</span>
-                        <span className="review-warnings">{summary.warnings.length ? summary.warnings.map(reviewWarningLabel).join(" · ") : "无提醒"}</span>
-                      </summary>
-                      <dl>
-                        <div><dt>World</dt><dd>{summary.baseLayout} / {summary.world.spatialMode} / {summary.world.artworkRole} / {summary.world.motionLaw}</dd></div>
-                        <div><dt>Cache</dt><dd>{summary.cacheVersion} / {summary.cacheEpoch} / {summary.source}</dd></div>
-                        <div><dt>Bible</dt><dd>{summary.bibleIdentityPrefix} · {summary.actCount} acts · quiet {summary.quietSharePercent}%</dd></div>
-                        <div><dt>Gestures</dt><dd>glyph {summary.gestureCounts.glyph} / token {summary.gestureCounts.token} / phrase {summary.gestureCounts.phrase}</dd></div>
-                        <div><dt>Effects</dt><dd>{Object.entries(summary.effectPrimitiveCounts).map(([name, count]) => `${name} ${count}`).join(" / ") || "0"}</dd></div>
-                        <div><dt>Coverage</dt><dd>{summary.sceneCardCount} cards · {summary.missingRanges.length} missing ranges</dd></div>
-                        <div><dt>Timing</dt><dd>{summary.timing ? `${summary.timing.cache} · ${summary.timing.totalMs}ms · provider ${summary.timing.providerMs}ms · ${summary.timing.attempts} attempts` : "无记录"}</dd></div>
-                        <div><dt>Repairs</dt><dd>{summary.localRepairFlags.join(" / ") || "none"}</dd></div>
-                      </dl>
-                    </details>
-                  ))}
-                </div>
-              )}
-            </section>
+            <details className="settings-card developer-disclosure director-review" data-director-review-state={directorReview.status}>
+              <summary className="developer-summary"><span><strong>开发者与诊断</strong><small>Director 审片、缓存覆盖与合同修复摘要</small></span></summary>
+              <div className="developer-body">
+                <div className="section-intro"><h2>Director 审片</h2><p>只读取本机缓存的安全摘要；不会返回歌词、提示词、完整计划、Key 或 API 地址。</p></div>
+                <p className="director-review-summary" aria-live="polite">{directorReviewAggregateV1(directorReview)}</p>
+                {directorReview.status === "ready" && (
+                  <div className="director-review-list">
+                    {directorReview.summaries.map((summary) => (
+                      <details className="director-review-row" key={`${summary.trackIDDisplay}:${summary.createdAtUnixMs}`}>
+                        <summary>
+                          <span><strong>{summary.trackTitle}</strong><small>{summary.trackArtist} · {summary.trackIDDisplay}</small></span>
+                          <span className="review-metrics">{summary.coveragePercent}% · M{summary.signatureMomentCount} G{summary.gestureCounts.total} E{summary.effectCount} L{summary.layoutTransitionCount}</span>
+                          <span className="review-motif">{summary.motifFamily}</span>
+                          <span className="review-warnings">{summary.warnings.length ? summary.warnings.map(reviewWarningLabel).join(" · ") : "无提醒"}</span>
+                        </summary>
+                        <dl>
+                          <div><dt>World</dt><dd>{summary.baseLayout} / {summary.world.spatialMode} / {summary.world.artworkRole} / {summary.world.motionLaw}</dd></div>
+                          <div><dt>Cache</dt><dd>{summary.cacheVersion} / {summary.cacheEpoch} / {summary.source}</dd></div>
+                          <div><dt>Bible</dt><dd>{summary.bibleIdentityPrefix} · {summary.actCount} acts · quiet {summary.quietSharePercent}%</dd></div>
+                          <div><dt>Gestures</dt><dd>glyph {summary.gestureCounts.glyph} / token {summary.gestureCounts.token} / phrase {summary.gestureCounts.phrase}</dd></div>
+                          <div><dt>Effects</dt><dd>{Object.entries(summary.effectPrimitiveCounts).map(([name, count]) => `${name} ${count}`).join(" / ") || "0"}</dd></div>
+                          <div><dt>Coverage</dt><dd>{summary.sceneCardCount} cards · {summary.missingRanges.length} missing ranges</dd></div>
+                          <div><dt>Timing</dt><dd>{summary.timing ? `${summary.timing.cache} · ${summary.timing.totalMs}ms · provider ${summary.timing.providerMs}ms · ${summary.timing.attempts} attempts` : "无记录"}</dd></div>
+                          <div><dt>Repairs</dt><dd>{summary.localRepairFlags.join(" / ") || "none"}</dd></div>
+                        </dl>
+                      </details>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </details>
             </>
           )}
 
@@ -528,9 +654,14 @@ export const SettingsApp = () => {
               <div className="grouped-list">
                 <label className="settings-switch"><span><strong>轻量模式</strong><small>减少模糊和动态效果，适合低性能设备或安静阅读。</small></span><input type="checkbox" checked={preferences.lightweight} disabled={busy === "performance"} onChange={(event) => void onTogglePreference({ lightweight: event.target.checked })} /></label>
                 <label className="settings-switch"><span><strong>个人 VJ 模式</strong><small>增强全屏环境运动；系统“减少动态效果”仍拥有最终优先级。</small></span><input type="checkbox" checked={preferences.vjMode} disabled={busy === "performance"} onChange={(event) => void onTogglePreference({ vjMode: event.target.checked })} /></label>
-                <label className="settings-switch"><span><strong>Rolling Director V1</strong><small>Off 使用旧导演；Shadow 只生成与缓存；On 才渲染滚动 Scene Cards。</small></span><select data-rolling-director-v1="" value={preferences.rollingDirectorV1} disabled={busy === "performance"} onChange={(event) => void onTogglePreference({ rollingDirectorV1: event.target.value as ExtensionPreferencesV0["rollingDirectorV1"] })}><option value="off">Off · legacy</option><option value="shadow">Shadow · audit only</option><option value="on">On · opt-in</option></select></label>
               </div>
               <small className="inline-status" aria-live="polite">{preferenceStatus}</small>
+              <details className="developer-disclosure embedded-disclosure">
+                <summary className="developer-summary"><span><strong>开发者与诊断</strong><small>实验性导演运行模式</small></span></summary>
+                <div className="developer-body">
+                  <label className="settings-switch"><span><strong>Rolling Director V1</strong><small>Off 使用稳定导演；Shadow 只生成与缓存；On 才渲染滚动 Scene Cards。</small></span><select data-rolling-director-v1="" value={preferences.rollingDirectorV1} disabled={busy === "performance"} onChange={(event) => void onTogglePreference({ rollingDirectorV1: event.target.value as ExtensionPreferencesV0["rollingDirectorV1"] })}><option value="off">Off · 稳定模式</option><option value="shadow">Shadow · 仅诊断</option><option value="on">On · 实验模式</option></select></label>
+                </div>
+              </details>
             </section>
           )}
 

@@ -386,10 +386,6 @@ h1 {
   cursor: pointer;
 }
 
-.lyrics-candidate-list button:hover {
-  border-color: #6ce5ff;
-}
-
 .lyrics-candidate-list span,
 .lyrics-candidate-list small {
   overflow: hidden;
@@ -536,6 +532,74 @@ h1 {
   width: 100%;
   aspect-ratio: 16 / 9;
   overflow: hidden;
+}
+
+.stage-exit-button {
+  position: absolute;
+  z-index: 7;
+  top: max(16px, env(safe-area-inset-top));
+  right: max(16px, env(safe-area-inset-right));
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  min-height: 42px;
+  border: 1px solid rgba(255, 255, 255, 0.34);
+  border-radius: 999px;
+  padding: 0 14px 0 11px;
+  color: rgba(255, 255, 255, 0.94);
+  background: rgba(8, 10, 14, 0.72);
+  box-shadow: 0 8px 28px rgba(0, 0, 0, 0.28);
+  backdrop-filter: blur(12px) saturate(1.08);
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 660;
+  letter-spacing: 0.01em;
+  line-height: 1;
+  transition:
+    transform 120ms cubic-bezier(0.23, 1, 0.32, 1),
+    border-color 160ms ease,
+    background-color 160ms ease;
+}
+
+.stage-exit-button > span:first-child {
+  font-size: 19px;
+  font-weight: 400;
+  line-height: 0.8;
+}
+
+.stage-exit-button:active {
+  transform: scale(0.97);
+}
+
+.stage-exit-button:focus-visible {
+  outline: 3px solid #ffffff;
+  outline-offset: 3px;
+  box-shadow:
+    0 0 0 2px rgba(0, 0, 0, 0.78),
+    0 8px 28px rgba(0, 0, 0, 0.28);
+}
+
+.fullscreen-interaction-notice {
+  position: absolute;
+  z-index: 8;
+  right: max(18px, env(safe-area-inset-right));
+  bottom: max(18px, env(safe-area-inset-bottom));
+  width: max-content;
+  max-width: min(440px, calc(100% - 36px));
+  margin: 0;
+  border: 1px solid rgba(255, 255, 255, 0.3);
+  border-radius: 10px;
+  padding: 10px 13px;
+  color: rgba(255, 255, 255, 0.96);
+  background: rgba(10, 11, 15, 0.88);
+  box-shadow: 0 12px 36px rgba(0, 0, 0, 0.34);
+  backdrop-filter: blur(12px) saturate(1.08);
+  font-size: clamp(12px, 1vw, 15px);
+  font-weight: 620;
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+  pointer-events: none;
 }
 
 .stage-canvas-host::after {
@@ -909,10 +973,6 @@ h1 {
   opacity: 0.54;
 }
 
-.stage-canvas-host[data-reduce-motion="true"] .stage-world-motif {
-  animation: none;
-}
-
 .stage-now-playing-info {
   align-self: center;
   min-width: 0;
@@ -964,11 +1024,6 @@ h1 {
   100% { filter: saturate(1.035) brightness(1.004); }
 }
 
-.stage-canvas-host[data-reduce-motion="true"] .stage-artwork-wash,
-.stage-canvas-host[data-reduce-motion="true"] .stage-artwork {
-  animation: none;
-}
-
 .stage-canvas-host:is(
   [data-playback-state="paused"],
   [data-playback-state="buffering"],
@@ -977,18 +1032,69 @@ h1 {
   animation-play-state: paused;
 }
 
-.stage-canvas-host[data-reduce-motion="true"] .stage-now-playing-layout {
-  animation-name: stage-layout-arrival-opacity;
+.stage-canvas-host[data-presentation]:is(
+  [data-reduce-motion="true"],
+  [data-lightweight="true"]
+) .stage-artwork-wash-secondary {
+  display: none;
 }
 
-.stage-canvas-host[data-reduce-motion="true"]
-  :is(.stage-now-playing-info, .stage-lyric-viewport, .stage-artwork-frame) {
+.stage-canvas-host[data-presentation]:is(
+  [data-reduce-motion="true"],
+  [data-lightweight="true"]
+) .stage-artwork-wash-primary {
+  opacity: 0.22;
+  filter: blur(24px) saturate(1.16) brightness(0.78);
+  transform: scale(1.04);
+  mix-blend-mode: normal;
+  animation: none;
+}
+
+.stage-canvas-host[data-presentation]:is(
+  [data-reduce-motion="true"],
+  [data-lightweight="true"]
+) .stage-world-motif {
+  opacity: 0.14;
+  filter: blur(14px) saturate(0.9);
+  transform: scale(1.04);
+  animation: none;
+}
+
+.stage-canvas-host[data-presentation]:is(
+  [data-reduce-motion="true"],
+  [data-lightweight="true"]
+) .stage-artwork {
+  filter: none;
+  animation: none;
+}
+
+.stage-canvas-host[data-presentation]:is(
+  [data-reduce-motion="true"],
+  [data-lightweight="true"]
+) .stage-artwork-frame {
+  box-shadow: 0 18px 42px rgba(0, 0, 0, 0.22);
+}
+
+.stage-canvas-host[data-presentation]:is(
+  [data-reduce-motion="true"],
+  [data-lightweight="true"]
+) .stage-director-status {
+  background: color-mix(in srgb, var(--stage-ink, #ffffff) 10%, transparent);
+  backdrop-filter: none;
+}
+
+.stage-canvas-host[data-presentation]:is(
+  [data-reduce-motion="true"],
+  [data-lightweight="true"]
+) .stage-now-playing-layout {
+  animation: none;
+}
+
+.stage-canvas-host[data-presentation]:is(
+  [data-reduce-motion="true"],
+  [data-lightweight="true"]
+) :is(.stage-now-playing-info, .stage-lyric-viewport, .stage-artwork-frame) {
   transition: none;
-}
-
-@keyframes stage-layout-arrival-opacity {
-  from { opacity: 0.68; transform: none; }
-  to { opacity: 1; transform: none; }
 }
 
 .stage-artwork-fallback {
@@ -1097,9 +1203,14 @@ h1 {
   transition: opacity 160ms ease;
 }
 
-.stage-progress:hover::-webkit-slider-thumb,
 .stage-progress:focus-visible::-webkit-slider-thumb {
   opacity: 1;
+}
+
+.stage-progress:focus-visible {
+  outline: 2px solid var(--stage-ink, #ffffff);
+  outline-offset: 3px;
+  box-shadow: 0 0 0 2px rgba(0, 0, 0, 0.58);
 }
 
 .stage-progress:disabled {
@@ -1128,7 +1239,6 @@ h1 {
   transition: opacity 180ms ease;
 }
 
-.stage-now-playing-info:hover .stage-transport,
 .stage-now-playing-info:focus-within .stage-transport {
   opacity: 0.96;
 }
@@ -1146,10 +1256,12 @@ h1 {
   cursor: pointer;
 }
 
-.stage-transport button:hover,
 .stage-transport button:focus-visible {
   color: var(--stage-ink, #ffffff);
   background: color-mix(in srgb, var(--stage-ink, #ffffff) 10%, transparent);
+  outline: 2px solid var(--stage-ink, #ffffff);
+  outline-offset: 2px;
+  box-shadow: 0 0 0 2px rgba(0, 0, 0, 0.58);
 }
 
 .stage-transport button:active {
@@ -1213,15 +1325,129 @@ h1 {
 }
 
 @media (max-width: 720px) {
-  .stage-now-playing-layout {
-    grid-template-columns: minmax(138px, 31%) minmax(0, 1fr);
-    padding: 22px;
+  .stage-canvas-host[data-presentation][data-director-source] .stage-now-playing-layout {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: auto minmax(0, 1fr);
+    gap: clamp(8px, 2.4vh, 16px);
+    padding:
+      max(12px, env(safe-area-inset-top))
+      max(12px, env(safe-area-inset-right))
+      max(12px, env(safe-area-inset-bottom))
+      max(12px, env(safe-area-inset-left));
+  }
+
+  .stage-canvas-host[data-presentation][data-director-source] .stage-now-playing-info {
+    position: relative;
+    inset: auto;
+    display: grid;
+    grid-template-columns: clamp(72px, 22vw, 112px) minmax(0, 1fr);
+    grid-template-areas:
+      "artwork meta"
+      "artwork progress"
+      "artwork transport";
+    grid-template-rows: auto auto auto;
+    align-self: start;
+    gap: 3px clamp(9px, 2.5vw, 16px);
+    width: auto;
+    max-width: none;
+    opacity: 1;
+    transform: none;
+  }
+
+  .stage-canvas-host[data-presentation][data-director-source] .stage-artwork-frame {
+    grid-area: artwork;
+    align-self: center;
+    width: clamp(72px, 22vw, 112px);
+    height: clamp(72px, 22vw, 112px);
+    max-height: none;
+    aspect-ratio: 1;
+    transform: none;
+    transform-origin: center;
+  }
+
+  .stage-canvas-host[data-presentation][data-director-source] .stage-track-meta {
+    grid-area: meta;
+    align-self: end;
+    width: 100%;
+    margin-top: 0;
+  }
+
+  .stage-canvas-host:has(> .stage-exit-button) .stage-track-meta {
+    padding-right: 48px;
+  }
+
+  .stage-canvas-host[data-presentation][data-director-source] .stage-progress-group {
+    grid-area: progress;
+    width: 100%;
+    margin-top: 2px;
+  }
+
+  .stage-canvas-host[data-presentation][data-director-source] .stage-transport {
+    grid-area: transport;
+    justify-content: flex-start;
+    width: 100%;
+    margin-top: 0;
+    opacity: 0.86;
+  }
+
+  .stage-canvas-host[data-presentation][data-director-source] .stage-lyric-viewport {
+    position: relative;
+    inset: auto;
+    grid-row: 2;
+    width: auto;
+    min-width: 0;
+    min-height: 0;
+    opacity: 1;
+    transform: none;
   }
 
   .stage-track-meta strong { font-size: 18px; }
   .stage-track-meta span { font-size: 11px; }
   .stage-time-row { display: none; }
   .stage-transport { gap: 4px; }
+
+  .stage-exit-button {
+    top: max(10px, env(safe-area-inset-top));
+    right: max(10px, env(safe-area-inset-right));
+    width: 40px;
+    min-height: 40px;
+    padding: 0;
+  }
+
+  .stage-exit-button > span:last-child {
+    display: none;
+  }
+
+  .fullscreen-interaction-notice {
+    right: max(12px, env(safe-area-inset-right));
+    bottom: max(12px, env(safe-area-inset-bottom));
+    max-width: calc(100% - 24px);
+  }
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .lyrics-candidate-list button:hover {
+    border-color: #6ce5ff;
+  }
+
+  .stage-exit-button:hover {
+    border-color: rgba(255, 255, 255, 0.58);
+    background: rgba(18, 20, 26, 0.82);
+  }
+
+  .stage-progress:hover::-webkit-slider-thumb {
+    opacity: 1;
+  }
+
+  .stage-now-playing-info:hover .stage-transport {
+    opacity: 0.96;
+  }
+
+  .stage-transport button:hover {
+    color: var(--stage-ink, #ffffff);
+    background: color-mix(in srgb, var(--stage-ink, #ffffff) 10%, transparent);
+  }
 }
 
 @media (pointer: coarse) {
@@ -1359,5 +1585,59 @@ h1 {
   *::before,
   *::after {
     scroll-behavior: auto !important;
+  }
+
+  .stage-canvas-host[data-presentation] .stage-artwork-wash-secondary {
+    display: none;
+  }
+
+  .stage-canvas-host[data-presentation] .stage-artwork-wash-primary {
+    opacity: 0.22;
+    filter: blur(24px) saturate(1.16) brightness(0.78);
+    transform: scale(1.04);
+    mix-blend-mode: normal;
+    animation: none;
+  }
+
+  .stage-canvas-host[data-presentation] .stage-world-motif {
+    opacity: 0.14;
+    filter: blur(14px) saturate(0.9);
+    transform: scale(1.04);
+    animation: none;
+  }
+
+  .stage-canvas-host[data-presentation][data-world-motion] .stage-artwork {
+    filter: none;
+    animation: none;
+  }
+
+  .stage-canvas-host[data-presentation] .stage-now-playing-layout {
+    animation: none;
+  }
+
+  .stage-canvas-host[data-presentation]
+    :is(.stage-now-playing-info, .stage-lyric-viewport, .stage-artwork-frame) {
+    transition: none;
+  }
+
+  .stage-exit-button {
+    transition: none;
+  }
+}
+
+@media (prefers-reduced-transparency: reduce) {
+  .stage-exit-button,
+  .fullscreen-interaction-notice {
+    background: #111319;
+    backdrop-filter: none;
+  }
+}
+
+@media (prefers-contrast: more) {
+  .stage-exit-button,
+  .fullscreen-interaction-notice {
+    border-color: #ffffff;
+    color: #ffffff;
+    background: #08090d;
   }
 }

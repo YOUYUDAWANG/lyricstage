@@ -197,6 +197,18 @@ describe("requestAutomaticDirectorPlan", () => {
     expect(directorStatusLabel({ status: "idle" }, "ai")).toBe("AI 导演 · 已接管");
     expect(directorStatusLabel({
       type: "director-resolution-v1",
+      status: "error",
+      source: "local",
+      reason: "rolling-provider-http-error-http-403",
+    })).toBe("本地演出 · AI 无访问权限");
+    expect(directorStatusLabel({
+      type: "director-resolution-v1",
+      status: "error",
+      source: "local",
+      reason: "scene-local-continuity-fallback:rolling-budget-exhausted",
+    })).toBe("本地演出 · 本曲 AI 预算已用完");
+    expect(directorStatusLabel({
+      type: "director-resolution-v1",
       status: "unavailable",
       source: "local",
       reason: "director-not-configured",

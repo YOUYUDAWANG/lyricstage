@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { lyricFixtures } from "@lyricstage/contracts";
+import { layeredLyricsLookupTimeoutMilliseconds } from "@lyricstage/lyrics";
 import {
   advanceRollingPerformanceStateV1,
   checkpointRollingPerformanceStateV1,
@@ -253,6 +254,277 @@ describe("YouTube Music background routing", () => {
       endpoint: "https://lyrics-one.example/api",
       token: "secret-one",
     });
+  });
+
+  it("rejects an unsafe private lyrics endpoint in the background", async () => {
+    const result = await send({
+      type: "youtube-music-save-private-lyrics-config",
+      endpoint: "http://public-host.example/api",
+      token: "secret",
+    }, sender(10));
+    expect(result.response).toMatchObject({ configured: false, reason: "歌词后端地址无效" });
+    expect(storage.get("lyricstage-private-lyrics-backend-v0")).toBeUndefined();
+  });
+
+  it("surfaces configuration storage failures instead of pretending configuration is empty", async () => {
+    const get = (globalThis as any).chrome.storage.local.get as ReturnType<typeof vi.fn>;
+    get.mockRejectedValue(new Error("storage unavailable"));
+
+    await expect(sendResolved({ type: "youtube-music-private-lyrics-config" }, sender(10))).resolves.toEqual({
+      configured: false,
+      endpoint: "",
+      reason: "读取歌词配置失败，请重试",
+    });
+    await expect(sendResolved({ type: "youtube-music-director-config" }, sender(10))).resolves.toMatchObject({
+      configured: false,
+      reason: "读取 AI 导演配置失败，请重试",
+    });
+  });
+
+  it("returns a network match when cache reads and writes reject", async () => {
+    const track = {
+      provider: "youtubeMusic" as const,
+      trackID: "lyrics-storage-failure",
+      title: "始まりの合図",
+      artist: "佐藤史果",
+      durationMs: 240_000,
+    };
+    const get = (globalThis as any).chrome.storage.local.get as ReturnType<typeof vi.fn>;
+    const set = (globalThis as any).chrome.storage.local.set as ReturnType<typeof vi.fn>;
+    get.mockImplementation(async (key: string) => {
+      if (key === "lyricstage-local-lyrics-v0" || key === "lyricstage-youtube-music-lyrics-v9") {
+        throw new Error("storage get unavailable");
+      }
+      return { [key]: storage.get(key) };
+    });
+    set.mockRejectedValue(new Error("storage set unavailable"));
+    vi.stubGlobal("fetch", vi.fn(async (input: string | URL | Request) => {
+      const url = new URL(String(input));
+      if (url.hostname === "sponsor.ajay.app") return new Response("", { status: 404 });
+      if (url.hostname === "lrclib.net" && url.pathname === "/api/get") {
+        return new Response(JSON.stringify({
+          id: 1,
+          trackName: track.title,
+          artistName: track.artist,
+          duration: 240,
+          syncedLyrics: "[00:01.00]test",
+        }), { status: 200 });
+      }
+      throw new Error(`unexpected request: ${url.href}`);
+    }));
+
+    const response = await sendResolved({ type: "youtube-music-resolve-lyrics", track }, sender(10));
+    expect(response).toMatchObject({
+      status: "match",
+      source: "network",
+      match: { provider: "lrclib", id: "1" },
+    });
+  });
+
+  it("releases a stalled automatic single-flight after the total lyrics deadline", async () => {
+    const track = {
+      provider: "youtubeMusic" as const,
+      trackID: "lyrics-stalled-single-flight",
+      title: "始まりの合図",
+      artist: "佐藤史果",
+      durationMs: 240_000,
+    };
+    let phase: "stalled" | "ready" = "stalled";
+    vi.stubGlobal("crypto", {
+      ...globalThis.crypto,
+      subtle: { digest: vi.fn().mockResolvedValue(new ArrayBuffer(32)) },
+    });
+    const fetcher = vi.fn((input: string | URL | Request, init?: RequestInit): Promise<Response> => {
+      const url = new URL(String(input));
+      if (url.hostname === "sponsor.ajay.app") return Promise.resolve(new Response("", { status: 404 }));
+      if (phase === "ready" && url.hostname === "lrclib.net" && url.pathname === "/api/get") {
+        return Promise.resolve(new Response(JSON.stringify({
+          id: 11,
+          trackName: track.title,
+          artistName: track.artist,
+          duration: 240,
+          syncedLyrics: "[00:01.00]recovered",
+        }), { status: 200 }));
+      }
+      return new Promise((_resolve, reject) => init?.signal?.addEventListener(
+        "abort", () => reject(init.signal?.reason), { once: true },
+      ));
+    });
+    vi.stubGlobal("fetch", fetcher);
+
+    const stalled = sendResolved({ type: "youtube-music-resolve-lyrics", track }, sender(10));
+    await flush();
+    await vi.advanceTimersByTimeAsync(layeredLyricsLookupTimeoutMilliseconds);
+    expect(await stalled).toMatchObject({ status: "error", message: "歌词搜索超时" });
+
+    phase = "ready";
+    expect(await sendResolved({ type: "youtube-music-resolve-lyrics", track }, sender(10)))
+      .toMatchObject({ status: "match", source: "network", match: { id: "11" } });
+  });
+
+  it("progressively evicts older lyrics entries after a quota rejection", async () => {
+    const track = {
+      provider: "youtubeMusic" as const,
+      trackID: "lyrics-quota-new",
+      title: "始まりの合図",
+      artist: "佐藤史果",
+      durationMs: 240_000,
+    };
+    const now = Date.now();
+    storage.set("lyricstage-youtube-music-lyrics-v9", Object.fromEntries(
+      Array.from({ length: 6 }, (_, index) => [`old-${index}`, {
+        fingerprint: `old-${index}`,
+        expiresAtUnixMs: now + 60_000,
+        updatedAtUnixMs: now - index - 1,
+        response: {
+          type: "lyrics-lookup-result",
+          version: "lyrics-lookup-v0",
+          trackID: `old-${index}`,
+          status: "miss",
+          source: "network",
+          candidates: [],
+        },
+      }]),
+    ));
+    const set = (globalThis as any).chrome.storage.local.set as ReturnType<typeof vi.fn>;
+    let rejected = false;
+    set.mockImplementation(async (values: Record<string, unknown>) => {
+      if (!rejected && values["lyricstage-youtube-music-lyrics-v9"]) {
+        rejected = true;
+        throw Object.assign(new Error("QUOTA_BYTES quota exceeded"), { name: "QuotaExceededError" });
+      }
+      Object.entries(values).forEach(([key, value]) => storage.set(key, value));
+    });
+    vi.stubGlobal("fetch", vi.fn(async (input: string | URL | Request) => {
+      const url = new URL(String(input));
+      if (url.hostname === "sponsor.ajay.app") return new Response("", { status: 404 });
+      if (url.hostname === "lrclib.net" && url.pathname === "/api/get") {
+        return new Response(JSON.stringify({
+          id: 2,
+          trackName: track.title,
+          artistName: track.artist,
+          duration: 240,
+          syncedLyrics: "[00:01.00]quota",
+        }), { status: 200 });
+      }
+      throw new Error(`unexpected request: ${url.href}`);
+    }));
+
+    const response = await sendResolved({ type: "youtube-music-resolve-lyrics", track }, sender(10));
+    expect(response).toMatchObject({ status: "match", source: "network" });
+    expect(set).toHaveBeenCalledTimes(2);
+    const firstRecord = set.mock.calls[0]?.[0]["lyricstage-youtube-music-lyrics-v9"] as Record<string, unknown>;
+    const secondRecord = set.mock.calls[1]?.[0]["lyricstage-youtube-music-lyrics-v9"] as Record<string, unknown>;
+    expect(Object.keys(secondRecord).length).toBeLessThan(Object.keys(firstRecord).length);
+    expect(secondRecord[track.trackID]).toBeDefined();
+  });
+
+  it("preserves an automatic match across a manual miss and worker reload", async () => {
+    const track = {
+      provider: "youtubeMusic" as const,
+      trackID: "lyrics-manual-miss",
+      title: "始まりの合図",
+      artist: "佐藤史果",
+      durationMs: 240_000,
+    };
+    let phase: "match" | "miss" | "offline" = "match";
+    const fetcher = vi.fn(async (input: string | URL | Request) => {
+      const url = new URL(String(input));
+      if (phase === "offline") throw new Error(`unexpected network after reload: ${url.href}`);
+      if (url.hostname === "sponsor.ajay.app") return new Response("", { status: 404 });
+      if (url.hostname === "lrclib.net") {
+        if (url.pathname === "/api/get") {
+          return phase === "match"
+            ? new Response(JSON.stringify({
+                id: 3,
+                trackName: track.title,
+                artistName: track.artist,
+                duration: 240,
+                syncedLyrics: "[00:01.00]automatic",
+              }), { status: 200 })
+            : new Response("", { status: 404 });
+        }
+        return new Response("[]", { status: 200 });
+      }
+      if (url.hostname === "mobilecdn.kugou.com") {
+        return new Response(JSON.stringify({ data: { info: [] } }), { status: 200 });
+      }
+      throw new Error(`unexpected request: ${url.href}`);
+    });
+    vi.stubGlobal("fetch", fetcher);
+
+    expect(await sendResolved({ type: "youtube-music-resolve-lyrics", track }, sender(10)))
+      .toMatchObject({ status: "match", match: { id: "3" } });
+    const formalBefore = structuredClone(
+      (storage.get("lyricstage-youtube-music-lyrics-v9") as Record<string, unknown>)[track.trackID],
+    );
+    phase = "miss";
+    expect(await sendResolved({
+      type: "youtube-music-search-lyrics",
+      track,
+      query: { title: "不存在的歌曲", artist: "无人" },
+    }, sender(10))).toMatchObject({ status: "miss", candidates: [] });
+    expect((storage.get("lyricstage-youtube-music-lyrics-v9") as Record<string, unknown>)[track.trackID])
+      .toEqual(formalBefore);
+
+    phase = "offline";
+    vi.resetModules();
+    await import("./background");
+    expect(await sendResolved({ type: "youtube-music-resolve-lyrics", track }, sender(10)))
+      .toMatchObject({ status: "match", source: "cache", match: { id: "3" } });
+  });
+
+  it("keeps manual candidates separate until the user selects one", async () => {
+    const track = {
+      provider: "youtubeMusic" as const,
+      trackID: "lyrics-manual-select",
+      title: "Original",
+      artist: "Original Artist",
+      durationMs: 240_000,
+    };
+    let phase: "automatic" | "manual" | "offline" = "automatic";
+    vi.stubGlobal("fetch", vi.fn(async (input: string | URL | Request) => {
+      const url = new URL(String(input));
+      if (phase === "offline") throw new Error(`unexpected network after reload: ${url.href}`);
+      if (url.hostname === "sponsor.ajay.app") return new Response("", { status: 404 });
+      if (url.hostname === "lrclib.net" && url.pathname === "/api/get") {
+        const manual = phase === "manual";
+        return new Response(JSON.stringify({
+          id: manual ? 5 : 4,
+          trackName: manual ? "Replacement" : track.title,
+          artistName: manual ? "Replacement Artist" : track.artist,
+          duration: 240,
+          syncedLyrics: manual ? "[00:01.00]replacement" : "[00:01.00]original",
+        }), { status: 200 });
+      }
+      throw new Error(`unexpected request: ${url.href}`);
+    }));
+
+    expect(await sendResolved({ type: "youtube-music-resolve-lyrics", track }, sender(10)))
+      .toMatchObject({ status: "match", match: { id: "4" } });
+    phase = "manual";
+    const manual = await sendResolved({
+      type: "youtube-music-search-lyrics",
+      track,
+      query: { title: "Replacement", artist: "Replacement Artist" },
+    }, sender(10));
+    expect(manual).toMatchObject({ status: "candidates", candidates: [{ id: "5" }] });
+
+    phase = "offline";
+    vi.resetModules();
+    await import("./background");
+    expect(await sendResolved({ type: "youtube-music-resolve-lyrics", track }, sender(10)))
+      .toMatchObject({ status: "match", source: "cache", match: { id: "4" } });
+    expect(await sendResolved({
+      type: "youtube-music-accept-lyrics",
+      track,
+      candidate: manual.candidates[0],
+    }, sender(10))).toEqual({ ok: true });
+
+    vi.resetModules();
+    await import("./background");
+    expect(await sendResolved({ type: "youtube-music-resolve-lyrics", track }, sender(10)))
+      .toMatchObject({ status: "match", source: "cache", match: { id: "5" } });
   });
 
   it("keeps a provider key when only the model changes on the same API", async () => {
@@ -556,6 +828,223 @@ describe("YouTube Music background routing", () => {
     const cache = storage.get("lyricstage-director-bible-cache-v1") as Record<string, unknown>;
     expect(cache[trackB.trackID]).toBeDefined();
     expect(cache[trackA.trackID]).toBeUndefined();
+  });
+
+  it("keeps two tabs' rolling generations independent", async () => {
+    await send({
+      type: "youtube-music-save-director-config",
+      configuration: {
+        version: "lyricstage-director-byok-v1",
+        primary: { protocol: "openai-responses", endpoint: "https://api.openai.com/v1", model: "fixture", apiKey: "rolling-secret" },
+      },
+    }, sender(10));
+    const trackA = rollingTrack();
+    const lyricsA = rollingLyrics();
+    const bibleA = compileLocalDirectorBibleV1(lyricsA);
+    const trackB = { ...trackA, trackID: "rolling-other-tab", title: "Other tab fixture" };
+    const lyricsB = { ...lyricsA, recordingID: "youtubeMusic:rolling-other-tab" };
+    const bibleB = compileLocalDirectorBibleV1(lyricsB);
+    const delayedA = deferred<Response>();
+    let calls = 0;
+    vi.stubGlobal("fetch", vi.fn(() => {
+      calls += 1;
+      return calls === 1
+        ? delayedA.promise
+        : Promise.resolve(new Response(JSON.stringify({ output_text: JSON.stringify(bibleB) }), { status: 200 }));
+    }));
+
+    const pendingA = sendResolved(
+      { type: "youtube-music-resolve-director-bible-v1", track: trackA, lyrics: lyricsA },
+      sender(10),
+    );
+    await flush();
+    const resultB = await sendResolved(
+      { type: "youtube-music-resolve-director-bible-v1", track: trackB, lyrics: lyricsB },
+      sender(20),
+    );
+    delayedA.resolve(new Response(JSON.stringify({ output_text: JSON.stringify(bibleA) }), { status: 200 }));
+
+    expect(resultB).toMatchObject({ status: "ready", source: "network" });
+    expect(await pendingA).toMatchObject({ status: "ready", source: "network" });
+    expect(calls).toBe(2);
+    const cache = storage.get("lyricstage-director-bible-cache-v1") as Record<string, unknown>;
+    expect(cache[trackA.trackID]).toBeDefined();
+    expect(cache[trackB.trackID]).toBeDefined();
+  });
+
+  it("aborts the old provider request when one tab switches tracks", async () => {
+    await send({
+      type: "youtube-music-save-director-config",
+      configuration: {
+        version: "lyricstage-director-byok-v1",
+        primary: { protocol: "openai-responses", endpoint: "https://api.openai.com/v1", model: "fixture", apiKey: "rolling-secret" },
+      },
+    }, sender(10));
+    const trackA = rollingTrack();
+    const lyricsA = rollingLyrics();
+    const trackB = { ...trackA, trackID: "rolling-next-track", title: "Next track fixture" };
+    const lyricsB = { ...lyricsA, recordingID: "youtubeMusic:rolling-next-track" };
+    const bibleB = compileLocalDirectorBibleV1(lyricsB);
+    let firstSignal: AbortSignal | undefined;
+    let calls = 0;
+    vi.stubGlobal("fetch", vi.fn((_input: string | URL | Request, init?: RequestInit) => {
+      calls += 1;
+      if (calls > 1) {
+        return Promise.resolve(new Response(JSON.stringify({ output_text: JSON.stringify(bibleB) }), { status: 200 }));
+      }
+      firstSignal = init?.signal ?? undefined;
+      return new Promise<Response>((_resolve, reject) => {
+        firstSignal?.addEventListener("abort", () => reject(new DOMException("Aborted", "AbortError")), { once: true });
+      });
+    }));
+
+    await send({ type: "youtube-music-source-snapshot", snapshot: snapshot(trackA.trackID, "playing", 1) }, sender(10));
+
+    const pendingA = sendResolved(
+      { type: "youtube-music-resolve-director-bible-v1", track: trackA, lyrics: lyricsA },
+      sender(10),
+    );
+    await flush();
+    await send({ type: "youtube-music-source-snapshot", snapshot: snapshot(trackB.trackID, "playing", 2) }, sender(10));
+    const pendingB = sendResolved(
+      { type: "youtube-music-resolve-director-bible-v1", track: trackB, lyrics: lyricsB },
+      sender(10),
+    );
+
+    expect(await pendingB).toMatchObject({ status: "ready", source: "network" });
+    expect(await pendingA).toMatchObject({ status: "stale", reason: "stale-generation" });
+    expect(firstSignal?.aborted).toBe(true);
+    expect(calls).toBe(2);
+    const cache = storage.get("lyricstage-director-bible-cache-v1") as Record<string, unknown>;
+    expect(cache[trackA.trackID]).toBeUndefined();
+    expect(cache[trackB.trackID]).toBeDefined();
+  });
+
+  it("aborts an old Scene Pack request without affecting the next track", async () => {
+    await send({
+      type: "youtube-music-save-director-config",
+      configuration: {
+        version: "lyricstage-director-byok-v1",
+        primary: { protocol: "openai-responses", endpoint: "https://api.openai.com/v1", model: "fixture", apiKey: "rolling-secret" },
+      },
+    }, sender(10));
+    const trackA = rollingTrack();
+    const lyricsA = rollingLyrics();
+    const bibleA = compileLocalDirectorBibleV1(lyricsA);
+    const cardsA = compileLocalSceneCardsV1(lyricsA, bibleA);
+    const trackB = { ...trackA, trackID: "rolling-scene-next", title: "Scene next fixture" };
+    const lyricsB = { ...lyricsA, recordingID: "youtubeMusic:rolling-scene-next" };
+    const bibleB = compileLocalDirectorBibleV1(lyricsB);
+    const cardsB = compileLocalSceneCardsV1(lyricsB, bibleB);
+    let delayedSceneSignal: AbortSignal | undefined;
+    let delayNextScene = false;
+    const fetcher = vi.fn((_input: string | URL | Request, init?: RequestInit) => {
+      const payload = JSON.parse(String(init?.body)) as any;
+      if (payload.instructions?.includes("whole-song constitution")) {
+        const bible = String(init?.body).includes(trackB.trackID) ? bibleB : bibleA;
+        return Promise.resolve(new Response(JSON.stringify({ output_text: JSON.stringify(bible) }), { status: 200 }));
+      }
+      const prompt = JSON.parse(payload.input[0].content[0].text) as any;
+      if (delayNextScene) {
+        delayNextScene = false;
+        delayedSceneSignal = init?.signal ?? undefined;
+        return new Promise<Response>((_resolve, reject) => {
+          delayedSceneSignal?.addEventListener("abort", () => reject(new DOMException("Aborted", "AbortError")), { once: true });
+        });
+      }
+      const cards = prompt.bible.bibleIdentity === bibleB.bibleIdentity ? cardsB : cardsA;
+      const scenes = cards.filter((card) => card.fromLineIndex >= prompt.window.fromLineIndex
+        && card.toLineIndex <= prompt.window.toLineIndex);
+      return Promise.resolve(new Response(JSON.stringify({ output_text: JSON.stringify({
+        version: "scene-pack-v1",
+        bibleIdentity: prompt.bible.bibleIdentity,
+        entryStateHash: prompt.state.stateHash,
+        scenes,
+      }) }), { status: 200 }));
+    });
+    vi.stubGlobal("fetch", fetcher);
+    await sendResolved({ type: "youtube-music-resolve-director-bible-v1", track: trackA, lyrics: lyricsA }, sender(10));
+    await sendResolved({ type: "youtube-music-resolve-director-bible-v1", track: trackB, lyrics: lyricsB }, sender(20));
+    await send({ type: "youtube-music-source-snapshot", snapshot: snapshot(trackA.trackID, "playing", 1) }, sender(10));
+    delayNextScene = true;
+    const pendingA = sendResolved({
+      type: "youtube-music-resolve-director-coverage-v1", track: trackA, lyrics: lyricsA, bible: bibleA,
+      playheadMs: 1, desiredHorizonMs: 60_000,
+    }, sender(10));
+    await flush();
+    await send({ type: "youtube-music-source-snapshot", snapshot: snapshot(trackB.trackID, "playing", 2) }, sender(10));
+    const resultB = await sendResolved({
+      type: "youtube-music-resolve-director-coverage-v1", track: trackB, lyrics: lyricsB, bible: bibleB,
+      playheadMs: 1, desiredHorizonMs: 60_000,
+    }, sender(10));
+
+    expect(delayedSceneSignal?.aborted).toBe(true);
+    expect(await pendingA).toMatchObject({ status: "stale", reason: "stale-scene-request" });
+    expect(resultB).toMatchObject({ status: "ready", source: "network" });
+    expect(fetcher).toHaveBeenCalledTimes(4);
+  });
+
+  it("supersedes an unsettled Scene Pack immediately when the same track seeks", async () => {
+    await send({
+      type: "youtube-music-save-director-config",
+      configuration: {
+        version: "lyricstage-director-byok-v1",
+        primary: { protocol: "openai-responses", endpoint: "https://api.openai.com/v1", model: "fixture", apiKey: "rolling-secret" },
+      },
+    }, sender(10));
+    const track = rollingTrack();
+    const lyrics = rollingLyrics();
+    const bible = compileLocalDirectorBibleV1(lyrics);
+    const localCards = compileLocalSceneCardsV1(lyrics, bible);
+    const oldScene = deferred<Response>();
+    let bibleSignal: AbortSignal | undefined;
+    let oldSceneSignal: AbortSignal | undefined;
+    const requestedWindows: Array<{ fromLineIndex: number; toLineIndex: number }> = [];
+    const fetcher = vi.fn((_input: string | URL | Request, init?: RequestInit) => {
+      const payload = JSON.parse(String(init?.body)) as any;
+      if (payload.instructions?.includes("whole-song constitution")) {
+        bibleSignal = init?.signal ?? undefined;
+        return Promise.resolve(new Response(JSON.stringify({ output_text: JSON.stringify(bible) }), { status: 200 }));
+      }
+      const prompt = JSON.parse(payload.input[0].content[0].text) as any;
+      requestedWindows.push(prompt.window);
+      if (requestedWindows.length === 1) {
+        oldSceneSignal = init?.signal ?? undefined;
+        return oldScene.promise;
+      }
+      const scenes = localCards.filter((card) => card.fromLineIndex >= prompt.window.fromLineIndex
+        && card.toLineIndex <= prompt.window.toLineIndex);
+      return Promise.resolve(new Response(JSON.stringify({ output_text: JSON.stringify({
+        version: "scene-pack-v1",
+        bibleIdentity: prompt.bible.bibleIdentity,
+        entryStateHash: prompt.state.stateHash,
+        scenes,
+      }) }), { status: 200 }));
+    });
+    vi.stubGlobal("fetch", fetcher);
+    await sendResolved({ type: "youtube-music-resolve-director-bible-v1", track, lyrics }, sender(10));
+    const pendingOld = sendResolved({
+      type: "youtube-music-resolve-director-coverage-v1", track, lyrics, bible,
+      playheadMs: 1, desiredHorizonMs: 60_000,
+    }, sender(10));
+    await flush();
+    const pendingSeek = sendResolved({
+      type: "youtube-music-resolve-director-coverage-v1", track, lyrics, bible,
+      playheadMs: 1, seekTargetMs: 100_000, desiredHorizonMs: 60_000,
+    }, sender(10));
+    await flush();
+
+    expect(oldSceneSignal?.aborted).toBe(true);
+    expect(bibleSignal?.aborted).toBe(false);
+    expect(fetcher).toHaveBeenCalledTimes(3);
+    expect(requestedWindows).toHaveLength(2);
+    expect(requestedWindows[1]?.fromLineIndex).not.toBe(requestedWindows[0]?.fromLineIndex);
+    oldScene.reject(new DOMException("Aborted", "AbortError"));
+    expect(await pendingOld).toMatchObject({ status: "stale", reason: "stale-scene-request" });
+    expect(await pendingSeek).toMatchObject({ status: "ready", source: "network" });
+    const sceneCache = storage.get("lyricstage-director-scene-cache-v1") as Record<string, any>;
+    expect(Object.values(sceneCache)).toHaveLength(1);
+    expect(Object.values(sceneCache)[0]?.fromLineIndex).toBe(requestedWindows[1]?.fromLineIndex);
   });
 
   it("does not expand rolling coverage while paused or inside the final 20 seconds", async () => {

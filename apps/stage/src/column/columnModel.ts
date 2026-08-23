@@ -3,6 +3,7 @@ import { sampleTimeline, type PreparedTimelineV0 } from "@lyricstage/core";
 
 export type ColumnSurfaceState =
   | "boot"
+  | "bridgeUnavailable"
   | "awaitingTrack"
   | "searching"
   | "candidates"
@@ -44,6 +45,42 @@ export const toggledColumnTool = (
   selected: ColumnTool,
 ): ColumnTool | null => current === selected ? null : selected;
 
+export const columnToolAfterLyricsSearch = (
+  current: ColumnTool | null,
+  previousStatus: AutomaticLyricsStatus,
+  nextStatus: AutomaticLyricsStatus,
+  candidateCount: number,
+): ColumnTool | null => current === "search"
+  && previousStatus === "searching"
+  && nextStatus === "candidates"
+  && candidateCount > 0
+  ? "versions"
+  : current;
+
+export const eventPathStartsInEditableControl = (path: readonly unknown[]): boolean => {
+  const origin = path[0];
+  if (!origin || typeof origin !== "object") return false;
+  const candidate = origin as {
+    tagName?: unknown;
+    isContentEditable?: unknown;
+    getAttribute?: (name: string) => string | null;
+  };
+  const tagName = typeof candidate.tagName === "string" ? candidate.tagName.toUpperCase() : "";
+  const role = typeof candidate.getAttribute === "function" ? candidate.getAttribute("role") : null;
+  return candidate.isContentEditable === true
+    || tagName === "INPUT"
+    || tagName === "TEXTAREA"
+    || tagName === "SELECT"
+    || role === "textbox"
+    || role === "combobox";
+};
+
+export const lyricLineTabIndex = (
+  lineIndex: number,
+  activeLineIndex: number,
+  firstLineIndex: number,
+): 0 | -1 => lineIndex === (activeLineIndex >= 0 ? activeLineIndex : firstLineIndex) ? 0 : -1;
+
 export const mapVoiceClass = (role: VoiceRole | undefined): ColumnVoiceClass => {
   switch (role) {
     case "duetA":
@@ -58,7 +95,7 @@ export const mapVoiceClass = (role: VoiceRole | undefined): ColumnVoiceClass => 
 };
 
 export const resolveColumnSurfaceState = (input: ColumnStateInput): ColumnSurfaceState => {
-  if (!input.bridgeAvailable) return "error";
+  if (!input.bridgeAvailable) return "bridgeUnavailable";
   if (input.disconnected) return "disconnected";
   if (!input.hasSnapshot) return "awaitingTrack";
 

@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { Application, Graphics } from "pixi.js";
 import type { MutableRefObject } from "react";
 import {
@@ -19,18 +19,30 @@ import { canvasBackingStoreForV1 } from "./canvasBackingStore";
 
 export type PerformanceEnvironmentStatus = "loading" | "webgl" | "canvas2d" | "failed";
 
+const sceneCache = new Map<string, EnvironmentSceneV1>();
+
+const cachedEnvironmentScene = (plan: DirectorPlanV1, sectionIdentity: string): EnvironmentSceneV1 => {
+  const key = `${plan.recordingID}:${plan.planIdentity}:${sectionIdentity}`;
+  const cached = sceneCache.get(key);
+  if (cached) return cached;
+  const scene = compileEnvironmentSceneV1(plan.recordingID, key);
+  sceneCache.set(key, scene);
+  if (sceneCache.size > 32) sceneCache.delete(sceneCache.keys().next().value as string);
+  return scene;
+};
+
 const tuningFor = (
   plan: DirectorPlanV1,
   timeMs: number,
   reduceMotion: boolean,
   vjMode: boolean,
-): { scene: EnvironmentSceneV1; tuning: EnvironmentTuningV1; energy: number } => {
+): { scene: EnvironmentSceneV1; tuning: EnvironmentTuningV1; energy: number; sampleTimeMs: number } => {
   const section = directorSectionAtV1(plan, timeMs);
   const recipe = effectRecipeAtV1(plan.effects, timeMs);
   const world = plan.world;
-  const scene = compileEnvironmentSceneV1(
-    plan.recordingID,
-    `${plan.planIdentity}:${section.artDirection}:${section.paletteIndex}:${section.id}`,
+  const scene = cachedEnvironmentScene(
+    plan,
+    `${section.artDirection}:${section.paletteIndex}:${section.id}`,
   );
   const recipeEnergy = recipe?.primary.primitive === "field.aperture" || recipe?.primary.primitive === "density.release"
     ? 0.42
@@ -68,6 +80,7 @@ const tuningFor = (
   return {
     scene,
     energy,
+    sampleTimeMs: reduceMotion ? section.fromMs : timeMs,
     tuning: {
       intensity: energy,
       bloom: vjMode && !reduceMotion ? Math.min(1, artBloom + 0.14) : artBloom,
@@ -132,18 +145,19 @@ const drawCanvas2D = (
   plan: DirectorPlanV1,
   timeMs: number,
   reduceMotion: boolean,
+  lightweight: boolean,
   vjMode: boolean,
   palette?: DirectedStagePaletteV1,
 ) => {
-  const { scene, tuning, energy } = tuningFor(plan, timeMs, reduceMotion, vjMode);
-  const frame = applyDirectedPalette(sampleEnvironmentSceneV1(scene, timeMs, tuning, energy), palette);
+  const { scene, tuning, energy, sampleTimeMs } = tuningFor(plan, timeMs, reduceMotion, vjMode);
+  const frame = applyDirectedPalette(sampleEnvironmentSceneV1(scene, sampleTimeMs, tuning, energy), palette);
   clearCanvasBackingStoreV1(context);
   context.save();
   context.globalAlpha = 0.72;
   context.fillStyle = cssColor(frame.background);
   context.fillRect(0, 0, width, height);
   context.restore();
-  frame.orbs.forEach((orb) => {
+  (lightweight ? frame.orbs.slice(0, 2) : frame.orbs).forEach((orb) => {
     const radius = Math.max(1, orb.radius * Math.max(width, height) * 1.42);
     const glowColor = mixNumericColor(orb.color, frame.paper, 0.34);
     const gradient = context.createRadialGradient(orb.x * width, orb.y * height, 0, orb.x * width, orb.y * height, radius);
@@ -153,7 +167,7 @@ const drawCanvas2D = (
     context.fillStyle = gradient;
     context.fillRect(orb.x * width - radius, orb.y * height - radius, radius * 2, radius * 2);
   });
-  frame.rails.forEach((rail) => {
+  (lightweight ? frame.rails.slice(0, 3) : frame.rails).forEach((rail) => {
     const centerY = rail.offset * height;
     const rise = Math.tan(rail.angle) * width;
     context.save();
@@ -166,7 +180,7 @@ const drawCanvas2D = (
     context.stroke();
     context.restore();
   });
-  frame.particles.forEach((particle) => {
+  (lightweight ? frame.particles.slice(0, 14) : frame.particles).forEach((particle) => {
     context.save();
     context.globalAlpha = Math.min(0.46, particle.alpha * 0.72);
     context.fillStyle = cssColor(particle.color);
@@ -184,17 +198,18 @@ const draw = (
   plan: DirectorPlanV1,
   timeMs: number,
   reduceMotion: boolean,
+  lightweight: boolean,
   vjMode: boolean,
   palette?: DirectedStagePaletteV1,
 ) => {
-  const { scene, tuning, energy } = tuningFor(plan, timeMs, reduceMotion, vjMode);
-  const frame = applyDirectedPalette(sampleEnvironmentSceneV1(scene, timeMs, tuning, energy), palette);
+  const { scene, tuning, energy, sampleTimeMs } = tuningFor(plan, timeMs, reduceMotion, vjMode);
+  const frame = applyDirectedPalette(sampleEnvironmentSceneV1(scene, sampleTimeMs, tuning, energy), palette);
   graphics.clear();
   graphics.rect(0, 0, width, height).fill({ color: frame.background, alpha: 0.72 });
-  frame.orbs.forEach((orb) => {
+  (lightweight ? frame.orbs.slice(0, 2) : frame.orbs).forEach((orb) => {
     const radius = orb.radius * Math.max(width, height) * 1.42;
     const glowColor = mixNumericColor(orb.color, frame.paper, 0.34);
-    const ringCount = 40;
+    const ringCount = lightweight ? 10 : reduceMotion ? 16 : 28;
     for (let ring = ringCount; ring >= 1; ring -= 1) {
       const radialPosition = ring / ringCount;
       const softness = (1 - radialPosition) ** 1.65;
@@ -204,7 +219,7 @@ const draw = (
       });
     }
   });
-  frame.rails.forEach((rail) => {
+  (lightweight ? frame.rails.slice(0, 3) : frame.rails).forEach((rail) => {
     const centerY = rail.offset * height;
     const rise = Math.tan(rail.angle) * width;
     graphics
@@ -212,7 +227,7 @@ const draw = (
       .lineTo(width * 1.15, centerY + rise * 0.65)
       .stroke({ color: rail.color, alpha: Math.min(0.62, rail.alpha * 2.2), width: Math.max(1, rail.width * height) });
   });
-  frame.particles.forEach((particle) => {
+  (lightweight ? frame.particles.slice(0, 14) : frame.particles).forEach((particle) => {
     graphics.circle(
       particle.x * width,
       particle.y * height,
@@ -224,21 +239,23 @@ const draw = (
 export function PerformanceEnvironment({
   plan,
   timeMsRef,
-  continuous,
   displayTimeMs,
   reduceMotion,
+  lightweight,
   vjMode,
   palette,
   onStatus,
+  registerFrameRenderer,
 }: {
   plan: DirectorPlanV1;
   timeMsRef: MutableRefObject<number>;
-  continuous: boolean;
   displayTimeMs: number;
   reduceMotion: boolean;
+  lightweight: boolean;
   vjMode: boolean;
   palette?: DirectedStagePaletteV1;
   onStatus?: (status: PerformanceEnvironmentStatus) => void;
+  registerFrameRenderer?: (render: () => void) => () => void;
 }) {
   const hostRef = useRef<HTMLDivElement>(null);
   const applicationRef = useRef<Application | null>(null);
@@ -246,23 +263,55 @@ export function PerformanceEnvironment({
   const fallbackCanvasRef = useRef<HTMLCanvasElement | null>(null);
   const fallbackContextRef = useRef<CanvasRenderingContext2D | null>(null);
   const failedRef = useRef(false);
-  const latestRef = useRef({ plan, timeMsRef, displayTimeMs, reduceMotion, vjMode, palette });
+  const sizeRef = useRef({ width: 0, height: 0 });
+  const webGLBackingKeyRef = useRef("");
+  const lastStaticFrameRef = useRef("");
+  const latestRef = useRef({ plan, timeMsRef, displayTimeMs, reduceMotion, lightweight, vjMode, palette });
   const [status, setStatus] = useState<PerformanceEnvironmentStatus>("loading");
-  latestRef.current = { plan, timeMsRef, displayTimeMs, reduceMotion, vjMode, palette };
+  latestRef.current = { plan, timeMsRef, displayTimeMs, reduceMotion, lightweight, vjMode, palette };
 
-  const report = (next: PerformanceEnvironmentStatus) => {
+  const report = useCallback((next: PerformanceEnvironmentStatus) => {
     failedRef.current = next === "failed";
     setStatus(next);
     onStatus?.(next);
-  };
-  const renderCurrent = () => {
+  }, [onStatus]);
+  const renderCurrent = useCallback((force = false) => {
     const application = applicationRef.current;
     const graphics = graphicsRef.current;
     const current = latestRef.current;
     const timeMs = Number.isFinite(current.timeMsRef.current) ? current.timeMsRef.current : current.displayTimeMs;
     if (failedRef.current) return;
+    const section = directorSectionAtV1(current.plan, timeMs);
+    const renderer = application && graphics ? "webgl" : fallbackContextRef.current ? "canvas2d" : "loading";
+    const staticKey = [
+      renderer,
+      current.plan.planIdentity,
+      section.id,
+      current.reduceMotion,
+      current.lightweight,
+      current.vjMode,
+      current.palette?.ground,
+      current.palette?.signal,
+      current.palette?.signalAlt,
+      current.palette?.warm,
+      current.palette?.ink,
+      sizeRef.current.width,
+      sizeRef.current.height,
+    ].join(":");
+    if (!force && (current.reduceMotion || current.lightweight) && lastStaticFrameRef.current === staticKey) return;
     try {
       if (application && graphics) {
+        const { width, height } = sizeRef.current;
+        if (width >= 2 && height >= 2) {
+          const requestedScale = current.lightweight ? 1 : Math.min(window.devicePixelRatio || 1, 2);
+          const backing = canvasBackingStoreForV1(width, height, requestedScale);
+          const resolution = Math.min(backing.scaleX, backing.scaleY);
+          const backingKey = `${width}:${height}:${resolution}`;
+          if (webGLBackingKeyRef.current !== backingKey) {
+            application.renderer.resize(width, height, resolution);
+            webGLBackingKeyRef.current = backingKey;
+          }
+        }
         draw(
           graphics,
           application.screen.width,
@@ -270,45 +319,53 @@ export function PerformanceEnvironment({
           current.plan,
           timeMs,
           current.reduceMotion,
+          current.lightweight,
           current.vjMode,
           current.palette,
         );
         application.render();
+        lastStaticFrameRef.current = staticKey;
         return;
       }
       const host = hostRef.current;
       const canvas = fallbackCanvasRef.current;
       const context = fallbackContextRef.current;
       if (!host || !canvas || !context) return;
-      const rect = host.getBoundingClientRect();
-      if (rect.width < 2 || rect.height < 2) return;
-      const dpr = Math.min(window.devicePixelRatio || 1, 2);
-      const backing = canvasBackingStoreForV1(rect.width, rect.height, dpr);
+      const { width, height } = sizeRef.current;
+      if (width < 2 || height < 2) return;
+      const dpr = current.lightweight ? 1 : Math.min(window.devicePixelRatio || 1, 2);
+      const backing = canvasBackingStoreForV1(width, height, dpr);
       if (canvas.width !== backing.pixelWidth || canvas.height !== backing.pixelHeight) {
         canvas.width = backing.pixelWidth;
         canvas.height = backing.pixelHeight;
       }
-      canvas.style.width = `${rect.width}px`;
-      canvas.style.height = `${rect.height}px`;
+      canvas.style.width = `${width}px`;
+      canvas.style.height = `${height}px`;
       context.setTransform(backing.scaleX, 0, 0, backing.scaleY, 0, 0);
       drawCanvas2D(
         context,
-        rect.width,
-        rect.height,
+        width,
+        height,
         current.plan,
         timeMs,
         current.reduceMotion,
+        current.lightweight,
         current.vjMode,
         current.palette,
       );
+      lastStaticFrameRef.current = staticKey;
     } catch {
       report("failed");
     }
-  };
+  }, [report]);
 
   useEffect(() => {
     const host = hostRef.current;
     if (!host) return undefined;
+    const initialRect = host.getBoundingClientRect();
+    sizeRef.current = { width: initialRect.width, height: initialRect.height };
+    const initialRequestedScale = latestRef.current.lightweight ? 1 : Math.min(window.devicePixelRatio || 1, 2);
+    const initialBacking = canvasBackingStoreForV1(initialRect.width, initialRect.height, initialRequestedScale);
     let disposed = false;
     let initialized = false;
     let onContextLost: ((event: Event) => void) | undefined;
@@ -332,16 +389,17 @@ export function PerformanceEnvironment({
       fallbackContextRef.current = context;
       host.appendChild(canvas);
       report("canvas2d");
-      renderCurrent();
+      renderCurrent(true);
     };
     void application.init({
-      resizeTo: host,
+      width: Math.max(1, initialRect.width),
+      height: Math.max(1, initialRect.height),
       preference: "webgl",
       powerPreference: "high-performance",
       backgroundAlpha: 0,
       antialias: true,
       autoDensity: true,
-      resolution: Math.min(window.devicePixelRatio || 1, 2),
+      resolution: Math.min(initialBacking.scaleX, initialBacking.scaleY),
       autoStart: false,
     }).then(() => {
       if (disposed) {
@@ -374,6 +432,7 @@ export function PerformanceEnvironment({
             current.plan,
             timeMs,
             current.reduceMotion,
+            current.lightweight,
             current.vjMode,
             current.palette,
           );
@@ -383,7 +442,7 @@ export function PerformanceEnvironment({
           graphicsRef.current = null;
           application.canvas.style.display = "none";
           report("canvas2d");
-          renderCurrent();
+          renderCurrent(true);
           return;
         }
         applicationRef.current = application;
@@ -399,18 +458,20 @@ export function PerformanceEnvironment({
       application.canvas.addEventListener("webglcontextrestored", onContextRestored);
       host.appendChild(application.canvas);
       report("webgl");
-      renderCurrent();
+      renderCurrent(true);
     }).catch((error) => {
       if (!disposed) {
         activateCanvasFallback(error instanceof Error ? error.message : "webgl-init-failed");
       }
     });
     let resizeFrameID = 0;
-    const observer = new ResizeObserver(() => {
+    const observer = new ResizeObserver((entries) => {
+      const rect = entries[0]?.contentRect;
+      if (rect) sizeRef.current = { width: rect.width, height: rect.height };
       if (resizeFrameID) cancelAnimationFrame(resizeFrameID);
       resizeFrameID = requestAnimationFrame(() => {
         resizeFrameID = 0;
-        renderCurrent();
+        renderCurrent(true);
       });
     });
     observer.observe(host);
@@ -420,6 +481,7 @@ export function PerformanceEnvironment({
       if (resizeFrameID) cancelAnimationFrame(resizeFrameID);
       graphicsRef.current = null;
       applicationRef.current = null;
+      webGLBackingKeyRef.current = "";
       fallbackContextRef.current = null;
       fallbackCanvasRef.current?.remove();
       fallbackCanvasRef.current = null;
@@ -427,34 +489,16 @@ export function PerformanceEnvironment({
       if (onContextRestored) application.canvas.removeEventListener("webglcontextrestored", onContextRestored);
       if (initialized) application.destroy(true, { children: true });
     };
-  }, []);
-
-  useEffect(renderCurrent, [plan, timeMsRef, displayTimeMs, reduceMotion, vjMode, palette]);
+  }, [renderCurrent, report]);
 
   useEffect(() => {
-    if (!continuous) return undefined;
-    let frameID = 0;
-    const tick = () => {
-      frameID = 0;
-      renderCurrent();
-      if (!document.hidden) frameID = requestAnimationFrame(tick);
-    };
-    const visibilityChanged = () => {
-      if (document.hidden) {
-        if (frameID) cancelAnimationFrame(frameID);
-        frameID = 0;
-      } else if (!frameID) {
-        renderCurrent();
-        frameID = requestAnimationFrame(tick);
-      }
-    };
-    visibilityChanged();
-    document.addEventListener("visibilitychange", visibilityChanged);
-    return () => {
-      if (frameID) cancelAnimationFrame(frameID);
-      document.removeEventListener("visibilitychange", visibilityChanged);
-    };
-  }, [continuous]);
+    renderCurrent(true);
+  }, [lightweight, palette, plan, reduceMotion, renderCurrent, vjMode]);
+
+  useEffect(() => {
+    if (!registerFrameRenderer) return undefined;
+    return registerFrameRenderer(() => renderCurrent(false));
+  }, [registerFrameRenderer, renderCurrent]);
 
   return <div className="performance-environment" ref={hostRef} data-renderer={status} aria-hidden="true" />;
 }

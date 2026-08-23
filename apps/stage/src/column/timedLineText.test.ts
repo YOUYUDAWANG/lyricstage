@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import { lyricFixtures } from "@lyricstage/contracts";
 import {
   alignTimedLineSegments,
+  alternativeLyricsCandidates,
   isStageHideRequest,
   MESSAGE_REQUEST_HIDE,
   retainCandidatesAfterChoice,
@@ -96,6 +97,14 @@ describe("candidate retention and Esc routing", () => {
     const pool = [{ id: "a" }, { id: "b" }, { id: "c" }];
     expect(retainCandidatesAfterChoice(pool, pool[1])).toEqual(pool);
     expect(retainCandidatesAfterChoice([], { id: "only" })).toEqual([{ id: "only" }]);
+  });
+
+  it("excludes the selected lyric from the alternatives", () => {
+    const candidates = [
+      { provider: "lrclib" as const, id: "a", title: "Song", artist: "Artist", durationMs: 1_000, syncedLyrics: "[00:00]A" },
+      { provider: "kugou" as const, id: "b", title: "Song", artist: "Artist", durationMs: 1_000, syncedLyrics: "[00:00]B" },
+    ];
+    expect(alternativeLyricsCandidates(candidates, "lrclib:a")).toEqual([candidates[1]]);
   });
 
   it("Esc never requests parent hide in enhanced native model", () => {

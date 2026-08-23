@@ -83,6 +83,17 @@ const option = (idValue: unknown, labelValue?: unknown, detailValue?: unknown): 
   return { id, label, ...(detail ? { detail } : {}) };
 };
 
+const isObviouslyNonTextGenerationModel = (model: DirectorModelOptionV1): boolean => {
+  const searchable = `${model.id} ${model.label}`.toLowerCase();
+  return [
+    /(?:^|[-_.\s])embed(?:ding|dings)?(?:[-_.\s]|$)/u,
+    /(?:^|[-_.\s])(?:audio|realtime|speech|tts|whisper|transcri(?:be|ption))(?:[-_.\s]|$)/u,
+    /(?:^|[-_.\s])(?:image|images|imagen|vision-only)(?:[-_.\s]|$)/u,
+    /(?:^|[-_.\s])moderation(?:[-_.\s]|$)/u,
+    /dall[-_.]?e/u,
+  ].some((pattern) => pattern.test(searchable));
+};
+
 const parseModels = (
   provider: DirectorProviderConnectionV1,
   value: unknown,
@@ -108,7 +119,7 @@ const parseModels = (
       candidate.display_name ?? candidate.displayName,
       candidate.description ?? candidate.owned_by,
     );
-    if (!next || seen.has(next.id)) continue;
+    if (!next || seen.has(next.id) || isObviouslyNonTextGenerationModel(next)) continue;
     seen.add(next.id);
     models.push(next);
   }
@@ -141,11 +152,11 @@ export const listDirectorProviderModelsV1 = async (
       await response.text();
       return {
         provider: provider.protocol,
-        models: [
-          { id: "gemini-3.7-flash", label: "Gemini 3.7 Flash", detail: "Vertex AI Express · verified probe" },
-          { id: "gemini-2.5-flash", label: "Gemini 2.5 Flash", detail: "Vertex AI Express · verified probe" },
-          { id: "gemini-3.5-flash", label: "Gemini 3.5 Flash", detail: "Vertex AI Express" },
-        ],
+        models: [{
+          id: "gemini-3.7-flash",
+          label: "Gemini 3.7 Flash（已验证）",
+          detail: "Vertex AI Express · 本次连接已成功生成文本",
+        }],
       };
     }
     const response = await fetchImplementation(modelsURL(provider), {

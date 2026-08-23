@@ -37,8 +37,6 @@ import {
   controlYouTubeMusic,
   isYouTubeMusicExtensionContext,
   seekYouTubeMusic,
-  startYouTubeMusicAudioAnalysis,
-  stopYouTubeMusicAudioAnalysis,
   useYouTubeMusicBridge,
 } from "./playback/youtubeMusicBridge";
 import {
@@ -55,12 +53,7 @@ import {
   lyricsOffsetForIdentity,
   lyricsTimeForPlaybackMs,
 } from "./playback/lyricsTimeOffset";
-import {
-  createFullscreenCaptureLifecycle,
-  isFullscreenCapturePinnedForTrack,
-  type FullscreenCaptureLifecycle,
-  type FullscreenCaptureOwnership,
-} from "./playback/fullscreenCaptureLifecycle";
+import { usePrefersReducedMotion, useTransientNotice } from "./playback/runtimeExperience";
 import { lyricDocumentFromCandidate } from "./playback/lyricsCandidateDocument";
 import {
   directorStatusDetail,
@@ -150,7 +143,10 @@ type AutomaticLyricsState = {
   trackID?: string;
   trackIdentity?: string;
   candidates: LyricsCandidateV0[];
+  selectedCandidateKey?: string;
 };
+
+const lyricsCandidateKey = (candidate: LyricsCandidateV0) => `${candidate.provider}:${candidate.id}`;
 
 const formatTime = (milliseconds: number): string => {
   const totalSeconds = Math.max(0, Math.floor(milliseconds / 1000));
@@ -179,10 +175,10 @@ export default function App({ embedded = embeddedStageFromLocation, onEmbeddedRe
   const [playing, setPlaying] = useState(false);
   const [displayTimeMs, setDisplayTimeMs] = useState(demoTimeMs);
   const [durationMs, setDurationMs] = useState(demoLyrics.durationMs);
-  const [reduceMotion, setReduceMotion] = useState(() =>
-    typeof globalThis.matchMedia === "function"
-      && globalThis.matchMedia("(prefers-reduced-motion: reduce)").matches
-  );
+  const prefersReducedMotion = usePrefersReducedMotion();
+  const [reduceMotionOverride, setReduceMotion] = useState(false);
+  const reduceMotion = prefersReducedMotion || reduceMotionOverride;
+  const interaction = useTransientNotice();
   const [showGuides, setShowGuides] = useState(false);
   const [message, setMessage] = useState("样片已就绪。选择音乐来源后导入匹配歌词即可排练。");
   const [metrics, setMetrics] = useState({ count: 0, p95: 0, p99: 0, max: 0 });
@@ -208,28 +204,12 @@ export default function App({ embedded = embeddedStageFromLocation, onEmbeddedRe
   const directorLookupGenerationRef = useRef(0);
   const manualLyricsIdentityRef = useRef<string | null>(null);
   const currentYouTubeIdentityRef = useRef<string | null>(null);
-  const vocalTimingPinnedTrackIDRef = useRef<string | null>(null);
-  const fullscreenCaptureOwnershipRef = useRef<FullscreenCaptureOwnership>({
-    embedded: embeddedStage,
-    pinned: false,
-  });
-  const fullscreenCaptureLifecycleRef = useRef<FullscreenCaptureLifecycle | null>(null);
   const lyricsOffsetIdentityRef = useRef<string | null>(null);
+  const columnClockCommitRef = useRef(0);
   const everConnectedRef = useRef(false);
   const lastTrackRef = useRef<{ title: string; artist: string }>({ title: "", artist: "" });
 
   displayTimeRef.current = displayTimeMs;
-  const currentCaptureTrackID = youtubeMusic.snapshot?.track.trackID;
-  fullscreenCaptureOwnershipRef.current = {
-    embedded: embeddedStage,
-    pinned: isFullscreenCapturePinnedForTrack(
-      vocalTimingPinnedTrackIDRef.current,
-      currentCaptureTrackID,
-    ),
-    trackID: currentCaptureTrackID,
-    captureID: youtubeMusic.musicCaptureID,
-  };
-
   const localClockRef = useRef<PlaybackClockV0>({
     source: "localMedia",
     sample: (nowMs = performance.now()) => {
@@ -370,6 +350,7 @@ export default function App({ embedded = embeddedStageFromLocation, onEmbeddedRe
   );
   const rollingDirectorStateRef = useRef(rollingDirectorState);
   const rollingSeekTargetRef = useRef<number | undefined>(undefined);
+  const rollingCoverageRequestEpochRef = useRef(0);
   const rollingClockObservationRef = useRef<{
     lyricTimeMs: number;
     observedAtMs: number;
@@ -398,6 +379,7 @@ export default function App({ embedded = embeddedStageFromLocation, onEmbeddedRe
     setRemoteDirectorPlan(undefined);
     setDirectorLookupState({ status: "idle" });
     const generation = ++directorLookupGenerationRef.current;
+    rollingCoverageRequestEpochRef.current += 1;
     rollingSeekTargetRef.current = undefined;
     rollingClockObservationRef.current = undefined;
     setRollingForceLocal(false);
@@ -477,13 +459,17 @@ export default function App({ embedded = embeddedStageFromLocation, onEmbeddedRe
       };
       rollingDirectorStateRef.current = ready;
       setRollingDirectorState(ready);
-      setDirectorLookupState({ status: "idle", reason: "rolling-bible-ready" });
+      setDirectorLookupState(response.source === "local" && response.reason
+        ? { type: "director-resolution-v1", status: "error", source: "local", reason: response.reason }
+        : { status: "idle", reason: "rolling-bible-ready" });
     }).catch(() => {
       if (cancelled || generation !== directorLookupGenerationRef.current) return;
       const degraded = { ...requesting, status: "degraded" as const, consecutiveFailures: 1 };
       rollingDirectorStateRef.current = degraded;
       setRollingDirectorState(degraded);
-      setDirectorLookupState({ status: "idle", reason: "rolling-bible-request-failed" });
+      setDirectorLookupState({
+        type: "director-resolution-v1", status: "error", source: "local", reason: "rolling-bible-request-failed",
+      });
     });
     return () => { cancelled = true; };
   }, [hasMatchingLyrics, localDirectorPlan.planIdentity, rollingDirectorMode, source, youtubeMusic.snapshot?.track.trackID]);
@@ -525,6 +511,7 @@ export default function App({ embedded = embeddedStageFromLocation, onEmbeddedRe
       const window = selectRollingRequestedWindowV1(lyrics, targetMs);
       if (!window || current.pendingWindow?.identity === window.identity || !current.bible) return;
       const requesting = { ...current, status: "coverage-requesting" as const, pendingWindow: window };
+      const requestEpoch = ++rollingCoverageRequestEpochRef.current;
       rollingDirectorStateRef.current = requesting;
       setRollingDirectorState(requesting);
       setDirectorLookupState({ status: "requesting", reason: "rolling-coverage" });
@@ -535,7 +522,9 @@ export default function App({ embedded = embeddedStageFromLocation, onEmbeddedRe
         ...(seekTargetMs !== undefined ? { seekTargetMs } : {}),
         state: requestState,
       }).then((response) => {
-        if (disposed || current.generation !== directorLookupGenerationRef.current) return;
+        if (disposed || current.generation !== directorLookupGenerationRef.current
+          || requestEpoch !== rollingCoverageRequestEpochRef.current
+          || rollingDirectorStateRef.current.pendingWindow?.identity !== window.identity) return;
         const next = reduceRollingCoverageResultV1(lyrics, requesting, response, targetMs, current.generation);
         if (seekTargetMs !== undefined && rollingSeekTargetRef.current === seekTargetMs) {
           rollingSeekTargetRef.current = undefined;
@@ -545,9 +534,13 @@ export default function App({ embedded = embeddedStageFromLocation, onEmbeddedRe
         setRollingDirectorState(next);
         setDirectorLookupState(response.status === "error" || response.status === "unavailable"
           ? { type: "director-resolution-v1", status: response.status, source: "local", reason: response.reason }
-          : { status: "idle", reason: response.reason });
+          : response.source === "local" && response.reason
+            ? { type: "director-resolution-v1", status: "error", source: "local", reason: response.reason }
+            : { status: "idle", reason: response.reason });
       }).catch(() => {
-        if (disposed || current.generation !== directorLookupGenerationRef.current) return;
+        if (disposed || current.generation !== directorLookupGenerationRef.current
+          || requestEpoch !== rollingCoverageRequestEpochRef.current
+          || rollingDirectorStateRef.current.pendingWindow?.identity !== window.identity) return;
         const next = { ...requesting, status: "degraded" as const, pendingWindow: undefined, consecutiveFailures: current.consecutiveFailures + 1 };
         if (rollingSeekTargetRef.current === seekTargetMs) rollingSeekTargetRef.current = undefined;
         rollingDirectorStateRef.current = next;
@@ -599,34 +592,20 @@ export default function App({ embedded = embeddedStageFromLocation, onEmbeddedRe
   }, [youtubeMusic.clock]);
 
   useEffect(() => {
-    if (!fullscreenCaptureLifecycleRef.current) {
-      fullscreenCaptureLifecycleRef.current = createFullscreenCaptureLifecycle({
-        document,
-        getOwnership: () => ({
-          ...fullscreenCaptureOwnershipRef.current,
-          pinned: isFullscreenCapturePinnedForTrack(
-            vocalTimingPinnedTrackIDRef.current,
-            fullscreenCaptureOwnershipRef.current.trackID,
-          ),
-        }),
-        onFullscreenState: (active, embedded) => {
-          setIsFullscreen(active);
-          if (!active && embedded) setPresentation("column");
-        },
-        stopAnalysis: (trackID, captureID) => {
-          void stopYouTubeMusicAudioAnalysis(trackID, captureID);
-        },
-      });
-    }
-    return fullscreenCaptureLifecycleRef.current.mount();
-  }, []);
-
-  useEffect(() => {
-    const pinnedTrackID = vocalTimingPinnedTrackIDRef.current;
-    if (currentCaptureTrackID && pinnedTrackID && currentCaptureTrackID !== pinnedTrackID) {
-      vocalTimingPinnedTrackIDRef.current = null;
-    }
-  }, [currentCaptureTrackID]);
+    const onFullscreenChange = () => {
+      const active = Boolean(document.fullscreenElement || stageShellRef.current?.matches(":fullscreen"));
+      setIsFullscreen(active);
+      if (!active && embeddedStage) setPresentation("column");
+    };
+    const root = stageShellRef.current?.getRootNode();
+    document.addEventListener("fullscreenchange", onFullscreenChange);
+    if (root instanceof ShadowRoot) root.addEventListener("fullscreenchange", onFullscreenChange);
+    onFullscreenChange();
+    return () => {
+      document.removeEventListener("fullscreenchange", onFullscreenChange);
+      if (root instanceof ShadowRoot) root.removeEventListener("fullscreenchange", onFullscreenChange);
+    };
+  }, [embeddedStage]);
 
   useEffect(() => {
     if (
@@ -636,14 +615,20 @@ export default function App({ embedded = embeddedStageFromLocation, onEmbeddedRe
       !youtubeMusic.connected
     ) return undefined;
     let frame = 0;
-    const tick = () => {
+    const tick = (nowMs: number) => {
       const sample = youtubeMusic.clock.sample();
-      if (sample.state !== "unavailable") setDisplayTimeMs(sample.timeMs);
+      const intervalMs = lightweight ? 200 : 50;
+      if (sample.state !== "unavailable" && nowMs - columnClockCommitRef.current >= intervalMs) {
+        columnClockCommitRef.current = nowMs;
+        setDisplayTimeMs((current) => Math.abs(current - sample.timeMs) >= 20 ? sample.timeMs : current);
+      }
       frame = requestAnimationFrame(tick);
     };
     frame = requestAnimationFrame(tick);
     return () => cancelAnimationFrame(frame);
-  }, [presentation, source, youtubeMusic.clock, youtubeMusic.connected]);
+  }, [lightweight, presentation, source, youtubeMusic.clock, youtubeMusic.connected]);
+
+  useEffect(() => interaction.clear(), [interaction.clear, youtubeLyricsIdentity]);
 
   useEffect(() => {
     if (!embeddedStage) return undefined;
@@ -671,6 +656,12 @@ export default function App({ embedded = embeddedStageFromLocation, onEmbeddedRe
       unsubscribe();
     };
   }, []);
+
+  useEffect(() => {
+    if (!embeddedStage || !hasMatchingLyrics) return undefined;
+    const timer = globalThis.setTimeout(() => { void loadStageCanvasModule(); }, 250);
+    return () => globalThis.clearTimeout(timer);
+  }, [embeddedStage, hasMatchingLyrics]);
 
   useEffect(() => {
     const recordingIdentity = source === "youtubeMusic" ? youtubeLyricsIdentity : null;
@@ -801,6 +792,7 @@ export default function App({ embedded = embeddedStageFromLocation, onEmbeddedRe
             trackID: track.trackID,
             trackIdentity,
             candidates: response.candidates,
+            selectedCandidateKey: lyricsCandidateKey(response.match),
           });
           setMessage(
             response.matchKind === "originalFallback"
@@ -978,6 +970,7 @@ export default function App({ embedded = embeddedStageFromLocation, onEmbeddedRe
       trackID: track.trackID,
       trackIdentity,
       candidates: retainCandidatesAfterChoice(previous.candidates, candidate),
+      selectedCandidateKey: lyricsCandidateKey(candidate),
     }));
     setShowVersionPicker(false);
     setMessage("已采用所选歌词版本，正在写入本地缓存。");
@@ -1123,7 +1116,9 @@ export default function App({ embedded = embeddedStageFromLocation, onEmbeddedRe
           setRollingDirectorState(priorRollingState);
           setRollingForceLocal(priorForceLocal);
         }
-        setMessage("跳转失败：YouTube Music 播放页暂时不可用。");
+        const notice = "跳转失败：歌曲可能刚刚切换，请稍候重试。";
+        setMessage(notice);
+        interaction.show(notice);
       }
       return;
     }
@@ -1136,17 +1131,17 @@ export default function App({ embedded = embeddedStageFromLocation, onEmbeddedRe
       const ok = expectedTrackID
         ? await controlYouTubeMusic(action, expectedTrackID)
         : false;
-      if (!ok) setMessage("播放控制暂时不可用，请回到 YouTube Music。");
+      if (!ok) {
+        const notice = "播放控制暂时不可用：歌曲可能刚刚切换，请重试。";
+        setMessage(notice);
+        interaction.show(notice);
+      }
       return;
     }
     if (action === "play" || action === "pause") await togglePlayback();
   };
 
   const exitEmbeddedFullscreen = useCallback(async () => {
-    const trackID = youtubeMusic.snapshot?.track.trackID;
-    if (trackID && !isFullscreenCapturePinnedForTrack(vocalTimingPinnedTrackIDRef.current, trackID)) {
-      void stopYouTubeMusicAudioAnalysis(trackID);
-    }
     setPresentation("column");
     if (document.fullscreenElement) {
       try {
@@ -1155,7 +1150,14 @@ export default function App({ embedded = embeddedStageFromLocation, onEmbeddedRe
         // Column remains the source of truth even if exitFullscreen is denied.
       }
     }
-  }, [youtubeMusic.snapshot?.track.trackID]);
+    requestAnimationFrame(() => {
+      const root = stageShellRef.current?.getRootNode();
+      const trigger = root instanceof ShadowRoot
+        ? root.querySelector<HTMLButtonElement>("[data-column-enter-fullscreen='true']")
+        : document.querySelector<HTMLButtonElement>("[data-column-enter-fullscreen='true']");
+      trigger?.focus();
+    });
+  }, []);
 
   const setCurrentLyricsOffset = useCallback((nextOffsetMs: number) => {
     const boundedOffset = clampLyricsOffsetMs(nextOffsetMs);
@@ -1213,14 +1215,6 @@ export default function App({ embedded = embeddedStageFromLocation, onEmbeddedRe
         setMessage("全屏容器尚未就绪，请重试。");
         return;
       }
-      const captureTrackID = source === "youtubeMusic" ? youtubeMusic.snapshot?.track.trackID : undefined;
-      const captureStart = captureTrackID
-        && youtubeMusic.snapshot
-        && youtubeMusic.musicMapStatus !== "analyzing"
-        && youtubeMusic.musicMapStatus !== "ready"
-        // tabCapture must begin from the same direct user gesture as fullscreen.
-        ? startYouTubeMusicAudioAnalysis(captureTrackID, youtubeMusic.snapshot.playback.durationMs)
-        : undefined;
       // Must stay in the user-gesture stack: reveal host then requestFullscreen.
       void loadStageCanvasModule();
       host.hidden = false;
@@ -1241,13 +1235,6 @@ export default function App({ embedded = embeddedStageFromLocation, onEmbeddedRe
         }
         setPresentation("fullscreen");
       } catch {
-        if (captureTrackID) {
-          // The start response may not have returned its captureID yet. This
-          // direct fullscreen failure owns the just-issued same-tab request,
-          // so cancel by gesture-time track identity immediately.
-          void stopYouTubeMusicAudioAnalysis(captureTrackID);
-          void captureStart?.catch(() => undefined);
-        }
         host.hidden = true;
         host.setAttribute("aria-hidden", "true");
         setPresentation("column");
@@ -1336,7 +1323,9 @@ export default function App({ embedded = embeddedStageFromLocation, onEmbeddedRe
             directorStatusReason={directorStatusDetail(directorLookupState)}
             automaticStatus={automaticLyrics.status}
             message={message}
+            interactionNotice={interaction.notice}
             candidates={automaticLyrics.candidates}
+            selectedCandidateKey={automaticLyrics.selectedCandidateKey}
             hasMatchingLyrics={hasMatchingLyrics}
             lyrics={lyrics}
             timeMs={columnTimeMs}
@@ -1344,11 +1333,14 @@ export default function App({ embedded = embeddedStageFromLocation, onEmbeddedRe
             playbackState={youtubeMusic.snapshot?.playback.state}
             canEnterFullscreen={canEnterEmbeddedFullscreen(hasMatchingLyrics)}
             lightweight={lightweight}
-            vocalTimingMap={youtubeMusic.vocalTimingMap}
             lyricsOffsetMs={effectiveLyricsOffsetMs}
             onSetLyricsOffset={setCurrentLyricsOffset}
             onAlignCurrentLine={alignCurrentLyricsLine}
             onSeekLine={(timeMs) => { void seekStage(timeMs); }}
+            onReconnect={() => {
+              interaction.show(youtubeMusic.retryConnection() ? "正在重新连接 YouTube Music…" : "连接已在恢复中。" );
+            }}
+            onReloadSource={() => window.location.reload()}
             onEnterFullscreen={() => void enterFullscreen()}
             onChooseCandidate={chooseLyricsCandidate}
             onShowVersions={() => setShowVersionPicker((value) => !value)}
@@ -1365,9 +1357,9 @@ export default function App({ embedded = embeddedStageFromLocation, onEmbeddedRe
           hidden={presentation !== "fullscreen"}
           aria-hidden={presentation !== "fullscreen"}
         >
-          {presentation === "fullscreen" ? (
+          {fullscreenSurface === "transition" ? (
             <FullscreenTrackTransition
-              active={fullscreenSurface === "transition"}
+              active
               artworkURL={stageArtworkURL}
               title={columnTitle}
               artist={columnArtist}
@@ -1393,6 +1385,7 @@ export default function App({ embedded = embeddedStageFromLocation, onEmbeddedRe
                   displayTimeMs={displayTimeMs}
                   lyricsOffsetMs={effectiveLyricsOffsetMs}
                   reduceMotion={reduceMotion || lightweight}
+                  lightweight={lightweight}
                   vjMode={vjMode}
                   showGuides={false}
                   onMetrics={handleMetrics}
@@ -1404,6 +1397,7 @@ export default function App({ embedded = embeddedStageFromLocation, onEmbeddedRe
                   controls={stageControls}
                   onSeek={seekStage}
                   onTransport={controlStageTransport}
+                  onExit={() => void exitEmbeddedFullscreen()}
                 />
               </Suspense>
             </div>
@@ -1411,6 +1405,9 @@ export default function App({ embedded = embeddedStageFromLocation, onEmbeddedRe
           <p className="sr-only" aria-live="polite">
             {fullscreenSurface === "stage" ? activeLineText : ""}
           </p>
+          {interaction.notice ? (
+            <p className="fullscreen-interaction-notice" role="status">{interaction.notice}</p>
+          ) : null}
         </section>
       </div>
     );
@@ -1594,6 +1591,7 @@ export default function App({ embedded = embeddedStageFromLocation, onEmbeddedRe
               displayTimeMs={stageDisplayTimeMs}
               lyricsOffsetMs={effectiveLyricsOffsetMs}
               reduceMotion={reduceMotion}
+              lightweight={lightweight}
               vjMode={vjMode}
               showGuides={showGuides}
               onMetrics={handleMetrics}

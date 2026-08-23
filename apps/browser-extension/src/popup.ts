@@ -52,9 +52,13 @@ const showNotice = (message: string, tone: "info" | "error" = "info", durationMs
   window.clearTimeout(noticeTimer);
   notice.textContent = message;
   notice.dataset.tone = tone;
+  notice.setAttribute("role", tone === "error" ? "alert" : "status");
+  notice.setAttribute("aria-live", tone === "error" ? "assertive" : "polite");
   noticeTimer = window.setTimeout(() => {
     notice.textContent = "";
     delete notice.dataset.tone;
+    notice.setAttribute("role", "status");
+    notice.setAttribute("aria-live", "polite");
   }, durationMs);
 };
 
@@ -154,20 +158,6 @@ const updatePreferences = (patch: Partial<ExtensionPreferencesV0>) => {
 lightweightToggle?.addEventListener("change", () => updatePreferences({ lightweight: lightweightToggle.checked }));
 vjToggle?.addEventListener("change", () => updatePreferences({ vjMode: vjToggle.checked }));
 
-const resumePendingAudioAnalysis = () => {
-  void chromeAPI.runtime.sendMessage({ type: "youtube-music-resume-pending-audio-analysis" })
-    .then((value) => {
-      const result = value as { ok?: boolean; pending?: boolean; reason?: string } | undefined;
-      if (!result?.pending) return;
-      refreshGeneration += 1;
-      activationMessageUntil = Date.now() + 3500;
-      showNotice(result.ok
-        ? "可关闭此窗口，歌词会按本地人声节奏修正"
-        : result.reason || "请回到 YouTube Music 后重试", result.ok ? "info" : "error");
-    })
-    .catch(() => undefined);
-};
-
 const refreshConfigurationSummaries = () => {
   void loadLyricsConfiguration().then((config) => {
     if (lyricsSummary) lyricsSummary.textContent = summarizeLyricsConfig(config);
@@ -182,6 +172,5 @@ const refreshConfigurationSummaries = () => {
 };
 
 void refresh();
-resumePendingAudioAnalysis();
 refreshConfigurationSummaries();
 setInterval(() => void refresh(), 1000);

@@ -846,6 +846,34 @@ describe("Director BYOK provider adapters", () => {
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
+  it("cancels an external request without spending retries", async () => {
+    const controller = new AbortController();
+    const fetchMock = vi.fn((_input: string | URL | Request, init?: RequestInit) => new Promise<Response>((_resolve, reject) => {
+      init?.signal?.addEventListener("abort", () => reject(new DOMException("Aborted", "AbortError")), { once: true });
+    }));
+    const request = executeDirectorBYOKProfileV1(
+      configuration("openai-responses", "https://primary.test/v1"),
+      requestFixture(),
+      legacyDirectorRequestProfileV1,
+      fetchMock as typeof fetch,
+      45_000,
+      3,
+      controller.signal,
+    );
+    await Promise.resolve();
+    controller.abort();
+    let failure: unknown;
+    try {
+      await request;
+    } catch (error) {
+      failure = error;
+    }
+    expect(failure).toBeInstanceOf(Error);
+    expect((failure as Error).message).toContain("已取消");
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(directorBYOKDiagnosticsFromErrorV1(failure)?.attempts).toHaveLength(1);
+  });
+
   it("expands sparse AI directives locally before applying the strict V4 contract", async () => {
     const sparse = aiFixture();
     sparse.directives = sparse.directives.slice(0, 1);

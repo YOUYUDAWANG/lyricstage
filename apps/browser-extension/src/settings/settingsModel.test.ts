@@ -10,6 +10,7 @@ import {
   displayLyricsEndpoint,
   draftFromPublicProvider,
   directorTimingCopy,
+  directorDraftValidationMessage,
   emptyProviderDraft,
   endpointForChangedProtocol,
   settingsSectionFromHash,
@@ -63,6 +64,8 @@ describe("extension settings model", () => {
     expect(model).not.toContain("directorReviewModel");
     expect(client).not.toContain("directorReviewModel");
     expect(client).not.toContain("directorReviewClient");
+    const app = readFileSync(new URL("./SettingsApp.tsx", import.meta.url), "utf8");
+    expect(app).toContain('window.addEventListener("pagehide", release)');
   });
 
   it("keeps packaged director defaults aligned with the runtime contract", () => {
@@ -155,12 +158,31 @@ describe("extension settings model", () => {
     });
   });
 
+  it("rejects unsafe provider endpoints before requesting host permission", () => {
+    expect(buildDirectorDiscoveryPayload({
+      protocol: "openai-compatible",
+      endpoint: "http://public-host.example/v1",
+      model: "",
+      apiKey: "key",
+    })).toEqual({ error: "API 地址不安全；远程服务必须使用 HTTPS，HTTP 仅限本机或私有网络" });
+    expect(buildDirectorSavePayload({
+      primary: {
+        ...emptyProviderDraft(),
+        endpoint: "https://user:pass@provider.example/v1?debug=1",
+        model: "gpt-5",
+        apiKey: "key",
+      },
+      fallbackEnabled: false,
+      fallback: emptyProviderDraft(true),
+    })).toEqual({ error: "API 地址不安全；远程服务必须使用 HTTPS，HTTP 仅限本机或私有网络" });
+  });
+
   it("requires a complete fallback provider and deduplicates origins", () => {
     expect(buildDirectorSavePayload({
       primary: { ...emptyProviderDraft(), endpoint: "https://api.openai.com/v1", model: "gpt-5" },
       fallbackEnabled: true,
       fallback: emptyProviderDraft(true),
-    })).toEqual({ error: "请完整填写备用供应商" });
+    })).toEqual({ error: "备用提供商已开启，请连接并选择备用模型" });
 
     const payload = buildDirectorSavePayload({
       primary: { ...emptyProviderDraft(), endpoint: "https://api.openai.com/v1/", model: "gpt-5" },
@@ -173,6 +195,24 @@ describe("extension settings model", () => {
       },
     });
     expect("origins" in payload && payload.origins).toEqual(["https://api.openai.com/*"]);
+  });
+
+  it("explains incomplete primary and fallback model selection before save", () => {
+    expect(directorDraftValidationMessage({
+      primary: emptyProviderDraft(),
+      fallbackEnabled: false,
+      fallback: emptyProviderDraft(true),
+    })).toBe("请先连接主要提供商并选择模型");
+    expect(directorDraftValidationMessage({
+      primary: { ...emptyProviderDraft(), model: "gpt-5" },
+      fallbackEnabled: true,
+      fallback: emptyProviderDraft(true),
+    })).toBe("备用提供商已开启，请连接并选择备用模型");
+    expect(directorDraftValidationMessage({
+      primary: { ...emptyProviderDraft(), model: "gpt-5" },
+      fallbackEnabled: true,
+      fallback: { ...emptyProviderDraft(true), model: "local-model" },
+    })).toBeUndefined();
   });
 
   it("summarizes public configuration without exposing secrets", () => {
