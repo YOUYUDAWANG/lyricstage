@@ -44,6 +44,7 @@ import {
 } from "./playback/youtubeMusicBridge";
 import {
   readExtensionPreferences,
+  rollingDirectorRouteV1,
   readLyricsOffset,
   saveLyricsOffset,
   subscribeExtensionPreferences,
@@ -67,8 +68,24 @@ import {
   directorStatusDetail,
   directorStatusLabel,
   requestAutomaticDirectorPlan,
+  requestDirectorBibleV1,
+  requestDirectorCoverageV1,
   type DirectorLookupState,
 } from "./playback/performanceDirector";
+import {
+  applyMusicMapToRollingDirectorPlanV1,
+  createRollingDirectorRuntimeStateV1,
+  detectRollingSeekTargetV1,
+  handleRollingSeekV1,
+  reduceRollingCoverageResultV1,
+  rollingCoverageAtV1,
+  rollingHasRemainingDirectionV1,
+  rollingRefillTargetV1,
+  rollingRequestStateV1,
+  selectRollingRequestedWindowV1,
+  shouldRefillRollingCoverageV1,
+  type RollingDirectorRuntimeStateV1,
+} from "./playback/rollingPerformanceDirector";
 import {
   lyricsTrackIdentity,
   lyricsTrackFromSnapshot,
@@ -110,6 +127,14 @@ const embeddedStageFromLocation =
   new URLSearchParams(globalThis.location?.search ?? "").get("embedded") === "1";
 const benchmarkStage = import.meta.env.DEV
   && new URLSearchParams(globalThis.location?.search ?? "").get("benchmark") === "1";
+const rollingDirectorDevOverride = import.meta.env.DEV
+  ? (() => {
+      const value = new URLSearchParams(globalThis.location?.search ?? "").get("rollingDirector");
+      if (value === "1" || value === "on") return "on" as const;
+      if (value === "shadow" || value === "off") return value;
+      return undefined;
+    })()
+  : undefined;
 
 interface AppProps {
   embedded?: boolean;
@@ -169,6 +194,9 @@ export default function App({ embedded = embeddedStageFromLocation, onEmbeddedRe
   const [manualSearchPending, setManualSearchPending] = useState(false);
   const [lightweight, setLightweight] = useState(false);
   const [vjMode, setVJMode] = useState(false);
+  const [rollingDirectorPreference, setRollingDirectorPreference] = useState<"off" | "shadow" | "on">("off");
+  const rollingDirectorMode = rollingDirectorDevOverride ?? rollingDirectorPreference;
+  const rollingDirectorRoute = rollingDirectorRouteV1(rollingDirectorMode);
   const [vocalTimingLocalError, setVocalTimingLocalError] = useState<string | undefined>();
   const [lyricsOffsetMs, setLyricsOffsetMs] = useState(0);
   const [installedYouTubeLyricsIdentity, setInstalledYouTubeLyricsIdentity] = useState<string | null>(null);
@@ -336,21 +364,47 @@ export default function App({ embedded = embeddedStageFromLocation, onEmbeddedRe
         : base.effects,
     };
   }, [lyrics]);
+  const [rollingDirectorState, setRollingDirectorState] = useState<RollingDirectorRuntimeStateV1>(() =>
+    createRollingDirectorRuntimeStateV1(localDirectorPlan, 0)
+  );
+  const rollingDirectorStateRef = useRef(rollingDirectorState);
+  const rollingSeekTargetRef = useRef<number | undefined>(undefined);
+  const rollingClockObservationRef = useRef<{
+    lyricTimeMs: number;
+    observedAtMs: number;
+    playing: boolean;
+  } | undefined>(undefined);
+  const [rollingForceLocal, setRollingForceLocal] = useState(false);
+  rollingDirectorStateRef.current = rollingDirectorState;
   const displayedRemoteDirectorPlan = useMemo(
-    () => remoteDirectorPlan
-      ? applyMusicMapToDirectorPlanV1(remoteDirectorPlan, youtubeMusic.musicMap)
-      : undefined,
-    [remoteDirectorPlan, youtubeMusic.musicMap],
+    () => {
+      const selected = rollingDirectorRoute.renderRolling
+        ? !rollingForceLocal && rollingHasRemainingDirectionV1(rollingDirectorState.cards, stageLyricTimeMs)
+          ? rollingDirectorState.compiledPlan
+          : undefined
+        : remoteDirectorPlan;
+      return selected
+        ? rollingDirectorRoute.renderRolling
+          ? applyMusicMapToRollingDirectorPlanV1(selected, youtubeMusic.musicMap, rollingDirectorState.cards)
+          : applyMusicMapToDirectorPlanV1(selected, youtubeMusic.musicMap)
+        : undefined;
+    },
+    [remoteDirectorPlan, rollingDirectorRoute.renderRolling, rollingDirectorState, rollingForceLocal, stageLyricTimeMs, youtubeMusic.musicMap],
   );
   const timeline = useMemo(() => prepareTimeline(plan), [plan]);
 
   useEffect(() => {
     setRemoteDirectorPlan(undefined);
     setDirectorLookupState({ status: "idle" });
-    directorLookupGenerationRef.current += 1;
+    const generation = ++directorLookupGenerationRef.current;
+    rollingSeekTargetRef.current = undefined;
+    rollingClockObservationRef.current = undefined;
+    setRollingForceLocal(false);
+    setRollingDirectorState(createRollingDirectorRuntimeStateV1(localDirectorPlan, generation));
   }, [localDirectorPlan.planIdentity]);
 
   useEffect(() => {
+    if (!rollingDirectorRoute.generateLegacy) return undefined;
     if (source !== "youtubeMusic" || !youtubeMusic.snapshot || !hasMatchingLyrics) return undefined;
     const track = lyricsTrackFromSnapshot(youtubeMusic.snapshot);
     if (!track) return undefined;
@@ -385,9 +439,127 @@ export default function App({ embedded = embeddedStageFromLocation, onEmbeddedRe
   }, [
     hasMatchingLyrics,
     localDirectorPlan.lyricsIdentity,
+    rollingDirectorMode,
     source,
     youtubeMusic.snapshot?.track.trackID,
   ]);
+
+  useEffect(() => {
+    if (!rollingDirectorRoute.generateRolling || source !== "youtubeMusic" || !youtubeMusic.snapshot || !hasMatchingLyrics) return undefined;
+    const track = lyricsTrackFromSnapshot(youtubeMusic.snapshot);
+    if (!track) return undefined;
+    const generation = directorLookupGenerationRef.current;
+    let cancelled = false;
+    const requesting = {
+      ...createRollingDirectorRuntimeStateV1(localDirectorPlan, generation),
+      status: "bible-requesting" as const,
+    };
+    rollingDirectorStateRef.current = requesting;
+    setRollingDirectorState(requesting);
+    setDirectorLookupState({ status: "requesting", reason: "rolling-bible" });
+    void requestDirectorBibleV1(track, lyrics, musicMapAtRenderRef.current).then((response) => {
+      if (cancelled || generation !== directorLookupGenerationRef.current) return;
+      if (response.status !== "ready" || !response.bible) {
+        const degraded = { ...requesting, status: "degraded" as const, consecutiveFailures: 1 };
+        rollingDirectorStateRef.current = degraded;
+        setRollingDirectorState(degraded);
+        setDirectorLookupState(response.status === "error" || response.status === "unavailable"
+          ? { type: "director-resolution-v1", status: response.status, source: "local", reason: response.reason }
+          : { status: "idle", reason: response.reason });
+        return;
+      }
+      const ready = {
+        ...requesting,
+        status: "ready" as const,
+        bible: response.bible,
+        bibleSource: response.source,
+      };
+      rollingDirectorStateRef.current = ready;
+      setRollingDirectorState(ready);
+      setDirectorLookupState({ status: "idle", reason: "rolling-bible-ready" });
+    }).catch(() => {
+      if (cancelled || generation !== directorLookupGenerationRef.current) return;
+      const degraded = { ...requesting, status: "degraded" as const, consecutiveFailures: 1 };
+      rollingDirectorStateRef.current = degraded;
+      setRollingDirectorState(degraded);
+      setDirectorLookupState({ status: "idle", reason: "rolling-bible-request-failed" });
+    });
+    return () => { cancelled = true; };
+  }, [hasMatchingLyrics, localDirectorPlan.planIdentity, rollingDirectorMode, source, youtubeMusic.snapshot?.track.trackID]);
+
+  useEffect(() => {
+    if (!rollingDirectorRoute.generateRolling || source !== "youtubeMusic" || !youtubeMusic.snapshot || !hasMatchingLyrics) return undefined;
+    const track = lyricsTrackFromSnapshot(youtubeMusic.snapshot);
+    if (!track) return undefined;
+    let disposed = false;
+    const tick = () => {
+      let current = rollingDirectorStateRef.current;
+      const sample = youtubeMusic.clock.sample();
+      const playbackMs = sample.state === "unavailable" ? displayTimeRef.current : sample.timeMs;
+      const lyricMs = lyricsTimeForPlaybackMs(playbackMs, effectiveLyricsOffsetMs, durationMs);
+      const paused = sample.state !== "playing" && sample.state !== "buffering";
+      const observation = { lyricTimeMs: lyricMs, observedAtMs: performance.now(), playing: !paused };
+      const detectedSeek = detectRollingSeekTargetV1(rollingClockObservationRef.current, observation);
+      rollingClockObservationRef.current = observation;
+      if (detectedSeek !== undefined) {
+        rollingSeekTargetRef.current = detectedSeek;
+        const seek = handleRollingSeekV1(current, localDirectorPlan, detectedSeek);
+        current = seek.state;
+        rollingDirectorStateRef.current = current;
+        setRollingDirectorState(current);
+        setRollingForceLocal(seek.useLocalImmediately);
+      }
+      let seekTargetMs = rollingSeekTargetRef.current;
+      if (seekTargetMs !== undefined && rollingCoverageAtV1(current.cards, seekTargetMs).aheadMs > 0) {
+        rollingSeekTargetRef.current = undefined;
+        seekTargetMs = undefined;
+        setRollingForceLocal(false);
+      }
+      if (seekTargetMs !== undefined && current.consecutiveFailures >= 3) {
+        rollingSeekTargetRef.current = undefined;
+        return;
+      }
+      if (!shouldRefillRollingCoverageV1(current, lyricMs, durationMs, paused, seekTargetMs)) return;
+      const targetMs = rollingRefillTargetV1(current, lyricMs, durationMs, seekTargetMs);
+      const window = selectRollingRequestedWindowV1(lyrics, targetMs);
+      if (!window || current.pendingWindow?.identity === window.identity || !current.bible) return;
+      const requesting = { ...current, status: "coverage-requesting" as const, pendingWindow: window };
+      rollingDirectorStateRef.current = requesting;
+      setRollingDirectorState(requesting);
+      setDirectorLookupState({ status: "requesting", reason: "rolling-coverage" });
+      const requestState = rollingRequestStateV1(lyrics, current.bible, current.cards, window.fromLineIndex);
+      void requestDirectorCoverageV1(track, lyrics, current.bible, targetMs, 60_000, {
+        musicMap: musicMapAtRenderRef.current,
+        paused,
+        ...(seekTargetMs !== undefined ? { seekTargetMs } : {}),
+        state: requestState,
+      }).then((response) => {
+        if (disposed || current.generation !== directorLookupGenerationRef.current) return;
+        const next = reduceRollingCoverageResultV1(lyrics, requesting, response, targetMs, current.generation);
+        if (seekTargetMs !== undefined && rollingSeekTargetRef.current === seekTargetMs) {
+          rollingSeekTargetRef.current = undefined;
+          setRollingForceLocal(rollingCoverageAtV1(next.cards, seekTargetMs).aheadMs <= 0);
+        }
+        rollingDirectorStateRef.current = next;
+        setRollingDirectorState(next);
+        setDirectorLookupState(response.status === "error" || response.status === "unavailable"
+          ? { type: "director-resolution-v1", status: response.status, source: "local", reason: response.reason }
+          : { status: "idle", reason: response.reason });
+      }).catch(() => {
+        if (disposed || current.generation !== directorLookupGenerationRef.current) return;
+        const next = { ...requesting, status: "degraded" as const, pendingWindow: undefined, consecutiveFailures: current.consecutiveFailures + 1 };
+        if (rollingSeekTargetRef.current === seekTargetMs) rollingSeekTargetRef.current = undefined;
+        rollingDirectorStateRef.current = next;
+        setRollingDirectorState(next);
+        setDirectorLookupState({
+          type: "director-resolution-v1", status: "error", source: "local", reason: "rolling-coverage-request-failed",
+        });
+      });
+    };
+    tick();
+    const timer = globalThis.setInterval(tick, 1_000);
+    return () => { disposed = true; globalThis.clearInterval(timer); };
+  }, [durationMs, effectiveLyricsOffsetMs, hasMatchingLyrics, lyrics, localDirectorPlan, rollingDirectorMode, source, youtubeMusic.clock, youtubeMusic.snapshot?.track.trackID]);
   const activeLineText = useMemo(() => {
     const active = sampleTimeline(timeline, stageLyricTimeMs);
     return active.map((index) => lyrics.lines[index]?.text).filter(Boolean).join(" / ") || "器乐段 / 等待下一句";
@@ -484,12 +656,12 @@ export default function App({ embedded = embeddedStageFromLocation, onEmbeddedRe
   }, [embeddedStage, onEmbeddedReady]);
 
   useEffect(() => {
-    if (!embeddedStage) return undefined;
     let cancelled = false;
-    const applyPreferences = (preferences: { lightweight: boolean; vjMode: boolean }) => {
+    const applyPreferences = (preferences: { lightweight: boolean; vjMode: boolean; rollingDirectorV1: "off" | "shadow" | "on" }) => {
       if (cancelled) return;
       setLightweight(preferences.lightweight);
       setVJMode(preferences.vjMode);
+      setRollingDirectorPreference(preferences.rollingDirectorV1);
     };
     void readExtensionPreferences().then(applyPreferences).catch(() => undefined);
     const unsubscribe = subscribeExtensionPreferences(applyPreferences);
@@ -497,7 +669,7 @@ export default function App({ embedded = embeddedStageFromLocation, onEmbeddedRe
       cancelled = true;
       unsubscribe();
     };
-  }, [embeddedStage]);
+  }, []);
 
   useEffect(() => {
     const recordingIdentity = source === "youtubeMusic" ? youtubeLyricsIdentity : null;
@@ -927,11 +1099,31 @@ export default function App({ embedded = embeddedStageFromLocation, onEmbeddedRe
 
   const seekStage = async (nextMs: number) => {
     if (source === "youtubeMusic") {
+      const priorRollingState = rollingDirectorStateRef.current;
+      const priorForceLocal = rollingForceLocal;
+      let appliedSeekState: RollingDirectorRuntimeStateV1 | undefined;
+      if (rollingDirectorRoute.generateRolling) {
+        const lyricTargetMs = lyricsTimeForPlaybackMs(nextMs, effectiveLyricsOffsetMs, durationMs);
+        rollingSeekTargetRef.current = lyricTargetMs;
+        const seek = handleRollingSeekV1(rollingDirectorStateRef.current, localDirectorPlan, lyricTargetMs);
+        appliedSeekState = seek.state;
+        rollingDirectorStateRef.current = seek.state;
+        setRollingDirectorState(seek.state);
+        setRollingForceLocal(seek.useLocalImmediately);
+      }
       const expectedTrackID = youtubeMusic.snapshot?.track.trackID;
       const ok = expectedTrackID
         ? await seekYouTubeMusic(nextMs, expectedTrackID)
         : false;
-      if (!ok) setMessage("跳转失败：YouTube Music 播放页暂时不可用。");
+      if (!ok) {
+        rollingSeekTargetRef.current = undefined;
+        if (appliedSeekState && rollingDirectorStateRef.current === appliedSeekState) {
+          rollingDirectorStateRef.current = priorRollingState;
+          setRollingDirectorState(priorRollingState);
+          setRollingForceLocal(priorForceLocal);
+        }
+        setMessage("跳转失败：YouTube Music 播放页暂时不可用。");
+      }
       return;
     }
     seek(nextMs);
@@ -1140,6 +1332,14 @@ export default function App({ embedded = embeddedStageFromLocation, onEmbeddedRe
     : youtubeMusic.snapshot?.playback.currentTimeMs ?? displayTimeMs;
   const columnTitle = youtubeMusic.snapshot?.track.title || lastTrackRef.current.title || "LyricStage";
   const columnArtist = youtubeMusic.snapshot?.track.artist || lastTrackRef.current.artist || "YouTube Music";
+  const columnDirectorSource = displayedRemoteDirectorPlan?.source === "cache"
+    ? "cache" as const
+    : displayedRemoteDirectorPlan?.source === "ai"
+      ? "ai" as const
+      : "local" as const;
+  const columnHasQueuedDirectorPlan = !rollingDirectorRoute.renderRolling
+    && Boolean(remoteDirectorPlan)
+    && !displayedRemoteDirectorPlan;
   const fullscreenSurface = embeddedFullscreenSurface(presentation, hasMatchingLyrics);
   const fullscreenTransitionStatus = automaticLyrics.status === "candidates"
     ? "等待选择歌词版本"
@@ -1160,7 +1360,7 @@ export default function App({ embedded = embeddedStageFromLocation, onEmbeddedRe
             disconnected={disconnected}
             title={columnTitle}
             artist={columnArtist}
-            directorStatus={directorStatusLabel(directorLookupState)}
+            directorStatus={directorStatusLabel(directorLookupState, columnDirectorSource, columnHasQueuedDirectorPlan)}
             directorStatusReason={directorStatusDetail(directorLookupState)}
             automaticStatus={automaticLyrics.status}
             message={message}
@@ -1179,15 +1379,7 @@ export default function App({ embedded = embeddedStageFromLocation, onEmbeddedRe
             onToggleVocalTiming={() => void toggleVocalTiming()}
             onSetLyricsOffset={setCurrentLyricsOffset}
             onAlignCurrentLine={alignCurrentLyricsLine}
-            onSeekLine={(timeMs) => {
-              const expectedTrackID = youtubeMusic.snapshot?.track.trackID;
-              const operation = expectedTrackID
-                ? seekYouTubeMusic(timeMs, expectedTrackID)
-                : Promise.resolve(false);
-              void operation.then((ok) => {
-                if (!ok) setMessage("跳转失败：YouTube Music 播放页暂时不可用。");
-              });
-            }}
+            onSeekLine={(timeMs) => { void seekStage(timeMs); }}
             onEnterFullscreen={() => void enterFullscreen()}
             onChooseCandidate={chooseLyricsCandidate}
             onImportLyrics={(file) => void onLyricFile(file)}
@@ -1224,6 +1416,9 @@ export default function App({ embedded = embeddedStageFromLocation, onEmbeddedRe
                 localDirectorPlan={localDirectorPlan}
                 remoteDirectorPlan={displayedRemoteDirectorPlan}
                 directorLookupState={directorLookupState}
+                directorMode={rollingDirectorRoute.renderRolling ? "rolling" : "legacy"}
+                bibleSource={rollingDirectorState.bibleSource}
+                rollingCards={rollingDirectorRoute.renderRolling ? rollingDirectorState.cards : []}
                 clock={youtubeMusic.clock}
                 continuous={selectedPlaying || benchmarkStage}
                 displayTimeMs={displayTimeMs}
@@ -1420,6 +1615,9 @@ export default function App({ embedded = embeddedStageFromLocation, onEmbeddedRe
             localDirectorPlan={localDirectorPlan}
             remoteDirectorPlan={displayedRemoteDirectorPlan}
             directorLookupState={directorLookupState}
+            directorMode={rollingDirectorRoute.renderRolling ? "rolling" : "legacy"}
+            bibleSource={rollingDirectorState.bibleSource}
+            rollingCards={rollingDirectorRoute.renderRolling ? rollingDirectorState.cards : []}
             clock={selectedClock}
             continuous={selectedPlaying || benchmarkStage}
             displayTimeMs={stageDisplayTimeMs}

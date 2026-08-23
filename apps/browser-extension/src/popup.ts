@@ -43,7 +43,7 @@ const vjToggle = document.querySelector<HTMLInputElement>("[data-vj-toggle]");
 const notice = document.querySelector<HTMLElement>("[data-popup-notice]");
 let refreshGeneration = 0;
 let activationMessageUntil = 0;
-let preferences: ExtensionPreferencesV0 = { lightweight: false, vjMode: false };
+let preferences: ExtensionPreferencesV0 = { lightweight: false, vjMode: false, rollingDirectorV1: "off" };
 let noticeTimer: number | undefined;
 let preferenceSaveGeneration = 0;
 

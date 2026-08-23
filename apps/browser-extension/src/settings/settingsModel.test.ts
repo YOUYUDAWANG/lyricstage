@@ -1,4 +1,5 @@
 import { defaultDirectorProviderEndpointV1 } from "@lyricstage/performance";
+import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import {
   apiKeyPlaceholder,
@@ -16,12 +17,52 @@ import {
   summarizeLyricsConfig,
   uniqueOriginPatterns,
 } from "./settingsModel";
+import { directorReviewAggregateV1, directorReviewStateFromResponseV1 } from "./directorReviewModel";
 
 describe("extension settings model", () => {
   it("defaults hash-less settings navigation to lyrics", () => {
     expect(settingsSectionFromHash("")).toBe("lyrics");
     expect(settingsSectionFromHash("#director")).toBe("director");
     expect(settingsSectionFromHash("#unknown")).toBe("lyrics");
+  });
+
+  it("models Director review loading, empty, ready, and error states", () => {
+    expect(directorReviewAggregateV1({ status: "loading", summaries: [] })).toContain("正在读取");
+    expect(directorReviewStateFromResponseV1({ type: "director-cache-summaries-v1", summaries: [] })).toEqual({ status: "empty", summaries: [] });
+    expect(directorReviewStateFromResponseV1({ type: "wrong", summaries: [] })).toMatchObject({ status: "error" });
+    expect(directorReviewStateFromResponseV1({
+      type: "director-cache-summaries-v1", summaries: [{
+        version: "director-cache-summary-v1", trackTitle: "Song", trackArtist: "Artist", trackIDDisplay: "abcdef01",
+        durationMs: 180_000, lineCount: 30, cacheVersion: "rolling-v1", cacheEpoch: "rolling-director-generation-v1.1", source: "cache",
+        createdAtUnixMs: 1, expiresAtUnixMs: 2, bibleIdentityPrefix: "abcdef01", biblePresent: true,
+        sceneCardCount: 0, coveragePercent: 0, missingRanges: [{ fromMs: 0, toMs: 180_000 }],
+        baseLayout: "monument", layoutTransitionCount: 0, continuityJustificationAccepted: false,
+        motifFamily: "thread", actCount: 3, signatureMomentCount: 3,
+        gestureCounts: { glyph: 0, token: 0, phrase: 0, total: 0 }, effectCount: 0, effectPrimitiveCounts: {},
+        artDirections: [], world: { spatialMode: "anchored", artworkRole: "anchor", motionLaw: "drift" },
+        quietSharePercent: 0, localRepairFlags: [], reachedFinalWindow: false, warnings: [],
+      }],
+    })).toMatchObject({ status: "ready" });
+  });
+
+  it("keeps Director review rows static and provides no cache deletion control", () => {
+    const source = readFileSync(new URL("./SettingsApp.tsx", import.meta.url), "utf8");
+    const reviewStart = source.indexOf("Director 审片");
+    const review = source.slice(reviewStart, source.indexOf("section === \"performance\"", reviewStart));
+    expect(review).toContain("director-review-row");
+    expect(review).not.toMatch(/delete|删除|regenerate|重新生成/ui);
+    const css = readFileSync(new URL("./settings.css", import.meta.url), "utf8");
+    const reviewCSS = css.slice(css.indexOf("/* director-review-start */"), css.indexOf("/* director-review-end */"));
+    expect(reviewCSS).not.toMatch(/animation\s*:|transition\s*:/u);
+  });
+
+  it("keeps popup-facing settings modules free of the review runtime dependency", () => {
+    const model = readFileSync(new URL("./settingsModel.ts", import.meta.url), "utf8");
+    const client = readFileSync(new URL("./settingsClient.ts", import.meta.url), "utf8");
+    expect(model).not.toContain("sanitizeDirectorCacheSummaryV1");
+    expect(model).not.toContain("directorReviewModel");
+    expect(client).not.toContain("directorReviewModel");
+    expect(client).not.toContain("directorReviewClient");
   });
 
   it("keeps packaged director defaults aligned with the runtime contract", () => {

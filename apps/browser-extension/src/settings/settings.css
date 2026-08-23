@@ -191,3 +191,70 @@ button:disabled, input:disabled, select:disabled { opacity: 0.48; cursor: not-al
   *, *::before, *::after { scroll-behavior: auto !important; transition-duration: 0.01ms !important; }
   .settings-sidebar a:active, .connect-button:active, .settings-actions button:active { transform: none; }
 }
+/* director-review-start */
+.director-review-summary {
+  margin: 0 0 14px;
+  color: var(--muted, #756f67);
+  font-size: 13px;
+}
+
+.director-review-list {
+  display: grid;
+  gap: 1px;
+  overflow: hidden;
+  border: 1px solid rgba(56, 49, 42, 0.12);
+  border-radius: 12px;
+  background: rgba(56, 49, 42, 0.12);
+}
+
+.director-review-row {
+  margin: 0;
+  background: #fffdf8;
+}
+
+.director-review-row > summary {
+  display: grid;
+  grid-template-columns: minmax(180px, 1.5fr) auto auto minmax(120px, 1fr);
+  gap: 14px;
+  align-items: center;
+  padding: 13px 15px;
+  cursor: pointer;
+  list-style-position: inside;
+}
+
+.director-review-row > summary span:first-child {
+  display: grid;
+  min-width: 0;
+}
+
+.director-review-row > summary strong,
+.director-review-row > summary small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.review-metrics,
+.review-motif,
+.review-warnings {
+  color: #756f67;
+  font-size: 12px;
+}
+
+.director-review-row dl {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px 18px;
+  margin: 0;
+  padding: 0 15px 15px;
+}
+
+.director-review-row dl div { min-width: 0; }
+.director-review-row dt { color: #8a837a; font-size: 11px; }
+.director-review-row dd { margin: 3px 0 0; overflow-wrap: anywhere; font-size: 12px; }
+
+@media (max-width: 820px) {
+  .director-review-row > summary { grid-template-columns: 1fr; gap: 5px; }
+  .director-review-row dl { grid-template-columns: 1fr; }
+}
+/* director-review-end */

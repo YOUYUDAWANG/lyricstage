@@ -10,6 +10,7 @@ import {
   stagePresentationAtV1,
   type DirectorPlanHandoffV1,
   type DirectorPlanV1,
+  type SceneCardV1,
 } from "@lyricstage/performance";
 import {
   directedPaletteForIndexV1,
@@ -32,12 +33,19 @@ import {
 } from "./playback/performanceDirector";
 import { lyricsTimeForPlaybackMs } from "./playback/lyricsTimeOffset";
 import { canvasBackingStoreForV1 } from "./canvasBackingStore";
+import {
+  queueRollingDirectorPlanV1,
+  rollingPreparedRendererIdentityV1,
+} from "./playback/rollingPerformanceDirector";
 
 interface StageCanvasProps {
   lyrics: LyricDocumentV0;
   localDirectorPlan: DirectorPlanV1;
   remoteDirectorPlan?: DirectorPlanV1;
   directorLookupState: DirectorLookupState;
+  directorMode?: "legacy" | "rolling";
+  bibleSource?: "cache" | "network" | "local";
+  rollingCards?: readonly SceneCardV1[];
   clock: PlaybackClockV0;
   continuous: boolean;
   displayTimeMs: number;
@@ -118,6 +126,9 @@ export function StageCanvas({
   localDirectorPlan,
   remoteDirectorPlan,
   directorLookupState,
+  directorMode = "legacy",
+  bibleSource,
+  rollingCards = [],
   clock,
   continuous,
   displayTimeMs,
@@ -235,16 +246,24 @@ export function StageCanvas({
     setPresentation(nextPresentation);
   }, [localDirectorPlan.planIdentity]);
 
-  useEffect(() => {
-    if (!remoteDirectorPlan) return;
+  useLayoutEffect(() => {
+    if (!remoteDirectorPlan) {
+      if (directorMode === "rolling" && handoffRef.current.active.planIdentity !== localDirectorPlan.planIdentity) {
+        handoffRef.current = { active: localDirectorPlan };
+        setActiveDirectorPlan(localDirectorPlan);
+      }
+      return;
+    }
     const sample = clock.sample();
     const playbackTimeMs = sample.state === "unavailable" ? displayTimeRef.current : sample.timeMs;
     const timeMs = lyricsTimeForPlaybackMs(playbackTimeMs, lyricsOffsetMs, durationMs);
-    handoffRef.current = queueDirectorPlanV1(handoffRef.current, remoteDirectorPlan, timeMs);
-  }, [clock, durationMs, lyricsOffsetMs, remoteDirectorPlan?.planIdentity]);
+    handoffRef.current = directorMode === "rolling"
+      ? queueRollingDirectorPlanV1(lyrics, handoffRef.current, remoteDirectorPlan, timeMs)
+      : queueDirectorPlanV1(handoffRef.current, remoteDirectorPlan, timeMs);
+  }, [clock, directorMode, durationMs, lyrics, lyricsOffsetMs, remoteDirectorPlan?.planIdentity]);
 
   const rendererIdentity = useMemo(
-    () => `${lyrics.recordingID}:${activeDirectorPlan.planIdentity}`,
+    () => rollingPreparedRendererIdentityV1(lyrics.recordingID, activeDirectorPlan.planIdentity),
     [activeDirectorPlan.planIdentity, lyrics.recordingID],
   );
 
@@ -353,6 +372,11 @@ export function StageCanvas({
       const activeDirective = activeLine
         ? handoff.active.directives.find((directive) => directive.lineIndex === activeLine.lineIndex)
         : undefined;
+      const activeScene = rollingCards.find((card) => activeSection.id === `rolling:${card.sceneID}`
+        && timeMs >= card.fromMs && timeMs < card.toMs);
+      const sceneCoverage = activeScene
+        ? Math.max(0, activeScene.toMs - timeMs)
+        : 0;
       if (hostRef.current) {
         hostRef.current.dataset.directorSource = handoff.active.source;
         hostRef.current.dataset.directorLayout = activeSection.layout;
@@ -370,6 +394,12 @@ export function StageCanvas({
         }
         if (activeDirective) hostRef.current.dataset.directorBehavior = activeDirective.behavior;
         else delete hostRef.current.dataset.directorBehavior;
+        hostRef.current.dataset.directorMode = directorMode;
+        hostRef.current.dataset.bibleSource = bibleSource ?? "local";
+        hostRef.current.dataset.sceneCoverageMs = String(Math.round(sceneCoverage));
+        hostRef.current.dataset.sceneCount = String(rollingCards.length);
+        if (activeScene) hostRef.current.dataset.sceneId = activeScene.sceneID;
+        else delete hostRef.current.dataset.sceneId;
       }
       const nextPalette = paletteForTime(timeMs);
       if (paletteRef.current !== nextPalette) {
@@ -418,7 +448,7 @@ export function StageCanvas({
       if (renderFrameRef.current === render) renderFrameRef.current = null;
       document.removeEventListener("visibilitychange", visibilityChanged);
     };
-  }, [clock, continuous, durationMs, lyricsOffsetMs, onMetrics, paletteForTime, reduceMotion, remoteDirectorPlan?.planIdentity, showGuides]);
+  }, [bibleSource, clock, continuous, directorMode, durationMs, lyricsOffsetMs, onMetrics, paletteForTime, reduceMotion, remoteDirectorPlan?.planIdentity, rollingCards, showGuides]);
 
   useEffect(() => {
     if (!continuous) renderFrameRef.current?.();
@@ -453,12 +483,21 @@ export function StageCanvas({
   const hasTransport = Boolean(controls?.playPause || controls?.previous || controls?.next);
   const paletteTone = paletteToneForV1(palette);
   const artworkShape = artworkShapeForAspectV1(artworkAspect);
+  const directorStatusSource = directorMode === "rolling"
+    && (remoteDirectorPlan?.source === "ai" || remoteDirectorPlan?.source === "cache")
+    ? remoteDirectorPlan.source
+    : activeDirectorPlan.source;
   const directorStatus = directorStatusLabel(
     directorLookupState,
-    activeDirectorPlan.source,
-    Boolean(remoteDirectorPlan),
+    directorStatusSource,
+    directorMode === "legacy" && Boolean(remoteDirectorPlan),
   );
   const renderedPlaybackState = playbackState ?? (continuous ? "playing" : "paused");
+  const observedTimeMs = frameTimeRef.current;
+  const observedSection = directorSectionAtV1(activeDirectorPlan, observedTimeMs);
+  const observedScene = rollingCards.find((card) => observedSection.id === `rolling:${card.sceneID}`
+    && observedTimeMs >= card.fromMs && observedTimeMs < card.toMs);
+  const observedSceneCoverageMs = observedScene ? Math.max(0, observedScene.toMs - observedTimeMs) : 0;
 
   return (
     <div
@@ -491,10 +530,16 @@ export function StageCanvas({
         "--stage-world-glow-directed": `${90 + activeDirectorPlan.world.atmosphere * 120}px`,
       } as CSSProperties}
       data-director-source={activeDirectorPlan.source}
+      data-director-mode={directorMode}
+      data-bible-source={bibleSource ?? "local"}
+      data-scene-count={rollingCards.length}
+      data-scene-id={observedScene?.sceneID}
+      data-scene-coverage-ms={Math.round(observedSceneCoverageMs)}
       data-director-state={directorLookupState.status}
       data-director-version={activeDirectorPlan.directorVersion}
       data-layout-change-count={activeDirectorPlan.blocking.transitions.length}
       data-gesture-count={activeDirectorPlan.gestures.length}
+      data-effect-count={activeDirectorPlan.effects.length}
       data-dramatic-moment-count={activeDirectorPlan.dramaticScore.signatureMoments.length}
       data-dramatic-motif={activeDirectorPlan.dramaticScore.motifActor.family}
       data-playback-state={renderedPlaybackState}

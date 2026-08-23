@@ -1,0 +1,265 @@
+import { stableHash32, type LyricDocumentV0 } from "@lyricstage/contracts";
+import { sanitizeDirectorBibleV1, type DirectorBibleV1, type SceneCardV1 } from "./rollingDirector";
+
+export type DirectorDiversityWarningV1 =
+  | "minimum-budget"
+  | "single-scale"
+  | "static-without-evidence"
+  | "repeated-tuple"
+  | "coverage-gap"
+  | "local-repair-heavy";
+
+export type DirectorLocalRepairCategoryV1 = "bible" | "blocking" | "gestures" | "effects" | "dramatic-score";
+
+export interface DirectorCacheSummaryV1 {
+  version: "director-cache-summary-v1";
+  trackTitle: string;
+  trackArtist: string;
+  trackIDDisplay: string;
+  durationMs: number;
+  lineCount: number;
+  cacheVersion: "rolling-v1";
+  cacheEpoch: string;
+  source: "cache" | "network" | "local";
+  createdAtUnixMs: number;
+  expiresAtUnixMs: number;
+  bibleIdentityPrefix: string;
+  biblePresent: boolean;
+  sceneCardCount: number;
+  coveragePercent: number;
+  missingRanges: Array<{ fromMs: number; toMs: number }>;
+  baseLayout: string;
+  layoutTransitionCount: number;
+  continuityJustificationAccepted: boolean;
+  motifFamily: string;
+  actCount: number;
+  signatureMomentCount: number;
+  gestureCounts: { glyph: number; token: number; phrase: number; total: number };
+  effectCount: number;
+  effectPrimitiveCounts: Record<string, number>;
+  artDirections: string[];
+  world: { spatialMode: string; artworkRole: string; motionLaw: string };
+  quietSharePercent: number;
+  localRepairFlags: DirectorLocalRepairCategoryV1[];
+  reachedFinalWindow: boolean;
+  timing?: { cache: "hit" | "miss" | "disabled"; totalMs: number; providerMs: number; attempts: number; outcome?: string };
+  warnings: DirectorDiversityWarningV1[];
+}
+
+export interface DirectorCacheSummaryInputV1 {
+  lyrics: LyricDocumentV0;
+  track: { trackID: string; title: string; artist: string };
+  cacheEpoch: string;
+  source: "cache" | "network" | "local";
+  createdAtUnixMs: number;
+  expiresAtUnixMs: number;
+  bible: DirectorBibleV1;
+  cards: readonly SceneCardV1[];
+  localRepairFlags?: readonly DirectorLocalRepairCategoryV1[];
+  reachedFinalWindow?: boolean;
+  timing?: unknown;
+}
+
+const clean = (value: unknown, max: number): string => typeof value === "string" ? value.trim().slice(0, max) : "";
+const boundedNumber = (value: unknown, min: number, max: number): number | undefined =>
+  typeof value === "number" && Number.isFinite(value) ? Math.min(max, Math.max(min, value)) : undefined;
+const repairCategories = new Set<DirectorLocalRepairCategoryV1>(["bible", "blocking", "gestures", "effects", "dramatic-score"]);
+const summaryLayouts = new Set(["monument", "editorialSplit", "railLeading", "railTrailing", "duetDivide"]);
+const summaryMotifs = new Set(["thread", "window", "silhouette", "horizon", "fold", "firework", "fish", "petal", "snow"]);
+const summarySpatialModes = new Set(["anchored", "panoramic", "cinematic", "orbital", "splitStage", "chorusWall"]);
+const summaryArtworkRoles = new Set(["anchor", "portal", "memory", "counterpoint", "atmosphere"]);
+const summaryMotionLaws = new Set(["drift", "flow", "pulse", "fall", "orbit", "converge", "suspend", "fracture"]);
+const summaryArtDirections = new Set(["editorialKinetic", "neonRail", "paperCut", "liquidMemory", "monoImpact", "celestialGrid"]);
+const summaryEffectCategories = new Set(["field", "geometry", "memory", "density", "motif", "cover", "transition"]);
+const summaryOutcomes = new Set(["ready", "http-error", "parse-error", "contract-degraded", "timeout", "network-error"]);
+const warningOrder: readonly DirectorDiversityWarningV1[] = [
+  "minimum-budget", "single-scale", "static-without-evidence", "repeated-tuple", "coverage-gap", "local-repair-heavy",
+];
+
+const mergedCoverage = (durationMs: number, cards: readonly SceneCardV1[]) => {
+  const ranges = cards.map((card) => ({ fromMs: Math.max(0, card.fromMs), toMs: Math.min(durationMs, card.toMs) }))
+    .filter((range) => range.fromMs < range.toMs).sort((a, b) => a.fromMs - b.fromMs);
+  const merged: Array<{ fromMs: number; toMs: number }> = [];
+  for (const range of ranges) {
+    const last = merged.at(-1);
+    if (last && range.fromMs <= last.toMs) last.toMs = Math.max(last.toMs, range.toMs);
+    else merged.push({ ...range });
+  }
+  const missing: Array<{ fromMs: number; toMs: number }> = [];
+  let cursor = 0;
+  for (const range of merged) {
+    if (range.fromMs > cursor) missing.push({ fromMs: cursor, toMs: range.fromMs });
+    cursor = Math.max(cursor, range.toMs);
+  }
+  if (cursor < durationMs) missing.push({ fromMs: cursor, toMs: durationMs });
+  const coveredMs = merged.reduce((total, range) => total + range.toMs - range.fromMs, 0);
+  return { missing: missing.slice(0, 24), percent: durationMs > 0 ? Math.round(coveredMs / durationMs * 10_000) / 100 : 0 };
+};
+
+const timingSummary = (value: unknown): DirectorCacheSummaryV1["timing"] => {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
+  const timing = value as Record<string, unknown>;
+  if (!["hit", "miss", "disabled"].includes(String(timing.cache))) return undefined;
+  const attempts = Array.isArray(timing.attempts) ? timing.attempts : [];
+  const last = attempts.at(-1) as Record<string, unknown> | undefined;
+  return {
+    cache: timing.cache as "hit" | "miss" | "disabled",
+    totalMs: Math.round(boundedNumber(timing.totalMs, 0, 90_000) ?? 0),
+    providerMs: Math.round(boundedNumber(timing.providerMs, 0, 90_000) ?? 0),
+    attempts: Math.min(6, attempts.length),
+    ...(last && typeof last.outcome === "string" ? { outcome: clean(last.outcome, 40) } : {}),
+  };
+};
+
+const warningsFor = (summary: DirectorCacheSummaryV1): DirectorDiversityWarningV1[] => {
+  const normal = summary.durationMs >= 150_000 && summary.lineCount >= 24;
+  const scopes = [summary.gestureCounts.glyph, summary.gestureCounts.token, summary.gestureCounts.phrase].filter((count) => count > 0).length;
+  return warningOrder.filter((warning) => {
+    if (warning === "minimum-budget") return normal && (summary.signatureMomentCount <= 2 || summary.gestureCounts.total <= 1 || summary.effectCount <= 1);
+    if (warning === "single-scale") return summary.signatureMomentCount > 0 && scopes < 2;
+    if (warning === "static-without-evidence") return summary.layoutTransitionCount === 0 && !summary.continuityJustificationAccepted;
+    if (warning === "coverage-gap") return summary.reachedFinalWindow && summary.coveragePercent < 80;
+    if (warning === "local-repair-heavy") return summary.localRepairFlags.length >= 2;
+    return false;
+  });
+};
+
+export const summarizeDirectorCacheEntryV1 = (input: DirectorCacheSummaryInputV1): DirectorCacheSummaryV1 | null => {
+  const bible = sanitizeDirectorBibleV1(input.lyrics, input.bible);
+  if (!bible || !clean(input.track.trackID, 256) || !Number.isFinite(input.createdAtUnixMs)
+    || !Number.isFinite(input.expiresAtUnixMs) || input.expiresAtUnixMs <= input.createdAtUnixMs) return null;
+  const cards = input.cards.filter((card) => card.recordingID === input.lyrics.recordingID
+    && card.lyricsIdentity === bible.lyricsIdentity && card.bibleIdentity === bible.bibleIdentity);
+  if (cards.length !== input.cards.length) return null;
+  const coverage = mergedCoverage(input.lyrics.durationMs, cards);
+  const gestures = cards.flatMap((card) => card.gestures);
+  const effects = cards.flatMap((card) => card.effects);
+  const gestureCounts = {
+    glyph: gestures.filter((gesture) => gesture.scope === "glyph").length,
+    token: gestures.filter((gesture) => gesture.scope === "token").length,
+    phrase: gestures.filter((gesture) => gesture.scope === "phrase").length,
+    total: gestures.length,
+  };
+  const effectPrimitiveCounts: Record<string, number> = {};
+  effects.forEach((effect) => [effect.primary, ...effect.support].forEach((use) => {
+    const category = use.primitive.split(".")[0]!.slice(0, 32);
+    effectPrimitiveCounts[category] = (effectPrimitiveCounts[category] ?? 0) + 1;
+  }));
+  const lineByIndex = new Map(input.lyrics.lines.map((line) => [line.lineIndex, line]));
+  const quietMs = bible.quietWindows.reduce((total, quiet) => {
+    const first = lineByIndex.get(quiet.fromLineIndex);
+    const last = lineByIndex.get(quiet.toLineIndex);
+    return total + (first && last ? Math.max(0, last.toMs - first.fromMs) : 0);
+  }, 0);
+  const repairs = [...new Set((input.localRepairFlags ?? []).filter((flag) => repairCategories.has(flag)))].sort();
+  const summary: DirectorCacheSummaryV1 = {
+    version: "director-cache-summary-v1",
+    trackTitle: clean(input.track.title, 120) || "Untitled",
+    trackArtist: clean(input.track.artist, 160) || "Unknown artist",
+    trackIDDisplay: stableHash32(input.track.trackID).slice(0, 10),
+    durationMs: input.lyrics.durationMs,
+    lineCount: input.lyrics.lines.length,
+    cacheVersion: "rolling-v1",
+    cacheEpoch: clean(input.cacheEpoch, 80),
+    source: input.source,
+    createdAtUnixMs: Math.round(input.createdAtUnixMs),
+    expiresAtUnixMs: Math.round(input.expiresAtUnixMs),
+    bibleIdentityPrefix: bible.bibleIdentity.slice(0, 12),
+    biblePresent: true,
+    sceneCardCount: cards.length,
+    coveragePercent: coverage.percent,
+    missingRanges: coverage.missing,
+    baseLayout: bible.layoutBudget.baseLayout,
+    layoutTransitionCount: bible.layoutBudget.proposedTransitions.length,
+    continuityJustificationAccepted: Boolean(bible.layoutBudget.continuityJustification),
+    motifFamily: bible.motifActor.family,
+    actCount: bible.acts.length,
+    signatureMomentCount: cards.filter((card) => Boolean(card.signatureMoment)).length,
+    gestureCounts,
+    effectCount: effects.length,
+    effectPrimitiveCounts,
+    artDirections: [...new Set(cards.map((card) => card.artDirection))].slice(0, 8),
+    world: { spatialMode: bible.world.spatialMode, artworkRole: bible.world.artworkRole, motionLaw: bible.world.motionLaw },
+    quietSharePercent: input.lyrics.durationMs > 0 ? Math.round(quietMs / input.lyrics.durationMs * 10_000) / 100 : 0,
+    localRepairFlags: repairs,
+    reachedFinalWindow: input.reachedFinalWindow === true,
+    ...(timingSummary(input.timing) ? { timing: timingSummary(input.timing) } : {}),
+    warnings: [],
+  };
+  return { ...summary, warnings: warningsFor(summary) };
+};
+
+const tuple = (summary: DirectorCacheSummaryV1): string => [
+  summary.baseLayout, summary.world.spatialMode, summary.world.artworkRole, summary.world.motionLaw, summary.motifFamily,
+].join("|");
+
+export const analyzeDirectorCacheSummariesV1 = (values: readonly DirectorCacheSummaryV1[]): DirectorCacheSummaryV1[] => {
+  const summaries = values.map((summary) => ({ ...summary, warnings: warningsFor({ ...summary, warnings: [] }) }))
+    .sort((left, right) => right.createdAtUnixMs - left.createdAtUnixMs || left.trackIDDisplay.localeCompare(right.trackIDDisplay));
+  for (let index = 0; index + 2 < summaries.length; index += 1) {
+    const current = summaries[index]!;
+    const older = summaries[index + 1]!;
+    const oldest = summaries[index + 2]!;
+    if (current.biblePresent && older.biblePresent && oldest.biblePresent
+      && tuple(current) === tuple(older) && tuple(current) === tuple(oldest)) {
+      current.warnings = warningOrder.filter((warning) => warning === "repeated-tuple" || current.warnings.includes(warning));
+    }
+  }
+  return summaries;
+};
+
+export const sanitizeDirectorCacheSummaryV1 = (value: unknown): DirectorCacheSummaryV1 | null => {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  const item = value as Partial<DirectorCacheSummaryV1>;
+  const allowed = new Set([
+    "version", "trackTitle", "trackArtist", "trackIDDisplay", "durationMs", "lineCount", "cacheVersion", "cacheEpoch",
+    "source", "createdAtUnixMs", "expiresAtUnixMs", "bibleIdentityPrefix", "biblePresent", "sceneCardCount",
+    "coveragePercent", "missingRanges", "baseLayout", "layoutTransitionCount", "continuityJustificationAccepted",
+    "motifFamily", "actCount", "signatureMomentCount", "gestureCounts", "effectCount", "effectPrimitiveCounts",
+    "artDirections", "world", "quietSharePercent", "localRepairFlags", "reachedFinalWindow", "timing", "warnings",
+  ]);
+  if (Object.keys(item).some((key) => !allowed.has(key))) return null;
+  if (item.version !== "director-cache-summary-v1" || !clean(item.trackTitle, 120) || !clean(item.trackArtist, 160)
+    || !/^[a-f0-9]{8,12}$/u.test(item.trackIDDisplay ?? "") || item.cacheVersion !== "rolling-v1"
+    || item.cacheEpoch !== "rolling-director-generation-v1.1" || !/^[a-f0-9]{8,12}$/u.test(item.bibleIdentityPrefix ?? "")
+    || !Array.isArray(item.warnings) || item.warnings.some((warning) => !warningOrder.includes(warning))
+    || !item.gestureCounts || !item.world || !Array.isArray(item.missingRanges) || !Array.isArray(item.artDirections)
+    || !Array.isArray(item.localRepairFlags) || !item.effectPrimitiveCounts) return null;
+  const numbers = [item.durationMs, item.lineCount, item.createdAtUnixMs, item.expiresAtUnixMs, item.sceneCardCount,
+    item.coveragePercent, item.layoutTransitionCount, item.actCount, item.signatureMomentCount, item.effectCount, item.quietSharePercent,
+    item.gestureCounts.glyph, item.gestureCounts.token, item.gestureCounts.phrase, item.gestureCounts.total];
+  if (numbers.some((number) => typeof number !== "number" || !Number.isFinite(number) || number < 0)
+    || item.coveragePercent! > 100 || item.quietSharePercent! > 100 || item.layoutTransitionCount! > 2
+    || item.source !== "cache" && item.source !== "network" && item.source !== "local" || item.biblePresent !== true
+    || typeof item.continuityJustificationAccepted !== "boolean" || typeof item.reachedFinalWindow !== "boolean"
+    || item.localRepairFlags.some((flag) => !repairCategories.has(flag))
+    || !summaryLayouts.has(item.baseLayout ?? "") || !summaryMotifs.has(item.motifFamily ?? "")
+    || typeof item.world.spatialMode !== "string" || item.world.spatialMode.length > 32
+    || typeof item.world.artworkRole !== "string" || item.world.artworkRole.length > 32
+    || typeof item.world.motionLaw !== "string" || item.world.motionLaw.length > 32
+    || !summarySpatialModes.has(item.world.spatialMode) || !summaryArtworkRoles.has(item.world.artworkRole)
+    || !summaryMotionLaws.has(item.world.motionLaw) || item.artDirections.some((value) =>
+      typeof value !== "string" || value.length > 40 || !summaryArtDirections.has(value))
+    || item.missingRanges.length > 24 || item.missingRanges.some((range) => !range
+      || Object.keys(range).some((key) => key !== "fromMs" && key !== "toMs")
+      || !Number.isFinite(range.fromMs) || !Number.isFinite(range.toMs) || range.fromMs < 0
+      || range.toMs < range.fromMs || range.toMs > item.durationMs!)
+    || Object.keys(item.gestureCounts).some((key) => !["glyph", "token", "phrase", "total"].includes(key))
+    || Object.keys(item.world).some((key) => !["spatialMode", "artworkRole", "motionLaw"].includes(key))
+    || Object.entries(item.effectPrimitiveCounts).some(([key, count]) => key.length > 32 || !summaryEffectCategories.has(key)
+      || !Number.isInteger(count) || count < 0)) return null;
+  if (item.timing && (Object.keys(item.timing).some((key) => !["cache", "totalMs", "providerMs", "attempts", "outcome"].includes(key))
+    || !["hit", "miss", "disabled"].includes(item.timing.cache)
+    || !Number.isFinite(item.timing.totalMs) || !Number.isFinite(item.timing.providerMs)
+    || !Number.isInteger(item.timing.attempts) || item.timing.attempts < 0 || item.timing.attempts > 6
+    || item.timing.outcome !== undefined && (typeof item.timing.outcome !== "string"
+      || item.timing.outcome.length > 40 || !summaryOutcomes.has(item.timing.outcome)))) return null;
+  return {
+    ...(item as DirectorCacheSummaryV1),
+    trackTitle: clean(item.trackTitle, 120), trackArtist: clean(item.trackArtist, 160),
+    cacheEpoch: clean(item.cacheEpoch, 80), bibleIdentityPrefix: clean(item.bibleIdentityPrefix, 12),
+    baseLayout: clean(item.baseLayout, 32), motifFamily: clean(item.motifFamily, 32),
+    artDirections: item.artDirections.map((value) => clean(value, 40)).filter(Boolean).slice(0, 8),
+    warnings: warningOrder.filter((warning) => item.warnings!.includes(warning)),
+  };
+};

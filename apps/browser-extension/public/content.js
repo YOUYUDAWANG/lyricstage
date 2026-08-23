@@ -64,6 +64,10 @@
     try {
       const url = new URL(source);
       if (url.protocol !== "https:") return "";
+      // The current YTM player bar can keep an empty <img src> whose DOM `src`
+      // property resolves to the site root. Treat it as a placeholder so the
+      // matching video thumbnail fallback still gets a chance to run.
+      if (url.hostname === "music.youtube.com" && url.pathname === "/") return "";
       if (url.hostname === "yt3.googleusercontent.com") {
         url.pathname = url.pathname.replace(/=w\d+-h\d+(?=-|$)/u, "=w1200-h1200");
       } else if (url.hostname === "i.ytimg.com") {
@@ -75,7 +79,7 @@
       }
       return url.href;
     } catch {
-      return source;
+      return "";
     }
   };
 

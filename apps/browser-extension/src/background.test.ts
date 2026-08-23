@@ -1,4 +1,13 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { lyricFixtures } from "@lyricstage/contracts";
+import {
+  advanceRollingPerformanceStateV1,
+  checkpointRollingPerformanceStateV1,
+  compileLocalDirectorBibleV1,
+  compileLocalSceneCardsV1,
+  initialRollingPerformanceStateV1,
+  rollingPerformanceStateIdentityV1,
+} from "@lyricstage/performance";
 
 interface Deferred<T> {
   promise: Promise<T>;
@@ -65,6 +74,19 @@ const vocalMap = () => ({
   toMs: 1_000,
   featureRateHz: 20,
   samples: [{ atMs: 1_000, presence: 0.7, attack: 0.5, confidence: 0.8 }],
+});
+
+const rollingTrack = () => ({
+  provider: "youtubeMusic" as const,
+  trackID: "rolling-track",
+  title: "Rolling fixture",
+  artist: "Fixture artist",
+  durationMs: lyricFixtures.longSongStructure.durationMs,
+});
+
+const rollingLyrics = () => ({
+  ...lyricFixtures.longSongStructure,
+  recordingID: "youtubeMusic:rolling-track",
 });
 
 interface RuntimeSender {
@@ -183,6 +205,10 @@ describe("YouTube Music background routing", () => {
     return { response, keepAlive };
   };
 
+  const sendResolved = (message: unknown, from: RuntimeSender): Promise<any> => new Promise((resolve) => {
+    onRuntimeMessage?.(message, from, resolve);
+  });
+
   const makePort = (from?: RuntimeSender): FakePort => {
     let messageListener: ((message: unknown) => void) | undefined;
     let disconnectListener: (() => void) | undefined;
@@ -260,6 +286,418 @@ describe("YouTube Music background routing", () => {
     expect(storage.get("lyricstage-director-byok-v1")).toMatchObject({
       primary: { model: "gpt-5.1", apiKey: "sk-secret" },
     });
+  });
+
+  it("caches rolling Bible and two independent Scene Pack fills with zero-attempt hits", async () => {
+    await send({
+      type: "youtube-music-save-director-config",
+      configuration: {
+        version: "lyricstage-director-byok-v1",
+        primary: { protocol: "openai-responses", endpoint: "https://api.openai.com/v1", model: "fixture", apiKey: "rolling-secret" },
+      },
+    }, sender(10));
+    const track = rollingTrack();
+    const lyrics = rollingLyrics();
+    const bible = compileLocalDirectorBibleV1(lyrics);
+    const localCards = compileLocalSceneCardsV1(lyrics, bible);
+    const ordinary = localCards.filter((card) => !card.signatureMoment);
+    expect(ordinary.length).toBeGreaterThanOrEqual(2);
+    const sceneResponses = [ordinary[0]!, ordinary.find((card) => card.fromLineIndex >= 4)!];
+    const fetcher = vi.fn(async (_input: string | URL | Request, init?: RequestInit) => {
+      const payload = JSON.parse(String(init?.body)) as any;
+      const prompt = payload.input?.[0]?.content?.[0]?.text
+        ? JSON.parse(payload.input[0].content[0].text) as any
+        : undefined;
+      const output = payload.instructions?.includes("whole-song constitution")
+        ? bible
+        : {
+            version: "scene-pack-v1",
+            bibleIdentity: prompt?.bible?.bibleIdentity,
+            entryStateHash: prompt?.state?.stateHash,
+            scenes: localCards.filter((card) => prompt?.window
+              && card.fromLineIndex >= prompt.window.fromLineIndex!
+              && card.toLineIndex <= prompt.window.toLineIndex!),
+          };
+      return new Response(JSON.stringify({ output_text: JSON.stringify(output) }), { status: 200 });
+    });
+    vi.stubGlobal("fetch", fetcher);
+
+    const bibleMiss = await sendResolved({ type: "youtube-music-resolve-director-bible-v1", track, lyrics }, sender(10));
+    const bibleHit = await sendResolved({ type: "youtube-music-resolve-director-bible-v1", track, lyrics }, sender(10));
+    expect(bibleMiss).toMatchObject({ status: "ready", source: "network", bible: { bibleIdentity: bible.bibleIdentity } });
+    expect(bibleHit).toMatchObject({ status: "ready", source: "cache", timing: { attempts: 0 } });
+
+    const first = await sendResolved({
+      type: "youtube-music-resolve-director-coverage-v1", track, lyrics, bible,
+      playheadMs: sceneResponses[0]!.fromMs + 1, desiredHorizonMs: 60_000,
+    }, sender(10));
+    const firstHit = await sendResolved({
+      type: "youtube-music-resolve-director-coverage-v1", track, lyrics, bible,
+      playheadMs: sceneResponses[0]!.fromMs + 1, desiredHorizonMs: 60_000,
+    }, sender(10));
+    const stateAfterA = first.cards.reduce(
+      (state: any, card: any) => advanceRollingPerformanceStateV1(state, card),
+      initialRollingPerformanceStateV1(bible),
+    );
+    const second = await sendResolved({
+      type: "youtube-music-resolve-director-coverage-v1", track, lyrics, bible,
+      playheadMs: sceneResponses[1]!.fromMs + 1, desiredHorizonMs: 60_000, seekTargetMs: sceneResponses[1]!.fromMs + 1,
+      state: stateAfterA,
+    }, sender(10));
+    expect(first).toMatchObject({ status: "ready", source: "network", coverage: { activation: "next-boundary" } });
+    expect(firstHit).toMatchObject({ status: "ready", source: "cache", timing: { attempts: 0 } });
+    expect(second).toMatchObject({ status: "ready", source: "network" });
+    expect(fetcher).toHaveBeenCalledTimes(3);
+    expect(storage.has("lyricstage-director-bible-cache-v1")).toBe(true);
+    expect(storage.has("lyricstage-director-scene-cache-v1")).toBe(true);
+    const stored = JSON.stringify({
+      bible: storage.get("lyricstage-director-bible-cache-v1"),
+      scenes: storage.get("lyricstage-director-scene-cache-v1"),
+    });
+    expect(stored).not.toContain("rolling-secret");
+    expect(stored).not.toContain("api.openai.com");
+
+    const identities = second.cards.map((card: any) => card.sceneID);
+    const callsBeforeRestart = fetcher.mock.calls.length;
+    vi.resetModules();
+    await import("./background");
+    const afterRestart = await sendResolved({
+      type: "youtube-music-resolve-director-coverage-v1", track, lyrics, bible,
+      playheadMs: sceneResponses[1]!.fromMs + 1, desiredHorizonMs: 60_000, seekTargetMs: sceneResponses[1]!.fromMs + 1,
+      state: stateAfterA,
+    }, sender(10));
+    expect(afterRestart).toMatchObject({ status: "ready", source: "cache", timing: { attempts: 0 } });
+    expect(afterRestart.cards.map((card: any) => card.sceneID)).toEqual(identities);
+    expect(fetcher).toHaveBeenCalledTimes(callsBeforeRestart);
+
+    const review = await sendResolved({ type: "youtube-music-director-cache-summaries-v1" }, sender(10));
+    expect(review).toMatchObject({
+      type: "director-cache-summaries-v1",
+      summaries: [{ version: "director-cache-summary-v1", trackTitle: track.title, trackArtist: track.artist }],
+    });
+    expect(review.summaries).toHaveLength(1);
+    expect(JSON.stringify(review)).not.toMatch(/rolling-secret|api\.openai\.com|fixture line|rationale|prompt|response|cookie/ui);
+    expect(review.summaries[0]).not.toHaveProperty("bible");
+    expect(review.summaries[0]).not.toHaveProperty("cards");
+
+    const finalWindowSnapshot = snapshot(track.trackID, "playing", 3);
+    finalWindowSnapshot.playback.currentTimeMs = lyrics.durationMs - 1_000;
+    finalWindowSnapshot.playback.durationMs = lyrics.durationMs;
+    const callsBeforeFinalWindowSnapshot = fetcher.mock.calls.length;
+    await send({ type: "youtube-music-source-snapshot", snapshot: finalWindowSnapshot }, sender(10));
+    await flush();
+    expect(fetcher).toHaveBeenCalledTimes(callsBeforeFinalWindowSnapshot);
+    const finalWindowReview = await sendResolved({ type: "youtube-music-director-cache-summaries-v1" }, sender(10));
+    expect(finalWindowReview.summaries[0]).toMatchObject({ reachedFinalWindow: true });
+    expect(finalWindowReview.summaries[0].warnings).toContain("coverage-gap");
+
+    const summaryTemplate = finalWindowReview.summaries[0];
+    const originalBibleCache = storage.get("lyricstage-director-bible-cache-v1");
+    const originalSceneCache = storage.get("lyricstage-director-scene-cache-v1");
+    storage.set("lyricstage-director-scene-cache-v1", {});
+    storage.set("lyricstage-director-bible-cache-v1", Object.fromEntries([
+      ...Array.from({ length: 105 }, (_, index) => [`review-${index}`, {
+        createdAtUnixMs: index + 1,
+        expiresAtUnixMs: Date.now() + 10_000,
+        summary: {
+          ...summaryTemplate,
+          trackTitle: `Review ${index}`,
+          trackIDDisplay: index.toString(16).padStart(8, "0"),
+          createdAtUnixMs: index + 1,
+        },
+      }]),
+      ["invalid", { summary: { version: "director-cache-summary-v1", apiKey: "must-not-pass" } }],
+    ]));
+    const boundedReview = await sendResolved({ type: "youtube-music-director-cache-summaries-v1" }, sender(10));
+    expect(boundedReview.summaries).toHaveLength(100);
+    expect(boundedReview.summaries[0].trackTitle).toBe("Review 104");
+    expect(JSON.stringify(boundedReview)).not.toContain("must-not-pass");
+    storage.set("lyricstage-director-bible-cache-v1", originalBibleCache);
+    storage.set("lyricstage-director-scene-cache-v1", originalSceneCache);
+
+    const corruptedSceneCache = structuredClone(storage.get("lyricstage-director-scene-cache-v1")) as Record<string, any>;
+    Object.values(corruptedSceneCache).forEach((entry) => {
+      if (entry.fromLineIndex === sceneResponses[0]!.fromLineIndex) {
+        entry.cards = entry.cards.map((card: any) => ({ ...card, sceneID: `tampered:${card.sceneID}` }));
+      }
+    });
+    storage.set("lyricstage-director-scene-cache-v1", corruptedSceneCache);
+    const regenerated = await sendResolved({
+      type: "youtube-music-resolve-director-coverage-v1", track, lyrics, bible,
+      playheadMs: sceneResponses[0]!.fromMs + 1, desiredHorizonMs: 60_000,
+    }, sender(10));
+    expect(regenerated).toMatchObject({ status: "ready", source: "network" });
+    expect(fetcher).toHaveBeenCalledTimes(callsBeforeRestart + 1);
+
+    vi.setSystemTime(Date.now() + 31 * 24 * 60 * 60 * 1_000);
+    vi.resetModules();
+    await import("./background");
+    const expiredBible = await sendResolved({ type: "youtube-music-resolve-director-bible-v1", track, lyrics }, sender(10));
+    expect(expiredBible).toMatchObject({ status: "ready", source: "network" });
+    expect(fetcher).toHaveBeenCalledTimes(callsBeforeRestart + 2);
+  });
+
+  it("falls back once after bounded HTTP retries and serves the repaired window from cache", async () => {
+    await send({
+      type: "youtube-music-save-director-config",
+      configuration: {
+        version: "lyricstage-director-byok-v1",
+        primary: { protocol: "openai-responses", endpoint: "https://api.openai.com/v1", model: "fixture", apiKey: "rolling-secret" },
+      },
+    }, sender(10));
+    const track = rollingTrack();
+    const lyrics = rollingLyrics();
+    const bible = compileLocalDirectorBibleV1(lyrics);
+    let bibleReady = false;
+    const fetcher = vi.fn(async () => {
+      if (!bibleReady) {
+        bibleReady = true;
+        return new Response(JSON.stringify({ output_text: JSON.stringify(bible) }), { status: 200 });
+      }
+      return new Response("temporary", { status: 503 });
+    });
+    vi.stubGlobal("fetch", fetcher);
+    expect(await sendResolved({ type: "youtube-music-resolve-director-bible-v1", track, lyrics }, sender(10)))
+      .toMatchObject({ status: "ready" });
+    const request = {
+      type: "youtube-music-resolve-director-coverage-v1", track, lyrics, bible,
+      playheadMs: 80_000, desiredHorizonMs: 60_000,
+    };
+    const responses = [];
+    for (let index = 0; index < 4; index += 1) responses.push(await sendResolved(request, sender(10)));
+    expect(responses[0]).toMatchObject({
+      status: "ready", source: "local", reason: expect.stringContaining("scene-local-continuity-fallback"),
+    });
+    expect(responses.slice(1).every((response) => response.status === "ready" && response.source === "cache")).toBe(true);
+    expect(fetcher).toHaveBeenCalledTimes(3);
+  });
+
+  it("deduplicates one in-flight Bible request and does not restart it for a later MusicMap", async () => {
+    await send({
+      type: "youtube-music-save-director-config",
+      configuration: {
+        version: "lyricstage-director-byok-v1",
+        primary: { protocol: "openai-responses", endpoint: "https://api.openai.com/v1", model: "fixture", apiKey: "rolling-secret" },
+      },
+    }, sender(10));
+    const track = rollingTrack();
+    const lyrics = rollingLyrics();
+    const bible = compileLocalDirectorBibleV1(lyrics);
+    const response = deferred<Response>();
+    const fetcher = vi.fn(() => response.promise);
+    vi.stubGlobal("fetch", fetcher);
+    const firstTask = sendResolved({ type: "youtube-music-resolve-director-bible-v1", track, lyrics }, sender(10));
+    await flush();
+    const secondTask = sendResolved({ type: "youtube-music-resolve-director-bible-v1", track, lyrics, musicMap: musicMap() }, sender(10));
+    await flush();
+    expect(fetcher).toHaveBeenCalledTimes(1);
+    response.resolve(new Response(JSON.stringify({ output_text: JSON.stringify(bible) }), { status: 200 }));
+    const [first, second] = await Promise.all([firstTask, secondTask]);
+    expect(first).toMatchObject({ status: "ready", source: "network" });
+    expect(second).toMatchObject({ status: "ready", source: "cache", timing: { attempts: 0 } });
+    expect(fetcher).toHaveBeenCalledTimes(1);
+  });
+
+  it("suppresses a late Bible after configuration changes", async () => {
+    await send({
+      type: "youtube-music-save-director-config",
+      configuration: {
+        version: "lyricstage-director-byok-v1",
+        primary: { protocol: "openai-responses", endpoint: "https://api.openai.com/v1", model: "fixture-a", apiKey: "rolling-secret" },
+      },
+    }, sender(10));
+    const track = rollingTrack();
+    const lyrics = rollingLyrics();
+    const bible = compileLocalDirectorBibleV1(lyrics);
+    const response = deferred<Response>();
+    vi.stubGlobal("fetch", vi.fn(() => response.promise));
+    const pending = sendResolved({ type: "youtube-music-resolve-director-bible-v1", track, lyrics }, sender(10));
+    await flush();
+    await send({
+      type: "youtube-music-save-director-config",
+      configuration: {
+        version: "lyricstage-director-byok-v1",
+        primary: { protocol: "openai-responses", endpoint: "https://api.openai.com/v1", model: "fixture-b", apiKey: "rolling-secret" },
+      },
+    }, sender(10));
+    response.resolve(new Response(JSON.stringify({ output_text: JSON.stringify(bible) }), { status: 200 }));
+    expect(await pending).toMatchObject({ status: "stale", reason: "stale-generation" });
+    expect(storage.get("lyricstage-director-bible-cache-v1")).toBeUndefined();
+  });
+
+  it("suppresses a late result after the active track fingerprint changes", async () => {
+    await send({
+      type: "youtube-music-save-director-config",
+      configuration: {
+        version: "lyricstage-director-byok-v1",
+        primary: { protocol: "openai-responses", endpoint: "https://api.openai.com/v1", model: "fixture", apiKey: "rolling-secret" },
+      },
+    }, sender(10));
+    const trackA = rollingTrack();
+    const lyricsA = rollingLyrics();
+    const bibleA = compileLocalDirectorBibleV1(lyricsA);
+    const trackB = { ...trackA, trackID: "rolling-track-b", title: "Rolling fixture B" };
+    const lyricsB = { ...lyricsA, recordingID: "youtubeMusic:rolling-track-b" };
+    const bibleB = compileLocalDirectorBibleV1(lyricsB);
+    const delayedA = deferred<Response>();
+    let calls = 0;
+    vi.stubGlobal("fetch", vi.fn(async () => {
+      calls += 1;
+      return calls === 1
+        ? delayedA.promise
+        : new Response(JSON.stringify({ output_text: JSON.stringify(bibleB) }), { status: 200 });
+    }));
+    const pendingA = sendResolved({ type: "youtube-music-resolve-director-bible-v1", track: trackA, lyrics: lyricsA }, sender(10));
+    await flush();
+    expect(await sendResolved({ type: "youtube-music-resolve-director-bible-v1", track: trackB, lyrics: lyricsB }, sender(10)))
+      .toMatchObject({ status: "ready", source: "network" });
+    delayedA.resolve(new Response(JSON.stringify({ output_text: JSON.stringify(bibleA) }), { status: 200 }));
+    expect(await pendingA).toMatchObject({ status: "stale", reason: "stale-generation" });
+    const cache = storage.get("lyricstage-director-bible-cache-v1") as Record<string, unknown>;
+    expect(cache[trackB.trackID]).toBeDefined();
+    expect(cache[trackA.trackID]).toBeUndefined();
+  });
+
+  it("does not expand rolling coverage while paused or inside the final 20 seconds", async () => {
+    await send({
+      type: "youtube-music-save-director-config",
+      configuration: {
+        version: "lyricstage-director-byok-v1",
+        primary: { protocol: "openai-responses", endpoint: "https://api.openai.com/v1", model: "fixture", apiKey: "rolling-secret" },
+      },
+    }, sender(10));
+    const track = rollingTrack();
+    const lyrics = rollingLyrics();
+    const bible = compileLocalDirectorBibleV1(lyrics);
+    const fetcher = vi.fn(async () => new Response(JSON.stringify({ output_text: JSON.stringify(bible) }), { status: 200 }));
+    vi.stubGlobal("fetch", fetcher);
+    await sendResolved({ type: "youtube-music-resolve-director-bible-v1", track, lyrics }, sender(10));
+    fetcher.mockClear();
+    const paused = await sendResolved({
+      type: "youtube-music-resolve-director-coverage-v1", track, lyrics, bible,
+      playheadMs: 60_000, desiredHorizonMs: 60_000, paused: true,
+    }, sender(10));
+    const final = await sendResolved({
+      type: "youtube-music-resolve-director-coverage-v1", track, lyrics, bible,
+      playheadMs: lyrics.durationMs - 10_000, desiredHorizonMs: 60_000,
+    }, sender(10));
+    expect(paused).toMatchObject({ status: "unavailable", reason: "paused-no-horizon-expansion" });
+    expect(final).toMatchObject({ status: "unavailable", reason: "final-window" });
+    expect(fetcher).not.toHaveBeenCalled();
+  });
+
+  it("ignores a self-hashed state without provenance and uses a trusted checkpoint", async () => {
+    await send({
+      type: "youtube-music-save-director-config",
+      configuration: {
+        version: "lyricstage-director-byok-v1",
+        primary: { protocol: "openai-responses", endpoint: "https://api.openai.com/v1", model: "fixture", apiKey: "rolling-secret" },
+      },
+    }, sender(10));
+    const track = rollingTrack();
+    const lyrics = rollingLyrics();
+    const bible = compileLocalDirectorBibleV1(lyrics);
+    const requestedStateHashes: string[] = [];
+    const fetcher = vi.fn(async (_input: string | URL | Request, init?: RequestInit) => {
+      const payload = JSON.parse(String(init?.body)) as any;
+      if (payload.instructions?.includes("whole-song constitution")) {
+        return new Response(JSON.stringify({ output_text: JSON.stringify(bible) }), { status: 200 });
+      }
+      const prompt = JSON.parse(payload.input[0].content[0].text) as any;
+      requestedStateHashes.push(prompt.state.stateHash);
+      return new Response(JSON.stringify({ output_text: JSON.stringify({
+        version: "scene-pack-v1",
+        bibleIdentity: prompt.bible.bibleIdentity,
+        entryStateHash: prompt.state.stateHash,
+        scenes: [{
+          fromLineIndex: prompt.window.fromLineIndex,
+          toLineIndex: prompt.window.toLineIndex,
+          intention: "Preserve the trusted continuity checkpoint.",
+          artDirection: "editorialKinetic",
+        }],
+      }) }), { status: 200 });
+    });
+    vi.stubGlobal("fetch", fetcher);
+    await sendResolved({ type: "youtube-music-resolve-director-bible-v1", track, lyrics }, sender(10));
+    const target = 126_001;
+    const checkpoint = checkpointRollingPerformanceStateV1(lyrics, bible, 4)!;
+    const forgedWithoutHash = { ...checkpoint, unresolvedPromiseIDs: ["forged-promise"], stateHash: "" };
+    const forged = { ...forgedWithoutHash, stateHash: rollingPerformanceStateIdentityV1(forgedWithoutHash) };
+    fetcher.mockClear();
+    const response = await sendResolved({
+      type: "youtube-music-resolve-director-coverage-v1", track, lyrics, bible,
+      playheadMs: target, desiredHorizonMs: 60_000, state: forged,
+    }, sender(10));
+    expect(response).toMatchObject({ status: "ready", source: "network" });
+    expect(requestedStateHashes).toHaveLength(1);
+    expect(requestedStateHashes[0]).not.toBe(forged.stateHash);
+  });
+
+  it("does not repeat slow provider failures after committing a local continuity card", async () => {
+    await send({
+      type: "youtube-music-save-director-config",
+      configuration: {
+        version: "lyricstage-director-byok-v1",
+        primary: { protocol: "openai-responses", endpoint: "https://api.openai.com/v1", model: "fixture", apiKey: "rolling-secret" },
+      },
+    }, sender(10));
+    const track = rollingTrack();
+    const lyrics = rollingLyrics();
+    const bible = compileLocalDirectorBibleV1(lyrics);
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({ output_text: JSON.stringify(bible) }), { status: 200 })));
+    await sendResolved({ type: "youtube-music-resolve-director-bible-v1", track, lyrics }, sender(10));
+    const slowFailure = vi.fn(async () => {
+      vi.setSystemTime(Date.now() + 30_000);
+      return new Response("temporary", { status: 503 });
+    });
+    vi.stubGlobal("fetch", slowFailure);
+    const request = {
+      type: "youtube-music-resolve-director-coverage-v1", track, lyrics, bible,
+      playheadMs: 60_000, desiredHorizonMs: 60_000,
+    };
+    expect(await sendResolved(request, sender(10))).toMatchObject({
+      status: "ready", source: "local", reason: expect.stringContaining("scene-local-continuity-fallback"),
+    });
+    const callsAfterFallback = slowFailure.mock.calls.length;
+    expect(await sendResolved(request, sender(10))).toMatchObject({ status: "ready", source: "cache" });
+    expect(await sendResolved(request, sender(10))).toMatchObject({ status: "ready", source: "cache" });
+    expect(slowFailure).toHaveBeenCalledTimes(callsAfterFallback);
+    expect(callsAfterFallback).toBeGreaterThan(0);
+  });
+
+  it("keeps rolling continuity with a valid local card when the provider Scene Pack is invalid", async () => {
+    await send({
+      type: "youtube-music-save-director-config",
+      configuration: {
+        version: "lyricstage-director-byok-v1",
+        primary: { protocol: "openai-responses", endpoint: "https://api.openai.com/v1", model: "fixture", apiKey: "rolling-secret" },
+      },
+    }, sender(10));
+    const track = rollingTrack();
+    const lyrics = rollingLyrics();
+    const bible = compileLocalDirectorBibleV1(lyrics);
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({ output_text: JSON.stringify(bible) }), { status: 200 })));
+    await sendResolved({ type: "youtube-music-resolve-director-bible-v1", track, lyrics }, sender(10));
+    const invalidFetcher = vi.fn(async (_input: string | URL | Request, init?: RequestInit) => {
+      const payload = JSON.parse(String(init?.body)) as any;
+      const prompt = JSON.parse(payload.input[0].content[0].text) as any;
+      return new Response(JSON.stringify({ output_text: JSON.stringify({
+        version: "scene-pack-v1",
+        bibleIdentity: prompt.bible.bibleIdentity,
+        entryStateHash: prompt.state.stateHash,
+        scenes: [{ fromLineIndex: prompt.window.fromLineIndex, toLineIndex: prompt.window.toLineIndex, intention: "incomplete" }],
+      }) }), { status: 200 });
+    });
+    vi.stubGlobal("fetch", invalidFetcher);
+    const response = await sendResolved({
+      type: "youtube-music-resolve-director-coverage-v1", track, lyrics, bible,
+      playheadMs: 60_000, desiredHorizonMs: 60_000,
+    }, sender(10));
+    expect(response).toMatchObject({
+      status: "ready", source: "local", reason: expect.stringContaining("scene-local-continuity-fallback"),
+    });
+    expect(response.cards).toHaveLength(1);
+    expect(storage.get("lyricstage-director-scene-cache-v1")).toBeDefined();
   });
 
   it("discovers models with a matching stored provider key without exposing it", async () => {

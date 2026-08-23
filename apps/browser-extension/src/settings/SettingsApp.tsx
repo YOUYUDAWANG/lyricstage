@@ -14,6 +14,7 @@ import {
   saveLyricsConfiguration,
   settingsChrome,
 } from "./settingsClient";
+import { loadDirectorCacheSummariesV1 } from "./directorReviewClient";
 import {
   apiKeyPlaceholder,
   canReuseSavedProviderKey,
@@ -36,6 +37,7 @@ import {
   type ProviderDraft,
   type SettingsSection,
 } from "./settingsModel";
+import { directorReviewAggregateV1, type DirectorReviewStateV1 } from "./directorReviewModel";
 
 interface ConnectionStatus {
   connected: boolean;
@@ -56,6 +58,14 @@ const savedDiscovery = (model: string): ModelDiscoveryState => model
   ? { phase: "saved", models: [{ id: model, label: model }] }
   : emptyDiscovery();
 const runtimeAvailable = (): boolean => Boolean(settingsChrome());
+const reviewWarningLabel = (warning: string): string => ({
+  "minimum-budget": "预算偏低",
+  "single-scale": "手势尺度单一",
+  "static-without-evidence": "静态但无连续性证据",
+  "repeated-tuple": "连续三首元组重复",
+  "coverage-gap": "末段覆盖不足",
+  "local-repair-heavy": "本地修复较多",
+}[warning] ?? warning);
 
 const readConnection = (value: unknown): ConnectionStatus => {
   const next = value as {
@@ -241,13 +251,14 @@ export const SettingsApp = () => {
   const [lyricsToken, setLyricsToken] = useState("");
   const [lyricsDirty, setLyricsDirty] = useState(false);
   const [director, setDirector] = useState<DirectorConfigView>({ configured: false });
+  const [directorReview, setDirectorReview] = useState<DirectorReviewStateV1>({ status: "loading", summaries: [] });
   const [primary, setPrimary] = useState<ProviderDraft>(emptyProviderDraft());
   const [primaryDiscovery, setPrimaryDiscovery] = useState<ModelDiscoveryState>(emptyDiscovery);
   const [fallbackEnabled, setFallbackEnabled] = useState(false);
   const [fallback, setFallback] = useState<ProviderDraft>(emptyProviderDraft(true));
   const [fallbackDiscovery, setFallbackDiscovery] = useState<ModelDiscoveryState>(emptyDiscovery);
   const [directorDirty, setDirectorDirty] = useState(false);
-  const [preferences, setPreferences] = useState<ExtensionPreferencesV0>({ lightweight: false, vjMode: false });
+  const [preferences, setPreferences] = useState<ExtensionPreferencesV0>({ lightweight: false, vjMode: false, rollingDirectorV1: "off" });
   const [preferenceStatus, setPreferenceStatus] = useState("修改后立即保存在本机");
   const [busy, setBusy] = useState<"lyrics" | "director" | "performance" | undefined>();
   const available = runtimeAvailable();
@@ -309,6 +320,7 @@ export const SettingsApp = () => {
     };
     void loadLyricsConfiguration().then((next) => { if (!cancelled) applyLyrics(next); });
     void loadDirectorConfiguration().then((next) => { if (!cancelled) applyDirector(next); });
+    void loadDirectorCacheSummariesV1().then((next) => { if (!cancelled) setDirectorReview(next); });
     void readExtensionPreferences().then((next) => { if (!cancelled) setPreferences(next); });
     void refreshConnection();
     const timer = window.setInterval(() => void refreshConnection(), 2000);
@@ -461,6 +473,7 @@ export const SettingsApp = () => {
           )}
 
           {section === "director" && (
+            <>
             <form className="settings-card director-card" onSubmit={(event) => void onSaveDirector(event)}>
               <ProviderFields draft={primary} discovery={primaryDiscovery} hasApiKey={canReuseSavedProviderKey(director.primary, primary)} disabled={busy === "director"} onChange={(next) => { setPrimary(next); setDirectorDirty(true); }} onDiscoveryReset={() => setPrimaryDiscovery(emptyDiscovery())} onDiscover={() => void onDiscover("primary")} />
               <label className="settings-toggle fallback-toggle">
@@ -478,6 +491,35 @@ export const SettingsApp = () => {
                 <div className="settings-actions"><button type="button" className="danger" data-clear-director-config="" disabled={busy === "director" || !director.configured} onClick={() => void onClearDirector()}>删除配置与 Key</button>{directorDirty && <button type="button" disabled={busy === "director"} onClick={resetDirectorDraft}>取消修改</button>}<button className="primary" type="submit" data-save-director-config="" disabled={busy === "director" || !directorDirty || !primary.model}>{busy === "director" ? "正在保存…" : "保存并启用"}</button></div>
               </footer>
             </form>
+            <section className="settings-card director-review" data-director-review-state={directorReview.status}>
+              <div className="section-intro"><h2>Director 审片</h2><p>只读取本机缓存的安全摘要；不会返回歌词、提示词、完整计划、Key 或 API 地址。</p></div>
+              <p className="director-review-summary" aria-live="polite">{directorReviewAggregateV1(directorReview)}</p>
+              {directorReview.status === "ready" && (
+                <div className="director-review-list">
+                  {directorReview.summaries.map((summary) => (
+                    <details className="director-review-row" key={`${summary.trackIDDisplay}:${summary.createdAtUnixMs}`}>
+                      <summary>
+                        <span><strong>{summary.trackTitle}</strong><small>{summary.trackArtist} · {summary.trackIDDisplay}</small></span>
+                        <span className="review-metrics">{summary.coveragePercent}% · M{summary.signatureMomentCount} G{summary.gestureCounts.total} E{summary.effectCount} L{summary.layoutTransitionCount}</span>
+                        <span className="review-motif">{summary.motifFamily}</span>
+                        <span className="review-warnings">{summary.warnings.length ? summary.warnings.map(reviewWarningLabel).join(" · ") : "无提醒"}</span>
+                      </summary>
+                      <dl>
+                        <div><dt>World</dt><dd>{summary.baseLayout} / {summary.world.spatialMode} / {summary.world.artworkRole} / {summary.world.motionLaw}</dd></div>
+                        <div><dt>Cache</dt><dd>{summary.cacheVersion} / {summary.cacheEpoch} / {summary.source}</dd></div>
+                        <div><dt>Bible</dt><dd>{summary.bibleIdentityPrefix} · {summary.actCount} acts · quiet {summary.quietSharePercent}%</dd></div>
+                        <div><dt>Gestures</dt><dd>glyph {summary.gestureCounts.glyph} / token {summary.gestureCounts.token} / phrase {summary.gestureCounts.phrase}</dd></div>
+                        <div><dt>Effects</dt><dd>{Object.entries(summary.effectPrimitiveCounts).map(([name, count]) => `${name} ${count}`).join(" / ") || "0"}</dd></div>
+                        <div><dt>Coverage</dt><dd>{summary.sceneCardCount} cards · {summary.missingRanges.length} missing ranges</dd></div>
+                        <div><dt>Timing</dt><dd>{summary.timing ? `${summary.timing.cache} · ${summary.timing.totalMs}ms · provider ${summary.timing.providerMs}ms · ${summary.timing.attempts} attempts` : "无记录"}</dd></div>
+                        <div><dt>Repairs</dt><dd>{summary.localRepairFlags.join(" / ") || "none"}</dd></div>
+                      </dl>
+                    </details>
+                  ))}
+                </div>
+              )}
+            </section>
+            </>
           )}
 
           {section === "performance" && (
@@ -486,6 +528,7 @@ export const SettingsApp = () => {
               <div className="grouped-list">
                 <label className="settings-switch"><span><strong>轻量模式</strong><small>减少模糊和动态效果，适合低性能设备或安静阅读。</small></span><input type="checkbox" checked={preferences.lightweight} disabled={busy === "performance"} onChange={(event) => void onTogglePreference({ lightweight: event.target.checked })} /></label>
                 <label className="settings-switch"><span><strong>个人 VJ 模式</strong><small>增强全屏环境运动；系统“减少动态效果”仍拥有最终优先级。</small></span><input type="checkbox" checked={preferences.vjMode} disabled={busy === "performance"} onChange={(event) => void onTogglePreference({ vjMode: event.target.checked })} /></label>
+                <label className="settings-switch"><span><strong>Rolling Director V1</strong><small>Off 使用旧导演；Shadow 只生成与缓存；On 才渲染滚动 Scene Cards。</small></span><select data-rolling-director-v1="" value={preferences.rollingDirectorV1} disabled={busy === "performance"} onChange={(event) => void onTogglePreference({ rollingDirectorV1: event.target.value as ExtensionPreferencesV0["rollingDirectorV1"] })}><option value="off">Off · legacy</option><option value="shadow">Shadow · audit only</option><option value="on">On · opt-in</option></select></label>
               </div>
               <small className="inline-status" aria-live="polite">{preferenceStatus}</small>
             </section>

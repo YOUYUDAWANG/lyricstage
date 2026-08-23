@@ -48,6 +48,26 @@ describe("director provider model discovery", () => {
     expect(result.models).toEqual([{ id: "gemini-3.6-flash", label: "Gemini 3.6 Flash" }]);
   });
 
+  it("probes Vertex AI Express because its API key cannot list publisher models", async () => {
+    const fetcher = vi.fn(async () => new Response(JSON.stringify({ candidates: [{ content: { parts: [{ text: "OK" }] } }] }), { status: 200 }));
+    const result = await listDirectorProviderModelsV1(
+      connection("gemini", "https://aiplatform.googleapis.com/v1beta1/publishers/google"),
+      fetcher,
+    );
+    expect(fetcher).toHaveBeenCalledWith(
+      "https://aiplatform.googleapis.com/v1beta1/publishers/google/models/gemini-3.7-flash:generateContent",
+      expect.objectContaining({
+        method: "POST",
+        headers: { "x-goog-api-key": "secret", "Content-Type": "application/json" },
+      }),
+    );
+    expect(result.models).toEqual([
+      { id: "gemini-3.7-flash", label: "Gemini 3.7 Flash", detail: "Vertex AI Express · verified probe" },
+      { id: "gemini-2.5-flash", label: "Gemini 2.5 Flash", detail: "Vertex AI Express · verified probe" },
+      { id: "gemini-3.5-flash", label: "Gemini 3.5 Flash", detail: "Vertex AI Express" },
+    ]);
+  });
+
   it("uses the Anthropic models endpoint and required headers", async () => {
     const fetcher = vi.fn(async () => new Response(JSON.stringify({
       data: [{ id: "claude-opus-4-6", display_name: "Claude Opus 4.6" }],

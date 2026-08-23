@@ -11,4 +11,7 @@ export * from "./musicMap";
 export * from "./timedText";
 export * from "./lyricChoreography";
 export * from "./dramaticScore";
+export * from "./rollingDirector";
+export * from "./rollingDirectorPrompt";
+export * from "./directorCacheReview";
 export * from "./vocalTiming";

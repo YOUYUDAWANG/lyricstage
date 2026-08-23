@@ -1,13 +1,20 @@
 import { afterEach, describe, expect, it } from "vitest";
 import { lyricFixtures } from "@lyricstage/contracts";
-import { compileLocalDirectorPlanV1, type MusicMapV1 } from "@lyricstage/performance";
+import {
+  compileLocalDirectorBibleV1,
+  compileLocalDirectorPlanV1,
+  compileLocalSceneCardsV1,
+  type MusicMapV1,
+} from "@lyricstage/performance";
 import type { LyricsLookupTrackV0 } from "@lyricstage/lyrics";
 import {
   directorPlanForStageEntry,
   directorStatusDetail,
   directorStatusLabel,
   requestAutomaticDirectorPlan,
+  requestDirectorBibleV1,
   requestDirectorBridgeWithOneRecovery,
+  requestDirectorCoverageV1,
 } from "./performanceDirector";
 
 const track: LyricsLookupTrackV0 = {
@@ -186,6 +193,7 @@ describe("requestAutomaticDirectorPlan", () => {
       status: "ready",
       source: "network",
     })).toBe("AI 导演 · 下一段接管");
+    expect(directorStatusLabel({ status: "requesting" }, "local", true)).toBe("AI 导演 · 下一段接管");
     expect(directorStatusLabel({ status: "idle" }, "ai")).toBe("AI 导演 · 已接管");
     expect(directorStatusLabel({
       type: "director-resolution-v1",
@@ -260,6 +268,50 @@ describe("requestAutomaticDirectorPlan", () => {
         completedAt: "2026-08-23T00:00:00.000Z",
       },
     })).toContain("permission denied · 总计 185ms");
+  });
+});
+
+describe("rolling director bridge", () => {
+  it("uses the two versioned messages without changing the legacy request", async () => {
+    const lyrics = lyricFixtures.wordTimedMixed;
+    const bible = compileLocalDirectorBibleV1(lyrics);
+    const cards = compileLocalSceneCardsV1(lyrics, bible);
+    const messages: unknown[] = [];
+    (globalThis as typeof globalThis & { chrome?: unknown }).chrome = {
+      runtime: {
+        id: "extension-test",
+        sendMessage: async (message: any) => {
+          messages.push(message);
+          return message.type === "youtube-music-resolve-director-bible-v1"
+            ? { type: "director-bible-resolution-v1", status: "ready", source: "cache", bible }
+            : {
+                type: "director-coverage-resolution-v1", status: "ready", source: "cache", cards,
+                coverage: { fromMs: 0, toMs: lyrics.durationMs, aheadMs: lyrics.durationMs, activation: "immediate" },
+              };
+        },
+      },
+    };
+    await expect(requestDirectorBibleV1(track, lyrics)).resolves.toMatchObject({ status: "ready", bible });
+    await expect(requestDirectorCoverageV1(track, lyrics, bible, 0, 60_000, {
+      paused: true,
+      seekTargetMs: Math.max(0, lyrics.durationMs - 1_000),
+    })).resolves.toMatchObject({ status: "ready", cards });
+    expect(messages.map((message: any) => message.type)).toEqual([
+      "youtube-music-resolve-director-bible-v1",
+      "youtube-music-resolve-director-coverage-v1",
+    ]);
+    expect(messages[1]).toMatchObject({ paused: true, seekTargetMs: Math.max(0, lyrics.durationMs - 1_000) });
+  });
+
+  it("rejects an invalid Bible response at the Stage bridge", async () => {
+    (globalThis as typeof globalThis & { chrome?: unknown }).chrome = {
+      runtime: { id: "extension-test", sendMessage: async () => ({
+        type: "director-bible-resolution-v1", status: "ready", source: "network", bible: { version: "director-bible-v1" },
+      }) },
+    };
+    await expect(requestDirectorBibleV1(track, lyricFixtures.wordTimedMixed)).resolves.toMatchObject({
+      status: "error", reason: "director-bible-invalid",
+    });
   });
 });
 

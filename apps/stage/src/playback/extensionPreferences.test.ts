@@ -5,14 +5,21 @@ import {
   saveLyricsOffset,
   saveExtensionPreferences,
   subscribeExtensionPreferences,
+  type ExtensionPreferencesV0,
+  rollingDirectorRouteV1,
 } from "./extensionPreferences";
 
 describe("extension appearance preferences", () => {
+  it("routes off, shadow, and on without enabling rolling rendering by default", () => {
+    expect(rollingDirectorRouteV1("off")).toEqual({ generateLegacy: true, generateRolling: false, renderRolling: false });
+    expect(rollingDirectorRouteV1("shadow")).toEqual({ generateLegacy: true, generateRolling: true, renderRolling: false });
+    expect(rollingDirectorRouteV1("on")).toEqual({ generateLegacy: false, generateRolling: true, renderRolling: true });
+  });
   afterEach(() => vi.unstubAllGlobals());
 
   it("defaults to the full renderer outside the extension", async () => {
     vi.stubGlobal("chrome", undefined);
-    await expect(readExtensionPreferences()).resolves.toEqual({ lightweight: false, vjMode: false });
+    await expect(readExtensionPreferences()).resolves.toEqual({ lightweight: false, vjMode: false, rollingDirectorV1: "off" });
   });
 
   it("persists and restores lightweight mode through extension storage", async () => {
@@ -25,8 +32,8 @@ describe("extension appearance preferences", () => {
         },
       },
     });
-    await saveExtensionPreferences({ lightweight: true, vjMode: true });
-    await expect(readExtensionPreferences()).resolves.toEqual({ lightweight: true, vjMode: true });
+    await saveExtensionPreferences({ lightweight: true, vjMode: true, rollingDirectorV1: "shadow" });
+    await expect(readExtensionPreferences()).resolves.toEqual({ lightweight: true, vjMode: true, rollingDirectorV1: "shadow" });
   });
 
   it("notifies when appearance preferences change in extension storage", async () => {
@@ -47,7 +54,7 @@ describe("extension appearance preferences", () => {
         },
       },
     });
-    const received: Array<{ lightweight: boolean; vjMode: boolean }> = [];
+    const received: ExtensionPreferencesV0[] = [];
     const unsubscribe = subscribeExtensionPreferences((preferences) => received.push(preferences));
     listeners.forEach((listener) => listener({
       "lyricstage-preferences-v0": { newValue: { lightweight: true, vjMode: false } },
@@ -56,7 +63,7 @@ describe("extension appearance preferences", () => {
     listeners.forEach((listener) => listener({
       "lyricstage-preferences-v0": { newValue: { lightweight: false, vjMode: true } },
     }, "local"));
-    expect(received).toEqual([{ lightweight: true, vjMode: false }]);
+    expect(received).toEqual([{ lightweight: true, vjMode: false, rollingDirectorV1: "off" }]);
   });
 
   it("stores a bounded per-track lyrics offset and clears zero", async () => {

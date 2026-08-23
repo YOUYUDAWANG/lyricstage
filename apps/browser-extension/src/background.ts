@@ -28,10 +28,24 @@ import {
   adaptFullscreenDirectorResponseV2,
   adaptFullscreenDirectorResponseV3,
   adaptFullscreenDirectorResponseV4,
+  analyzeDirectorCacheSummariesV1,
+  advanceRollingPerformanceStateV1,
   buildDirectorRequestPayloadV1,
+  compileLocalDirectorBibleV1,
+  compileLocalSceneCardForWindowV1,
   directorBYOKCacheIdentityV1,
   directorBYOKDiagnosticsFromErrorV1,
+  directorBibleRequestProfileV1,
+  executeDirectorBYOKProfileV1,
   executeDirectorBYOKV1,
+  initialRollingPerformanceStateV1,
+  checkpointRollingPerformanceStateV1,
+  isRollingPerformanceStateV1,
+  sanitizeDirectorBibleV1,
+  sanitizeDirectorCacheSummaryV1,
+  sanitizeSceneCardV1,
+  scenePackRequestProfileV1,
+  summarizeDirectorCacheEntryV1,
   isDirectorPlanV1ForLyrics,
   listDirectorProviderModelsV1,
   publicDirectorBYOKConfigurationV1,
@@ -40,11 +54,15 @@ import {
   sanitizeMusicMapV1,
   sanitizeVocalTimingMapV1,
   type DirectorBYOKConfigurationV1,
+  type DirectorBibleV1,
+  type DirectorCacheSummaryV1,
   type DirectorPlanV1,
   type DirectorProviderConfigurationV1,
   type DirectorResolutionResponseV1,
   type DirectorTimingV1,
   type MusicMapV1,
+  type RollingPerformanceStateV1,
+  type SceneCardV1,
   type VocalTimingMapV1,
 } from "@lyricstage/performance";
 
@@ -113,7 +131,10 @@ const directorConfigurationStorageKey = "lyricstage-director-byok-v1";
 const legacyDirectorCacheStorageKey = "lyricstage-director-cache-v4";
 const directorCacheStorageKey = "lyricstage-director-cache-v5";
 const directorLastTimingStorageKey = "lyricstage-director-last-timing-v1";
+const directorBibleCacheStorageKey = "lyricstage-director-bible-cache-v1";
+const directorSceneCacheStorageKey = "lyricstage-director-scene-cache-v1";
 const directorCacheEpoch = "fullscreen-director-v4-client-contract-v8.7-byok-intent-v1";
+const rollingDirectorEpoch = "rolling-director-generation-v1.1";
 const lyricsCacheLimit = 100;
 const directorCacheLimit = 100;
 const lyricsLookupTasks = new Map<string, Promise<LyricsLookupResponseV0>>();
@@ -122,6 +143,9 @@ const directorLookupTasks = new Map<string, Promise<DirectorResolutionResponseV1
 let lyricsCacheWrite = Promise.resolve();
 let localLyricsWrite = Promise.resolve();
 let directorCacheWrite = Promise.resolve();
+let rollingDirectorCacheWrite = Promise.resolve();
+let rollingDirectorGeneration = 0;
+let activeRollingFingerprint: string | undefined;
 let sourceLeaseTimer: ReturnType<typeof setInterval> | undefined;
 let offscreenCreation: Promise<void> | undefined;
 type AudioAnalysisStatus = "analyzing" | "ready" | "error";
@@ -209,6 +233,52 @@ interface StoredDirectorCacheEntry {
 
 type StoredDirectorCache = Record<string, StoredDirectorCacheEntry>;
 
+interface StoredDirectorBibleCacheEntry {
+  fingerprint: string;
+  epoch: string;
+  createdAtUnixMs: number;
+  expiresAtUnixMs: number;
+  trackTitle: string;
+  trackArtist: string;
+  summary?: DirectorCacheSummaryV1;
+  bible: DirectorBibleV1;
+}
+
+interface StoredDirectorSceneCacheEntry {
+  fingerprint: string;
+  epoch: string;
+  createdAtUnixMs: number;
+  expiresAtUnixMs: number;
+  trackID: string;
+  trackTitle: string;
+  trackArtist: string;
+  bibleIdentity: string;
+  fromLineIndex: number;
+  entryStateHash: string;
+  entryState: RollingPerformanceStateV1;
+  cards: SceneCardV1[];
+  summary?: DirectorCacheSummaryV1;
+}
+
+type StoredDirectorBibleCache = Record<string, StoredDirectorBibleCacheEntry>;
+type StoredDirectorSceneCache = Record<string, StoredDirectorSceneCacheEntry>;
+
+interface RollingGenerationLedgerV1 {
+  fingerprint: string;
+  generation: number;
+  bibleLogicalRequests: number;
+  sceneLogicalRequests: number;
+  providerAttempts: number;
+  providerMs: number;
+  consecutiveFailures: number;
+  inFlight?: Promise<void>;
+  inFlightKind?: "bible" | "scene-pack";
+  inFlightWindow?: { fromLineIndex: number; toLineIndex: number };
+  generatedCoverage: Array<{ fromLineIndex: number; toLineIndex: number; sceneIDs: string[] }>;
+}
+
+const rollingGenerationLedgers = new Map<string, RollingGenerationLedgerV1>();
+
 const privateLyricsConfiguration = async (): Promise<LDDCLyricsConfigurationV0 | undefined> => {
   const value = (await chromeAPI.storage.local.get(privateLyricsConfigurationStorageKey))[privateLyricsConfigurationStorageKey] as
     Partial<LDDCLyricsConfigurationV0> | undefined;
@@ -288,6 +358,7 @@ const saveDirectorConfiguration = async (value: unknown): Promise<{ configured: 
       [legacyDirectorCacheStorageKey]: {},
       [directorLastTimingStorageKey]: null,
     });
+    invalidateRollingGeneration();
     return { configured: false };
   }
   if (typeof value !== "object" || Array.isArray(value)) throw new Error("导演配置格式无效");
@@ -309,6 +380,7 @@ const saveDirectorConfiguration = async (value: unknown): Promise<{ configured: 
     [legacyDirectorCacheStorageKey]: {},
     [directorLastTimingStorageKey]: null,
   });
+  invalidateRollingGeneration();
   return { configured: true };
 };
 
@@ -686,6 +758,317 @@ const saveDirectorPlanCache = (
   return directorCacheWrite;
 };
 
+const rollingDirectorFingerprint = (
+  track: LyricsLookupTrackV0,
+  lyrics: LyricDocumentV0,
+  configuration: DirectorBYOKConfigurationV1,
+): string => stableHash32({
+  version: "rolling-director-fingerprint-v1",
+  epoch: rollingDirectorEpoch,
+  provider: directorBYOKCacheIdentityV1(configuration),
+  track: lyricsFingerprint(track),
+  lyrics,
+});
+
+const activateRollingFingerprint = (fingerprint: string): number => {
+  if (activeRollingFingerprint !== fingerprint) {
+    activeRollingFingerprint = fingerprint;
+    rollingDirectorGeneration += 1;
+  }
+  return rollingDirectorGeneration;
+};
+
+const invalidateRollingGeneration = (): void => {
+  activeRollingFingerprint = undefined;
+  rollingDirectorGeneration += 1;
+};
+
+const rollingLedger = (fingerprint: string, generation: number): RollingGenerationLedgerV1 => {
+  const existing = rollingGenerationLedgers.get(fingerprint);
+  if (existing && existing.generation === generation) return existing;
+  const created: RollingGenerationLedgerV1 = {
+    fingerprint,
+    generation,
+    bibleLogicalRequests: 0,
+    sceneLogicalRequests: 0,
+    providerAttempts: 0,
+    providerMs: 0,
+    consecutiveFailures: 0,
+    generatedCoverage: [],
+  };
+  rollingGenerationLedgers.set(fingerprint, created);
+  if (rollingGenerationLedgers.size > 24) {
+    const oldest = rollingGenerationLedgers.keys().next().value as string | undefined;
+    if (oldest && oldest !== fingerprint) rollingGenerationLedgers.delete(oldest);
+  }
+  return created;
+};
+
+const rollingRequestAllowed = (ledger: RollingGenerationLedgerV1, kind: "bible" | "scene-pack"): boolean =>
+  ledger.consecutiveFailures < 3
+  && ledger.providerAttempts < 6
+  && ledger.providerMs < 90_000
+  && (kind === "bible" ? ledger.bibleLogicalRequests < 1 : ledger.sceneLogicalRequests < 6);
+
+const readDirectorBibleCache = async (): Promise<StoredDirectorBibleCache> => {
+  const stored = (await chromeAPI.storage.local.get(directorBibleCacheStorageKey))[directorBibleCacheStorageKey];
+  return stored && typeof stored === "object" && !Array.isArray(stored) ? stored as StoredDirectorBibleCache : {};
+};
+
+const readDirectorSceneCache = async (): Promise<StoredDirectorSceneCache> => {
+  const stored = (await chromeAPI.storage.local.get(directorSceneCacheStorageKey))[directorSceneCacheStorageKey];
+  return stored && typeof stored === "object" && !Array.isArray(stored) ? stored as StoredDirectorSceneCache : {};
+};
+
+const cachedDirectorBible = async (
+  track: LyricsLookupTrackV0,
+  lyrics: LyricDocumentV0,
+  fingerprint: string,
+): Promise<{ bible: DirectorBibleV1; expiresAtUnixMs: number } | undefined> => {
+  const entry = (await readDirectorBibleCache())[track.trackID];
+  if (!entry || entry.epoch !== rollingDirectorEpoch || entry.fingerprint !== fingerprint
+    || entry.expiresAtUnixMs <= Date.now()) return undefined;
+  const bible = sanitizeDirectorBibleV1(lyrics, entry.bible);
+  return bible ? { bible, expiresAtUnixMs: entry.expiresAtUnixMs } : undefined;
+};
+
+const saveDirectorBibleCache = async (
+  track: LyricsLookupTrackV0,
+  lyrics: LyricDocumentV0,
+  fingerprint: string,
+  bible: DirectorBibleV1,
+  timing?: unknown,
+  source: "network" | "local" = "network",
+): Promise<number> => {
+  const createdAtUnixMs = Date.now();
+  const expiresAtUnixMs = createdAtUnixMs + 30 * 24 * 60 * 60 * 1_000;
+  const summary = summarizeDirectorCacheEntryV1({
+    lyrics, track, cacheEpoch: rollingDirectorEpoch, source, createdAtUnixMs, expiresAtUnixMs,
+    bible, cards: [], timing,
+  }) ?? undefined;
+  rollingDirectorCacheWrite = rollingDirectorCacheWrite.catch(() => undefined).then(async () => {
+    const entries = Object.entries(await readDirectorBibleCache()).filter(([trackID, entry]) =>
+      trackID !== track.trackID && entry.expiresAtUnixMs > Date.now());
+    entries.push([track.trackID, {
+      fingerprint, epoch: rollingDirectorEpoch, createdAtUnixMs, expiresAtUnixMs,
+      trackTitle: track.title.slice(0, 120), trackArtist: track.artist.slice(0, 160), summary, bible,
+    }]);
+    await chromeAPI.storage.local.set({
+      [directorBibleCacheStorageKey]: Object.fromEntries(entries.sort((a, b) => b[1].expiresAtUnixMs - a[1].expiresAtUnixMs).slice(0, 100)),
+    });
+  });
+  await rollingDirectorCacheWrite;
+  return expiresAtUnixMs;
+};
+
+const sceneCacheIdentity = (
+  trackID: string,
+  bibleIdentity: string,
+  fromLineIndex: number,
+  entryStateHash: string,
+): string => stableHash32({ trackID, bibleIdentity, fromLineIndex, entryStateHash });
+
+const cachedDirectorScenes = async (
+  track: LyricsLookupTrackV0,
+  lyrics: LyricDocumentV0,
+  bible: DirectorBibleV1,
+  fingerprint: string,
+): Promise<SceneCardV1[]> => {
+  const now = Date.now();
+  const entries = Object.values(await readDirectorSceneCache()).filter((entry) =>
+    entry.epoch === rollingDirectorEpoch && entry.fingerprint === fingerprint && entry.trackID === track.trackID
+    && entry.bibleIdentity === bible.bibleIdentity && entry.expiresAtUnixMs > now);
+  const cards: SceneCardV1[] = [];
+  let accumulatedState = initialRollingPerformanceStateV1(bible);
+  for (const entry of entries.sort((a, b) => a.fromLineIndex - b.fromLineIndex)) {
+    const storedState = isRollingPerformanceStateV1(entry.entryState, bible) ? entry.entryState : undefined;
+    const lastAccepted = cards.at(-1);
+    const checkpoint = !lastAccepted || entry.fromLineIndex > lastAccepted.toLineIndex + 1
+      ? checkpointRollingPerformanceStateV1(lyrics, bible, entry.fromLineIndex)
+      : undefined;
+    let state = accumulatedState.stateHash === entry.entryStateHash
+      ? accumulatedState
+      : storedState?.stateHash === entry.entryStateHash
+        ? storedState
+        : checkpoint?.stateHash === entry.entryStateHash
+          ? checkpoint
+          : undefined;
+    if (!state || state.stateHash !== entry.entryStateHash) continue;
+    let acceptedAny = false;
+    for (const candidate of entry.cards) {
+      const card = sanitizeSceneCardV1(lyrics, bible, state, candidate);
+      if (!card) break;
+      if (!cards.some((existing) => existing.sceneID === card.sceneID)) cards.push(card);
+      state = advanceRollingPerformanceStateV1(state, card);
+      acceptedAny = true;
+    }
+    if (acceptedAny) accumulatedState = state;
+  }
+  return cards.sort((a, b) => a.fromLineIndex - b.fromLineIndex);
+};
+
+const saveDirectorSceneCache = async (
+  track: LyricsLookupTrackV0,
+  lyrics: LyricDocumentV0,
+  fingerprint: string,
+  bible: DirectorBibleV1,
+  state: RollingPerformanceStateV1,
+  cards: SceneCardV1[],
+  priorCards: SceneCardV1[],
+  bibleExpiresAtUnixMs: number,
+  timing?: unknown,
+  reachedFinalWindow = false,
+  source: "network" | "local" = "network",
+): Promise<void> => {
+  const createdAtUnixMs = Date.now();
+  const fromLineIndex = cards[0]!.fromLineIndex;
+  const key = sceneCacheIdentity(track.trackID, bible.bibleIdentity, fromLineIndex, state.stateHash);
+  const entry: StoredDirectorSceneCacheEntry = {
+    fingerprint,
+    epoch: rollingDirectorEpoch,
+    createdAtUnixMs,
+    expiresAtUnixMs: Math.min(bibleExpiresAtUnixMs, createdAtUnixMs + 30 * 24 * 60 * 60 * 1_000),
+    trackID: track.trackID,
+    trackTitle: track.title.slice(0, 120),
+    trackArtist: track.artist.slice(0, 160),
+    bibleIdentity: bible.bibleIdentity,
+    fromLineIndex,
+    entryStateHash: state.stateHash,
+    entryState: state,
+    cards,
+  };
+  entry.summary = summarizeDirectorCacheEntryV1({
+    lyrics, track, cacheEpoch: rollingDirectorEpoch, source,
+    createdAtUnixMs: entry.createdAtUnixMs, expiresAtUnixMs: entry.expiresAtUnixMs, bible,
+    cards: [...new Map([...priorCards, ...cards].map((card) => [card.sceneID, card])).values()],
+    timing, reachedFinalWindow,
+  }) ?? undefined;
+  rollingDirectorCacheWrite = rollingDirectorCacheWrite.catch(() => undefined).then(async () => {
+    const entries = Object.entries(await readDirectorSceneCache()).filter(([entryKey, stored]) =>
+      entryKey !== key && stored.expiresAtUnixMs > Date.now());
+    entries.push([key, entry]);
+    await chromeAPI.storage.local.set({
+      [directorSceneCacheStorageKey]: Object.fromEntries(entries.sort((a, b) => b[1].expiresAtUnixMs - a[1].expiresAtUnixMs).slice(0, 180)),
+    });
+  });
+  await rollingDirectorCacheWrite;
+};
+
+const directorCacheSummariesV1 = async (): Promise<DirectorCacheSummaryV1[]> => {
+  const candidates = [
+    ...Object.values(await readDirectorBibleCache()).map((entry) => entry.summary),
+    ...Object.values(await readDirectorSceneCache()).map((entry) => entry.summary),
+  ].map(sanitizeDirectorCacheSummaryV1).filter((summary): summary is DirectorCacheSummaryV1 => Boolean(summary))
+    .sort((left, right) => right.createdAtUnixMs - left.createdAtUnixMs);
+  const newestByTrack = new Map<string, DirectorCacheSummaryV1>();
+  candidates.forEach((summary) => {
+    if (!newestByTrack.has(summary.trackIDDisplay)) newestByTrack.set(summary.trackIDDisplay, summary);
+  });
+  return analyzeDirectorCacheSummariesV1([...newestByTrack.values()].slice(0, 100));
+};
+
+const markDirectorCacheReachedFinalWindowV1 = async (trackID: string): Promise<void> => {
+  rollingDirectorCacheWrite = rollingDirectorCacheWrite.catch(() => undefined).then(async () => {
+    const bibleCache = await readDirectorBibleCache();
+    const bibleEntry = bibleCache[trackID];
+    if (bibleEntry?.summary && !bibleEntry.summary.reachedFinalWindow) {
+      bibleEntry.summary = analyzeDirectorCacheSummariesV1([{ ...bibleEntry.summary, reachedFinalWindow: true }])[0];
+    }
+    const sceneCache = await readDirectorSceneCache();
+    Object.values(sceneCache).forEach((entry) => {
+      if (entry.trackID === trackID && entry.summary && !entry.summary.reachedFinalWindow) {
+        entry.summary = analyzeDirectorCacheSummariesV1([{ ...entry.summary, reachedFinalWindow: true }])[0];
+      }
+    });
+    await chromeAPI.storage.local.set({
+      [directorBibleCacheStorageKey]: bibleCache,
+      [directorSceneCacheStorageKey]: sceneCache,
+    });
+  });
+  await rollingDirectorCacheWrite;
+};
+
+const rollingEntryStatesForWindow = async (
+  track: LyricsLookupTrackV0,
+  lyrics: LyricDocumentV0,
+  bible: DirectorBibleV1,
+  fingerprint: string,
+  fromLineIndex: number,
+): Promise<RollingPerformanceStateV1[]> => {
+  const candidates: RollingPerformanceStateV1[] = [];
+  const checkpoint = checkpointRollingPerformanceStateV1(lyrics, bible, fromLineIndex);
+  if (checkpoint) candidates.push(checkpoint);
+  const entries = Object.values(await readDirectorSceneCache()).filter((entry) =>
+    entry.epoch === rollingDirectorEpoch && entry.fingerprint === fingerprint && entry.trackID === track.trackID
+    && entry.bibleIdentity === bible.bibleIdentity && entry.expiresAtUnixMs > Date.now());
+  let accumulatedState = initialRollingPerformanceStateV1(bible);
+  let lastAccepted: SceneCardV1 | undefined;
+  for (const entry of entries.sort((a, b) => a.fromLineIndex - b.fromLineIndex)) {
+    const gapCheckpoint = !lastAccepted || entry.fromLineIndex > lastAccepted.toLineIndex + 1
+      ? checkpointRollingPerformanceStateV1(lyrics, bible, entry.fromLineIndex)
+      : undefined;
+    let state = accumulatedState.stateHash === entry.entryStateHash
+      ? accumulatedState
+      : gapCheckpoint?.stateHash === entry.entryStateHash
+        ? gapCheckpoint
+        : undefined;
+    if (!state) continue;
+    if (state.lastToLineIndex === null || state.lastToLineIndex < fromLineIndex) candidates.push(state);
+    let acceptedAny = false;
+    for (const candidate of entry.cards) {
+      const card = sanitizeSceneCardV1(lyrics, bible, state, candidate);
+      if (!card) break;
+      state = advanceRollingPerformanceStateV1(state, card);
+      lastAccepted = card;
+      acceptedAny = true;
+      if (state.lastToLineIndex !== null && state.lastToLineIndex < fromLineIndex) candidates.push(state);
+    }
+    if (acceptedAny) accumulatedState = state;
+  }
+  return [...new Map(candidates.map((state) => [state.stateHash, state])).values()];
+};
+
+interface RollingTimingV1 {
+  version: "rolling-director-timing-v1";
+  cache: "hit" | "miss";
+  providerMs: number;
+  contractMs: number;
+  attempts: number;
+  inputBytes: number;
+  outputBytes: number;
+}
+
+const rollingTiming = (execution?: { diagnostics: { providerMs: number; contractMs: number; attempts: unknown[]; inputBytes: number; outputBytes: number } }, cache: "hit" | "miss" = "miss"): RollingTimingV1 => ({
+  version: "rolling-director-timing-v1",
+  cache,
+  providerMs: execution?.diagnostics.providerMs ?? 0,
+  contractMs: execution?.diagnostics.contractMs ?? 0,
+  attempts: execution?.diagnostics.attempts.length ?? 0,
+  inputBytes: execution?.diagnostics.inputBytes ?? 0,
+  outputBytes: execution?.diagnostics.outputBytes ?? 0,
+});
+
+const rollingFingerprintStillCurrent = async (
+  track: LyricsLookupTrackV0,
+  lyrics: LyricDocumentV0,
+  fingerprint: string,
+  generation: number,
+): Promise<boolean> => {
+  if (activeRollingFingerprint !== fingerprint || rollingDirectorGeneration !== generation) return false;
+  const current = await directorConfiguration();
+  return Boolean(current && rollingDirectorFingerprint(track, lyrics, current) === fingerprint);
+};
+
+const updateRollingLedgerFromExecution = (
+  ledger: RollingGenerationLedgerV1,
+  diagnosticsValue: { providerMs: number; attempts: unknown[] } | undefined,
+  succeeded: boolean,
+): void => {
+  ledger.providerAttempts += diagnosticsValue?.attempts.length ?? 0;
+  ledger.providerMs += diagnosticsValue?.providerMs ?? 0;
+  ledger.consecutiveFailures = succeeded ? 0 : ledger.consecutiveFailures + 1;
+};
+
 const saveDirectorTiming = async (timing: DirectorTimingV1): Promise<void> => {
   await chromeAPI.storage.local.set({ [directorLastTimingStorageKey]: timing });
 };
@@ -844,6 +1227,328 @@ const resolveAutomaticDirector = async (
   })();
   directorLookupTasks.set(fingerprint, task);
   return task;
+};
+
+type RollingSourceV1 = "cache" | "network" | "local";
+
+interface DirectorBibleResolutionV1 {
+  type: "director-bible-resolution-v1";
+  status: "ready" | "unavailable" | "error" | "stale";
+  source: RollingSourceV1;
+  bible?: DirectorBibleV1;
+  reason?: string;
+  timing: RollingTimingV1;
+}
+
+interface DirectorCoverageResolutionV1 {
+  type: "director-coverage-resolution-v1";
+  status: "ready" | "unavailable" | "error" | "stale";
+  source: RollingSourceV1;
+  cards: SceneCardV1[];
+  coverage: {
+    fromMs: number;
+    toMs: number;
+    aheadMs: number;
+    activation: "immediate" | "next-boundary" | "local";
+  };
+  reason?: string;
+  timing: RollingTimingV1;
+}
+
+const sanitizedRollingReason = (error: unknown, configuration: DirectorBYOKConfigurationV1): string => {
+  void configuration;
+  const diagnosticsValue = directorBYOKDiagnosticsFromErrorV1(error);
+  const last = diagnosticsValue?.attempts.at(-1);
+  const message = error instanceof Error ? error.message : "";
+  if (last?.outcome === "contract-degraded") {
+    const contractReasons = [...message.matchAll(/:contract:([a-z0-9-]{1,120})/giu)];
+    const contractReason = contractReasons.at(-1)?.[1]?.toLowerCase();
+    return `rolling-provider-contract-degraded${contractReason ? `-${contractReason}` : ""}`;
+  }
+  if (last?.outcome === "parse-error") {
+    const suffix = last.status ? `-http-${last.status}` : "";
+    if (/供应商没有返回有效 JSON/u.test(message)) return `rolling-provider-envelope-json-invalid-${last.responseShape ?? "unknown"}${suffix}`;
+    if (/响应缺少文本|缺少 output_text/u.test(message)) return `rolling-provider-envelope-text-missing${suffix}`;
+    if (/模型没有返回 JSON 对象/u.test(message)) return `rolling-provider-output-json-invalid${suffix}`;
+  }
+  if (last) return `rolling-provider-${last.outcome}${last.status ? `-http-${last.status}` : ""}`;
+  return /budget|预算|上限|超时/u.test(message)
+    ? "rolling-provider-budget"
+    : "rolling-provider-error";
+};
+
+const resolveDirectorBibleV1 = async (
+  track: LyricsLookupTrackV0,
+  lyrics: LyricDocumentV0,
+  musicMap?: MusicMapV1,
+): Promise<DirectorBibleResolutionV1> => {
+  const configuration = await directorConfiguration();
+  if (!configuration) return { type: "director-bible-resolution-v1", status: "unavailable", source: "local", reason: "director-not-configured", timing: rollingTiming() };
+  const fingerprint = rollingDirectorFingerprint(track, lyrics, configuration);
+  const generation = activateRollingFingerprint(fingerprint);
+  const cached = await cachedDirectorBible(track, lyrics, fingerprint);
+  if (cached) return { type: "director-bible-resolution-v1", status: "ready", source: "cache", bible: cached.bible, timing: rollingTiming(undefined, "hit") };
+  const ledger = rollingLedger(fingerprint, generation);
+  if (ledger.inFlight) {
+    await ledger.inFlight.catch(() => undefined);
+    const afterWait = await cachedDirectorBible(track, lyrics, fingerprint);
+    if (afterWait) return { type: "director-bible-resolution-v1", status: "ready", source: "cache", bible: afterWait.bible, timing: rollingTiming(undefined, "hit") };
+  }
+  if (!rollingRequestAllowed(ledger, "bible")) return { type: "director-bible-resolution-v1", status: "unavailable", source: "local", reason: "rolling-budget-exhausted", timing: rollingTiming() };
+  ledger.bibleLogicalRequests += 1;
+  ledger.inFlightKind = "bible";
+  let result: DirectorBibleResolutionV1 | undefined;
+  const operation = (async () => {
+    try {
+      const remainingAttempts = 6 - ledger.providerAttempts;
+      const remainingProviderMs = 90_000 - ledger.providerMs;
+      const execution = await executeDirectorBYOKProfileV1(
+        configuration,
+        { lyrics, promptInput: { track: { trackID: track.trackID, title: track.title, artist: track.artist, durationMs: track.durationMs }, musicMap, lines: lyrics.lines } },
+        directorBibleRequestProfileV1,
+        fetch,
+        Math.min(45_000, remainingProviderMs),
+        remainingAttempts,
+      );
+      updateRollingLedgerFromExecution(ledger, execution.diagnostics, true);
+      if (!await rollingFingerprintStillCurrent(track, lyrics, fingerprint, generation)) {
+        result = { type: "director-bible-resolution-v1", status: "stale", source: "local", reason: "stale-generation", timing: rollingTiming(execution) };
+        return;
+      }
+      await saveDirectorBibleCache(track, lyrics, fingerprint, execution.response, rollingTiming(execution));
+      result = { type: "director-bible-resolution-v1", status: "ready", source: "network", bible: execution.response, timing: rollingTiming(execution) };
+    } catch (error) {
+      const diagnosticsValue = directorBYOKDiagnosticsFromErrorV1(error);
+      updateRollingLedgerFromExecution(ledger, diagnosticsValue, false);
+      const timing = rollingTiming(diagnosticsValue ? { diagnostics: diagnosticsValue } : undefined);
+      const localBible = compileLocalDirectorBibleV1(lyrics);
+      await saveDirectorBibleCache(track, lyrics, fingerprint, localBible, timing, "local");
+      result = {
+        type: "director-bible-resolution-v1",
+        status: "ready",
+        source: "local",
+        bible: localBible,
+        reason: sanitizedRollingReason(error, configuration),
+        timing,
+      };
+    }
+  })();
+  ledger.inFlight = operation;
+  await operation.finally(() => {
+    if (ledger.inFlight === operation) {
+      ledger.inFlight = undefined;
+      ledger.inFlightKind = undefined;
+    }
+  });
+  return result!;
+};
+
+const coverageForCards = (cards: SceneCardV1[], atMs: number): { fromMs: number; toMs: number; aheadMs: number } => {
+  const sorted = [...cards].sort((a, b) => a.fromMs - b.fromMs);
+  const activeIndex = sorted.findIndex((card) => atMs >= card.fromMs && atMs < card.toMs);
+  if (activeIndex < 0) return { fromMs: atMs, toMs: atMs, aheadMs: 0 };
+  let toMs = sorted[activeIndex]!.toMs;
+  let lastLineIndex = sorted[activeIndex]!.toLineIndex;
+  for (const card of sorted.slice(activeIndex + 1)) {
+    if (card.fromLineIndex !== lastLineIndex + 1) break;
+    toMs = Math.max(toMs, card.toMs);
+    lastLineIndex = card.toLineIndex;
+  }
+  return { fromMs: sorted[activeIndex]!.fromMs, toMs, aheadMs: Math.max(0, toMs - atMs) };
+};
+
+const mergeValidatedSceneCards = (...groups: readonly SceneCardV1[][]): SceneCardV1[] =>
+  [...new Map(groups.flat().map((card) => [card.sceneID, card])).values()]
+    .sort((left, right) => left.fromLineIndex - right.fromLineIndex || left.sceneIndex - right.sceneIndex);
+
+const sceneWindowFor = (
+  lyrics: LyricDocumentV0,
+  targetMs: number,
+  desiredHorizonMs: number,
+): { fromLineIndex: number; toLineIndex: number; fromMs: number; toMs: number } | undefined => {
+  let start = lyrics.lines.findIndex((line) => targetMs >= line.fromMs && targetMs < line.toMs);
+  if (start < 0) start = lyrics.lines.findIndex((line) => line.fromMs >= targetMs);
+  const safeStart = start < 0 ? lyrics.lines.length - 1 : start;
+  const first = lyrics.lines[safeStart];
+  if (!first) return undefined;
+  const targetToMs = Math.min(first.fromMs + 75_000, Math.max(first.fromMs + 45_000, targetMs + Math.min(60_000, desiredHorizonMs)));
+  let end = safeStart;
+  while (end + 1 < lyrics.lines.length && lyrics.lines[end]!.toMs < targetToMs
+    && lyrics.lines[end + 1]!.toMs - first.fromMs <= 75_000) end += 1;
+  const last = lyrics.lines[end]!;
+  return { fromLineIndex: first.lineIndex, toLineIndex: last.lineIndex, fromMs: first.fromMs, toMs: last.toMs };
+};
+
+const resolveDirectorCoverageV1 = async (
+  track: LyricsLookupTrackV0,
+  lyrics: LyricDocumentV0,
+  bible: DirectorBibleV1,
+  playheadMs: number,
+  desiredHorizonMs: number,
+  options: { musicMap?: MusicMapV1; paused?: boolean; seekTargetMs?: number; state?: RollingPerformanceStateV1 },
+): Promise<DirectorCoverageResolutionV1> => {
+  const configuration = await directorConfiguration();
+  const empty = (status: DirectorCoverageResolutionV1["status"], reason: string): DirectorCoverageResolutionV1 => ({
+    type: "director-coverage-resolution-v1", status, source: "local", cards: [],
+    coverage: { fromMs: playheadMs, toMs: playheadMs, aheadMs: 0, activation: "local" }, reason, timing: rollingTiming(),
+  });
+  if (!configuration) return empty("unavailable", "director-not-configured");
+  const sanitizedBible = sanitizeDirectorBibleV1(lyrics, bible);
+  if (!sanitizedBible) return empty("error", "director-bible-invalid");
+  const fingerprint = rollingDirectorFingerprint(track, lyrics, configuration);
+  const generation = activateRollingFingerprint(fingerprint);
+  const bibleCache = await cachedDirectorBible(track, lyrics, fingerprint);
+  if (!bibleCache || bibleCache.bible.bibleIdentity !== sanitizedBible.bibleIdentity) return empty("error", "director-bible-cache-miss");
+  let cards = await cachedDirectorScenes(track, lyrics, sanitizedBible, fingerprint);
+  const targetMs = options.seekTargetMs ?? playheadMs;
+  if (targetMs >= lyrics.durationMs - 20_000) await markDirectorCacheReachedFinalWindowV1(track.trackID);
+  let coverage = coverageForCards(cards, targetMs);
+  if (coverage.aheadMs >= 35_000) return {
+    type: "director-coverage-resolution-v1", status: "ready", source: "cache", cards, coverage: { ...coverage, activation: "immediate" }, timing: rollingTiming(undefined, "hit"),
+  };
+  if (options.paused && options.seekTargetMs === undefined) return { ...empty("unavailable", "paused-no-horizon-expansion"), cards, coverage: { ...coverage, activation: "local" } };
+  if (options.seekTargetMs === undefined && playheadMs >= lyrics.durationMs - 20_000) return { ...empty("unavailable", "final-window"), cards, coverage: { ...coverage, activation: "local" } };
+  const window = sceneWindowFor(lyrics, targetMs, desiredHorizonMs);
+  if (!window) return empty("error", "scene-window-invalid");
+  const provenanceStates = await rollingEntryStatesForWindow(track, lyrics, sanitizedBible, fingerprint, window.fromLineIndex);
+  const suppliedState = options.state && isRollingPerformanceStateV1(options.state, sanitizedBible) ? options.state : undefined;
+  const matchedSuppliedState = suppliedState
+    ? provenanceStates.find((candidate) => candidate.stateHash === suppliedState.stateHash)
+    : undefined;
+  // The Stage state is only a continuity hint. A valid-but-stale hint can race a
+  // newly cached Bible or scene checkpoint, so never let it block a refill. It
+  // remains untrusted unless it exactly matches state reconstructed from cache
+  // provenance; otherwise continue with the newest trusted background state.
+  const state = matchedSuppliedState ?? provenanceStates.sort((left, right) =>
+    (right.lastToLineIndex ?? -1) - (left.lastToLineIndex ?? -1))[0];
+  if (!state || (state.lastToLineIndex !== null && state.lastToLineIndex >= window.fromLineIndex)) return empty("error", "scene-entry-state-invalid");
+  const exactKey = sceneCacheIdentity(track.trackID, sanitizedBible.bibleIdentity, window.fromLineIndex, state.stateHash);
+  const exactEntry = (await readDirectorSceneCache())[exactKey];
+  if (exactEntry && exactEntry.expiresAtUnixMs > Date.now()) {
+    cards = await cachedDirectorScenes(track, lyrics, sanitizedBible, fingerprint);
+    coverage = coverageForCards(cards, targetMs);
+    if (coverage.aheadMs > 0) {
+      return { type: "director-coverage-resolution-v1", status: "ready", source: "cache", cards, coverage: { ...coverage, activation: "immediate" }, timing: rollingTiming(undefined, "hit") };
+    }
+  }
+  const ledger = rollingLedger(fingerprint, generation);
+  if (ledger.inFlight) {
+    await ledger.inFlight.catch(() => undefined);
+    cards = await cachedDirectorScenes(track, lyrics, sanitizedBible, fingerprint);
+    coverage = coverageForCards(cards, targetMs);
+    if (coverage.aheadMs > 0) return { type: "director-coverage-resolution-v1", status: "ready", source: "cache", cards, coverage: { ...coverage, activation: "immediate" }, timing: rollingTiming(undefined, "hit") };
+  }
+  const commitLocalContinuity = async (reason: string, timing: RollingTimingV1): Promise<DirectorCoverageResolutionV1> => {
+    const localCard = compileLocalSceneCardForWindowV1(
+      lyrics, sanitizedBible, state, window.fromLineIndex, window.toLineIndex,
+    );
+    if (!localCard || !await rollingFingerprintStillCurrent(track, lyrics, fingerprint, generation)) {
+      return { ...empty("unavailable", reason), cards, coverage: { ...coverage, activation: "local" }, timing };
+    }
+    await saveDirectorSceneCache(
+      track, lyrics, fingerprint, sanitizedBible, state, [localCard], cards, bibleCache.expiresAtUnixMs,
+      timing, targetMs >= lyrics.durationMs - 20_000, "local",
+    );
+    ledger.generatedCoverage = [...ledger.generatedCoverage, {
+      fromLineIndex: localCard.fromLineIndex,
+      toLineIndex: localCard.toLineIndex,
+      sceneIDs: [localCard.sceneID],
+    }].slice(-12);
+    cards = mergeValidatedSceneCards(
+      cards,
+      await cachedDirectorScenes(track, lyrics, sanitizedBible, fingerprint),
+      [localCard],
+    );
+    coverage = coverageForCards(cards, targetMs);
+    const activation = localCard.fromMs - playheadMs < 8_000 ? "next-boundary" as const : "immediate" as const;
+    return {
+      type: "director-coverage-resolution-v1", status: "ready", source: "local", cards,
+      coverage: { ...coverage, activation }, reason: `scene-local-continuity-fallback:${reason}`, timing,
+    };
+  };
+  if (!rollingRequestAllowed(ledger, "scene-pack")) {
+    return commitLocalContinuity("rolling-budget-exhausted", rollingTiming());
+  }
+  ledger.sceneLogicalRequests += 1;
+  ledger.inFlightKind = "scene-pack";
+  ledger.inFlightWindow = { fromLineIndex: window.fromLineIndex, toLineIndex: window.toLineIndex };
+  let result: DirectorCoverageResolutionV1 | undefined;
+  const operation = (async () => {
+    try {
+      const execution = await executeDirectorBYOKProfileV1(
+        configuration,
+        {
+          lyrics, bible: sanitizedBible, state,
+          promptInput: {
+            bible: sanitizedBible, state, fromLineIndex: window.fromLineIndex, toLineIndex: window.toLineIndex,
+            lines: lyrics.lines, musicMap: options.musicMap,
+            diversityLedger: {
+              recentLayouts: cards.slice(-8).map((card) => card.layout),
+              recentStageActions: cards.slice(-8).flatMap((card) => card.signatureMoment ? [card.signatureMoment.stageAction] : []),
+              recentEffectPrimitives: cards.slice(-8).flatMap((card) => card.effects.map((effect) => effect.primary.primitive)),
+              recentGesturePrimitives: cards.slice(-8).flatMap((card) => card.gestures.map((gesture) => gesture.primitive)),
+            },
+          },
+        },
+        scenePackRequestProfileV1,
+        fetch,
+        Math.min(45_000, 90_000 - ledger.providerMs),
+        6 - ledger.providerAttempts,
+      );
+      updateRollingLedgerFromExecution(ledger, execution.diagnostics, true);
+      const generated = execution.response;
+      const generatedSpanMs = generated.length > 0 ? generated.at(-1)!.toMs - generated[0]!.fromMs : 0;
+      const availableLyricSpanMs = Math.max(0, lyrics.lines.at(-1)!.toMs - window.fromMs);
+      const minimumPackSpanMs = Math.min(45_000, availableLyricSpanMs);
+      const coversRequestedWindow = generated[0]?.fromLineIndex === window.fromLineIndex
+        && generated.at(-1)?.toLineIndex === window.toLineIndex
+        && generated.every((card, index) => index === 0 || card.fromLineIndex === generated[index - 1]!.toLineIndex + 1);
+      if (!coversRequestedWindow || generatedSpanMs < minimumPackSpanMs || generatedSpanMs > 75_000) {
+        updateRollingLedgerFromExecution(ledger, undefined, false);
+        result = await commitLocalContinuity("scene-pack-coverage-invalid", rollingTiming(execution));
+        return;
+      }
+      if (!await rollingFingerprintStillCurrent(track, lyrics, fingerprint, generation)) {
+        result = { ...empty("stale", "stale-generation"), timing: rollingTiming(execution) };
+        return;
+      }
+      await saveDirectorSceneCache(
+        track, lyrics, fingerprint, sanitizedBible, state, execution.response, cards, bibleCache.expiresAtUnixMs,
+        rollingTiming(execution), targetMs >= lyrics.durationMs - 20_000,
+      );
+      ledger.generatedCoverage = [...ledger.generatedCoverage, {
+        fromLineIndex: execution.response[0]!.fromLineIndex,
+        toLineIndex: execution.response.at(-1)!.toLineIndex,
+        sceneIDs: execution.response.map((card) => card.sceneID),
+      }].slice(-12);
+      cards = mergeValidatedSceneCards(
+        cards,
+        await cachedDirectorScenes(track, lyrics, sanitizedBible, fingerprint),
+        execution.response,
+      );
+      coverage = coverageForCards(cards, targetMs);
+      const intendedBoundaryMs = execution.response[0]?.fromMs ?? window.fromMs;
+      const activation = intendedBoundaryMs - playheadMs < 8_000 ? "next-boundary" as const : "immediate" as const;
+      result = { type: "director-coverage-resolution-v1", status: "ready", source: "network", cards, coverage: { ...coverage, activation }, timing: rollingTiming(execution) };
+    } catch (error) {
+      const diagnosticsValue = directorBYOKDiagnosticsFromErrorV1(error);
+      updateRollingLedgerFromExecution(ledger, diagnosticsValue, false);
+      const reason = sanitizedRollingReason(error, configuration);
+      result = await commitLocalContinuity(
+        reason,
+        rollingTiming(diagnosticsValue ? { diagnostics: diagnosticsValue } : undefined),
+      );
+    }
+  })();
+  ledger.inFlight = operation;
+  await operation.finally(() => {
+    if (ledger.inFlight === operation) {
+      ledger.inFlight = undefined;
+      ledger.inFlightKind = undefined;
+      ledger.inFlightWindow = undefined;
+    }
+  });
+  return result!;
 };
 
 const bridgeState = (): YouTubeMusicBridgeStateV0 => sourceRegistry.state();
@@ -1657,6 +2362,12 @@ chromeAPI.runtime.onMessage.addListener((message, sender, sendResponse) => {
     expectedTrackID?: unknown;
     durationMs?: unknown;
     reason?: unknown;
+    bible?: unknown;
+    state?: unknown;
+    playheadMs?: unknown;
+    desiredHorizonMs?: unknown;
+    paused?: unknown;
+    seekTargetMs?: unknown;
   };
   const fromOffscreen = sender.url === chromeAPI.runtime.getURL("offscreen.html");
   if (request.type === "youtube-music-source-snapshot") {
@@ -1694,6 +2405,10 @@ chromeAPI.runtime.onMessage.addListener((message, sender, sendResponse) => {
       }
     }
     const currentSnapshot = sourceRegistry.snapshotForTab(tabID);
+    if (currentSnapshot && currentSnapshot.playback.durationMs > 0
+      && currentSnapshot.playback.currentTimeMs >= currentSnapshot.playback.durationMs - 20_000) {
+      void markDirectorCacheReachedFinalWindowV1(currentSnapshot.track.trackID);
+    }
     if (audioAnalysisReplayByTab.get(tabID)?.trackID !== currentSnapshot?.track.trackID) {
       audioAnalysisReplayByTab.delete(tabID);
     }
@@ -1942,6 +2657,14 @@ chromeAPI.runtime.onMessage.addListener((message, sender, sendResponse) => {
     return true;
   }
 
+  if (request.type === "youtube-music-director-cache-summaries-v1") {
+    void directorCacheSummariesV1().then(
+      (summaries) => sendResponse({ type: "director-cache-summaries-v1", summaries }),
+      () => sendResponse({ type: "director-cache-summaries-v1", summaries: [], reason: "director-cache-review-unavailable" }),
+    );
+    return true;
+  }
+
   if (request.type === "youtube-music-save-director-config") {
     void saveDirectorConfiguration(request.configuration).then(
       async (result) => {
@@ -1998,6 +2721,82 @@ chromeAPI.runtime.onMessage.addListener((message, sender, sendResponse) => {
     void resolveManualLyrics(track, query.title, query.artist).then(
       sendResponse,
       (error) => sendResponse(lyricsErrorResponse(track.trackID, error)),
+    );
+    return true;
+  }
+
+  if (request.type === "youtube-music-resolve-director-bible-v1") {
+    const parsedLyrics = parseLyricDocumentV0(request.lyrics);
+    const parsedMusicMap = request.musicMap === undefined ? undefined : sanitizeMusicMapV1(request.musicMap);
+    if (!isLyricsLookupTrackV0(request.track) || !parsedLyrics.ok
+      || (request.musicMap !== undefined && !parsedMusicMap)) {
+      sendResponse({ type: "director-bible-resolution-v1", status: "error", source: "local", reason: "invalid-rolling-bible-request", timing: rollingTiming() });
+      return;
+    }
+    if (parsedLyrics.value.recordingID !== youtubeMusicRecordingID(request.track.trackID)) {
+      sendResponse({ type: "director-bible-resolution-v1", status: "error", source: "local", reason: "recording-identity-mismatch", timing: rollingTiming() });
+      return;
+    }
+    void resolveDirectorBibleV1(request.track, parsedLyrics.value, parsedMusicMap).then(
+      sendResponse,
+      () => sendResponse({ type: "director-bible-resolution-v1", status: "error", source: "local", reason: "rolling-bible-unavailable", timing: rollingTiming() }),
+    );
+    return true;
+  }
+
+  if (request.type === "youtube-music-resolve-director-coverage-v1") {
+    const parsedLyrics = parseLyricDocumentV0(request.lyrics);
+    const parsedMusicMap = request.musicMap === undefined ? undefined : sanitizeMusicMapV1(request.musicMap);
+    if (!isLyricsLookupTrackV0(request.track) || !parsedLyrics.ok
+      || (request.musicMap !== undefined && !parsedMusicMap)
+      || typeof request.playheadMs !== "number" || !Number.isFinite(request.playheadMs)
+      || typeof request.desiredHorizonMs !== "number" || !Number.isFinite(request.desiredHorizonMs)
+      || request.playheadMs < 0 || request.playheadMs > (parsedLyrics.ok ? parsedLyrics.value.durationMs : 0)
+      || request.desiredHorizonMs < 0 || request.desiredHorizonMs > 120_000
+      || (request.seekTargetMs !== undefined && (typeof request.seekTargetMs !== "number" || !Number.isFinite(request.seekTargetMs)
+        || request.seekTargetMs < 0 || request.seekTargetMs > (parsedLyrics.ok ? parsedLyrics.value.durationMs : 0)))) {
+      sendResponse({
+        type: "director-coverage-resolution-v1", status: "error", source: "local", cards: [],
+        coverage: { fromMs: 0, toMs: 0, aheadMs: 0, activation: "local" }, reason: "invalid-rolling-coverage-request", timing: rollingTiming(),
+      });
+      return;
+    }
+    if (parsedLyrics.value.recordingID !== youtubeMusicRecordingID(request.track.trackID)) {
+      sendResponse({
+        type: "director-coverage-resolution-v1", status: "error", source: "local", cards: [],
+        coverage: { fromMs: request.playheadMs, toMs: request.playheadMs, aheadMs: 0, activation: "local" }, reason: "recording-identity-mismatch", timing: rollingTiming(),
+      });
+      return;
+    }
+    const bible = sanitizeDirectorBibleV1(parsedLyrics.value, request.bible);
+    if (!bible) {
+      sendResponse({
+        type: "director-coverage-resolution-v1", status: "error", source: "local", cards: [],
+        coverage: { fromMs: request.playheadMs, toMs: request.playheadMs, aheadMs: 0, activation: "local" }, reason: "director-bible-invalid", timing: rollingTiming(),
+      });
+      return;
+    }
+    const state = request.state && isRollingPerformanceStateV1(request.state, bible)
+      ? request.state as RollingPerformanceStateV1
+      : undefined;
+    if (request.state !== undefined && !state) {
+      sendResponse({
+        type: "director-coverage-resolution-v1", status: "error", source: "local", cards: [],
+        coverage: { fromMs: request.playheadMs, toMs: request.playheadMs, aheadMs: 0, activation: "local" }, reason: "scene-entry-state-invalid", timing: rollingTiming(),
+      });
+      return;
+    }
+    void resolveDirectorCoverageV1(request.track, parsedLyrics.value, bible, request.playheadMs, request.desiredHorizonMs, {
+      musicMap: parsedMusicMap,
+      paused: request.paused === true,
+      ...(typeof request.seekTargetMs === "number" ? { seekTargetMs: request.seekTargetMs } : {}),
+      ...(state ? { state } : {}),
+    }).then(
+      sendResponse,
+      () => sendResponse({
+        type: "director-coverage-resolution-v1", status: "error", source: "local", cards: [],
+        coverage: { fromMs: request.playheadMs, toMs: request.playheadMs, aheadMs: 0, activation: "local" }, reason: "rolling-coverage-unavailable", timing: rollingTiming(),
+      }),
     );
     return true;
   }

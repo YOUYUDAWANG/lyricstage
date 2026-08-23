@@ -9,6 +9,7 @@ import {
   saveLyricsConfiguration,
   type SettingsChrome,
 } from "./settingsClient";
+import { loadDirectorCacheSummariesV1 } from "./directorReviewClient";
 import { emptyProviderDraft } from "./settingsModel";
 
 const fakeChrome = (overrides: Partial<SettingsChrome> = {}): SettingsChrome => {
@@ -21,6 +22,9 @@ const fakeChrome = (overrides: Partial<SettingsChrome> = {}): SettingsChrome => 
     }
     if (message.type === "youtube-music-director-config") {
       return { configured: false };
+    }
+    if (message.type === "youtube-music-director-cache-summaries-v1") {
+      return { type: "director-cache-summaries-v1", summaries: [] };
     }
     if (message.type === "youtube-music-list-director-models") {
       return { models: [{ id: "gpt-5", label: "GPT-5" }] };
@@ -53,6 +57,16 @@ describe("extension settings client", () => {
       configured: true,
       endpoint: "http://127.0.0.1:8788/",
     });
+  });
+
+  it("models empty and error cache review independently from provider configuration", async () => {
+    const chromeAPI = fakeChrome();
+    await expect(loadDirectorCacheSummariesV1(chromeAPI)).resolves.toEqual({ status: "empty", summaries: [] });
+    const broken = fakeChrome({ runtime: { sendMessage: vi.fn(async () => { throw new Error("offline"); }) } });
+    await expect(loadDirectorCacheSummariesV1(broken)).resolves.toEqual({
+      status: "error", summaries: [], reason: "读取审片摘要失败",
+    });
+    await expect(loadDirectorConfiguration(chromeAPI)).resolves.toEqual({ configured: false });
   });
 
   it("requests the exact lyrics origin before saving", async () => {

@@ -1,7 +1,14 @@
 export interface ExtensionPreferencesV0 {
   lightweight: boolean;
   vjMode: boolean;
+  rollingDirectorV1: "off" | "shadow" | "on";
 }
+
+export const rollingDirectorRouteV1 = (mode: ExtensionPreferencesV0["rollingDirectorV1"]) => ({
+  generateLegacy: mode !== "on",
+  generateRolling: mode !== "off",
+  renderRolling: mode === "on",
+});
 
 const storageKey = "lyricstage-preferences-v0";
 const lyricsOffsetStorageKey = "lyricstage-lyrics-offsets-v1";
@@ -39,12 +46,15 @@ const sanitizePreferences = (value: unknown): ExtensionPreferencesV0 => {
   return {
     lightweight: stored?.lightweight === true,
     vjMode: stored?.vjMode === true,
+    rollingDirectorV1: stored?.rollingDirectorV1 === "shadow" || stored?.rollingDirectorV1 === "on"
+      ? stored.rollingDirectorV1
+      : "off",
   };
 };
 
 export const readExtensionPreferences = async (): Promise<ExtensionPreferencesV0> => {
   const storage = extensionStorage();
-  if (!storage) return { lightweight: false, vjMode: false };
+  if (!storage) return { lightweight: false, vjMode: false, rollingDirectorV1: "off" };
   return sanitizePreferences((await storage.get(storageKey))[storageKey]);
 };
 

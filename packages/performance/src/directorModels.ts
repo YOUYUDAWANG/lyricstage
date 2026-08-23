@@ -48,6 +48,12 @@ const requestHeaders = (provider: DirectorProviderConnectionV1): HeadersInit => 
   return provider.apiKey ? { Authorization: `Bearer ${provider.apiKey}` } : {};
 };
 
+const isVertexExpress = (provider: DirectorProviderConnectionV1): boolean => {
+  if (provider.protocol !== "gemini") return false;
+  const url = new URL(provider.endpoint);
+  return url.hostname === "aiplatform.googleapis.com" && /\/publishers\/google(?:\/|$)/u.test(url.pathname);
+};
+
 const cleanText = (value: unknown, limit: number): string =>
   (typeof value === "string" ? value.trim().replace(/\s+/gu, " ") : "").slice(0, limit);
 
@@ -117,6 +123,31 @@ export const listDirectorProviderModelsV1 = async (
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), Math.max(1, Math.min(timeoutMs, 30_000)));
   try {
+    if (isVertexExpress(provider)) {
+      const endpoint = provider.endpoint.replace(/\/+$/u, "");
+      const response = await fetchImplementation(`${endpoint}/models/gemini-3.7-flash:generateContent`, {
+        method: "POST",
+        headers: { ...requestHeaders(provider), "Content-Type": "application/json" },
+        body: JSON.stringify({
+          contents: [{ role: "user", parts: [{ text: "Return OK." }] }],
+          generationConfig: { maxOutputTokens: 8 },
+        }),
+        signal: controller.signal,
+      });
+      if (!response.ok) {
+        const body = (await response.text()).slice(0, 4_000);
+        throw new ModelDiscoveryHTTPError(response.status, providerErrorMessage(response.status, body));
+      }
+      await response.text();
+      return {
+        provider: provider.protocol,
+        models: [
+          { id: "gemini-3.7-flash", label: "Gemini 3.7 Flash", detail: "Vertex AI Express · verified probe" },
+          { id: "gemini-2.5-flash", label: "Gemini 2.5 Flash", detail: "Vertex AI Express · verified probe" },
+          { id: "gemini-3.5-flash", label: "Gemini 3.5 Flash", detail: "Vertex AI Express" },
+        ],
+      };
+    }
     const response = await fetchImplementation(modelsURL(provider), {
       method: "GET",
       headers: requestHeaders(provider),

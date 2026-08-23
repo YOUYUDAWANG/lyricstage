@@ -13,6 +13,7 @@ import {
 } from "@lyricstage/performance";
 import { GpuEnvironment, type GpuRendererStatus } from "./GpuEnvironment";
 import type { TheatreAuthoringHandle } from "./theatreAuthoring";
+import { rollingArrivalFixturesV1 } from "./rollingArrivalFixtures";
 
 const fixtures = {
   "逐字混排": lyricFixtures.wordTimedMixed,
@@ -91,6 +92,7 @@ function LabStage({
 export default function App() {
   const [fixtureName, setFixtureName] = useState<keyof typeof fixtures>("逐字混排");
   const [clipID, setClipID] = useState(motionClipsV1[0]!.id);
+  const [rollingFixtureID, setRollingFixtureID] = useState(rollingArrivalFixturesV1[0]!.id);
   const [timeMs, setTimeMs] = useState(0);
   const [playing, setPlaying] = useState(false);
   const [gpuStatus, setGpuStatus] = useState<GpuRendererStatus>("loading");
@@ -118,6 +120,12 @@ export default function App() {
       ? 1
       : 0.48 + (activeLine.lineIndex % 4) * 0.09
     : 0.2;
+  const rollingFixture = rollingArrivalFixturesV1.find((fixture) => fixture.id === rollingFixtureID)!;
+  const rollingFixtureState = timeMs < rollingFixture.arrivalMs
+    ? "local"
+    : rollingFixture.arrivalMs > rollingFixture.intendedBoundaryMs
+      ? "late-local"
+      : "scene-ready";
 
   useEffect(() => {
     if (!import.meta.env.DEV) return undefined;
@@ -175,7 +183,7 @@ export default function App() {
   };
 
   return (
-    <main className="lab-shell">
+    <main className="lab-shell" data-rolling-fixture={rollingFixture.id} data-rolling-state={rollingFixtureState}>
       <header className="lab-header">
         <div>
           <p>LYRICSTAGE / 01</p>
@@ -198,6 +206,12 @@ export default function App() {
               {motionClipsV1.map((candidate) => <option key={candidate.id}>{candidate.id}</option>)}
             </select>
           </label>
+          <label>
+            Rolling arrival
+            <select value={rollingFixtureID} onChange={(event) => setRollingFixtureID(event.target.value as typeof rollingFixtureID)}>
+              {rollingArrivalFixturesV1.map((fixture) => <option key={fixture.id} value={fixture.id}>{fixture.label}</option>)}
+            </select>
+          </label>
           <div className="lab-facts">
             <span>duration</span><strong>{formatTime(lyrics.durationMs)}</strong>
             <span>phrases</span><strong>{index.phrases.length}</strong>
@@ -205,6 +219,7 @@ export default function App() {
             <span>characters</span><strong>{index.characters.length || "not invented"}</strong>
             <span>scene seed</span><strong>{environment.seed}</strong>
             <span>authoring</span><strong>{authoringStatus}</strong>
+            <span>rolling</span><strong>{rollingFixtureState}</strong>
           </div>
           {authoringError && <p className="lab-authoring-error">{authoringError}</p>}
           {authoringStatus === "ready" && (

@@ -153,6 +153,7 @@ export interface DirectorAttemptTimingV1 {
   firstByteMs?: number;
   elapsedMs: number;
   responseBytes: number;
+  responseShape?: "json" | "sse" | "ndjson" | "data-stream" | "html" | "empty" | "plain-text";
   outcome: "ready" | "http-error" | "parse-error" | "contract-degraded" | "timeout" | "network-error";
 }
 

@@ -6,8 +6,12 @@ import {
 import type { LyricsLookupTrackV0 } from "@lyricstage/lyrics";
 import {
   isDirectorPlanV1ForLyrics,
+  sanitizeDirectorBibleV1,
+  type DirectorBibleV1,
   type DirectorPlanV1,
   type MusicMapV1,
+  type RollingPerformanceStateV1,
+  type SceneCardV1,
   type DirectorResolutionResponseV1,
 } from "@lyricstage/performance";
 
@@ -127,6 +131,95 @@ export const requestAutomaticDirectorPlan = async (
   })().finally(() => automaticDirectorTasks.delete(identity));
   automaticDirectorTasks.set(identity, task);
   return task;
+};
+
+export interface DirectorBibleResolutionV1 {
+  type: "director-bible-resolution-v1";
+  status: "ready" | "unavailable" | "error" | "stale";
+  source: "cache" | "network" | "local";
+  bible?: DirectorBibleV1;
+  reason?: string;
+  timing?: unknown;
+}
+
+export interface DirectorCoverageResolutionV1 {
+  type: "director-coverage-resolution-v1";
+  status: "ready" | "unavailable" | "error" | "stale";
+  source: "cache" | "network" | "local";
+  cards: SceneCardV1[];
+  coverage: {
+    fromMs: number;
+    toMs: number;
+    aheadMs: number;
+    activation: "immediate" | "next-boundary" | "local";
+  };
+  reason?: string;
+  timing?: unknown;
+}
+
+const bibleBridgeFailure = (reason: string): DirectorBibleResolutionV1 => ({
+  type: "director-bible-resolution-v1", status: "error", source: "local", reason,
+});
+
+const coverageBridgeFailure = (reason: string): DirectorCoverageResolutionV1 => ({
+  type: "director-coverage-resolution-v1", status: "error", source: "local", cards: [],
+  coverage: { fromMs: 0, toMs: 0, aheadMs: 0, activation: "local" }, reason,
+});
+
+export const requestDirectorBibleV1 = async (
+  track: LyricsLookupTrackV0,
+  lyrics: LyricDocumentV0,
+  musicMap?: MusicMapV1,
+): Promise<DirectorBibleResolutionV1> => {
+  const result = await requestDirectorBridgeWithOneRecovery({
+    type: "youtube-music-resolve-director-bible-v1", track, lyrics, ...(musicMap ? { musicMap } : {}),
+  });
+  if (!result.ok) return bibleBridgeFailure(result.reason);
+  const response = result.response as DirectorBibleResolutionV1 | undefined;
+  if (response?.type !== "director-bible-resolution-v1"
+    || !["ready", "unavailable", "error", "stale"].includes(response.status)
+    || !["cache", "network", "local"].includes(response.source)) {
+    return bibleBridgeFailure("extension-bridge-response-invalid");
+  }
+  if (response.status === "ready" && (!response.bible || !sanitizeDirectorBibleV1(lyrics, response.bible))) {
+    return bibleBridgeFailure("director-bible-invalid");
+  }
+  return response;
+};
+
+export const requestDirectorCoverageV1 = async (
+  track: LyricsLookupTrackV0,
+  lyrics: LyricDocumentV0,
+  bible: DirectorBibleV1,
+  playheadMs: number,
+  desiredHorizonMs: number,
+  options: {
+    musicMap?: MusicMapV1;
+    paused?: boolean;
+    seekTargetMs?: number;
+    state?: RollingPerformanceStateV1;
+  } = {},
+): Promise<DirectorCoverageResolutionV1> => {
+  const result = await requestDirectorBridgeWithOneRecovery({
+    type: "youtube-music-resolve-director-coverage-v1",
+    track, lyrics, bible, playheadMs, desiredHorizonMs,
+    ...(options.musicMap ? { musicMap: options.musicMap } : {}),
+    ...(options.paused ? { paused: true } : {}),
+    ...(options.seekTargetMs !== undefined ? { seekTargetMs: options.seekTargetMs } : {}),
+    ...(options.state ? { state: options.state } : {}),
+  });
+  if (!result.ok) return coverageBridgeFailure(result.reason);
+  const response = result.response as DirectorCoverageResolutionV1 | undefined;
+  if (response?.type !== "director-coverage-resolution-v1" || !Array.isArray(response.cards)
+    || !["ready", "unavailable", "error", "stale"].includes(response.status)
+    || !["cache", "network", "local"].includes(response.source)
+    || !response.coverage || !Number.isFinite(response.coverage.fromMs) || !Number.isFinite(response.coverage.toMs)
+    || !Number.isFinite(response.coverage.aheadMs) || response.coverage.fromMs < 0
+    || response.coverage.toMs < response.coverage.fromMs || response.coverage.toMs > lyrics.durationMs
+    || !["immediate", "next-boundary", "local"].includes(response.coverage.activation)) {
+    return coverageBridgeFailure("extension-bridge-response-invalid");
+  }
+  return response;
 };
 
 export const directorStatusLabel = (

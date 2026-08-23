@@ -525,7 +525,6 @@ h1 {
   width: 100%;
   aspect-ratio: 16 / 9;
   overflow: hidden;
-  transition: background 900ms cubic-bezier(0.22, 1, 0.36, 1);
 }
 
 .stage-canvas-host::after {
@@ -587,7 +586,6 @@ h1 {
   filter: blur(var(--stage-world-blur-silk, 42px));
   transform: scale(1.08);
   pointer-events: none;
-  transition: opacity 900ms ease, filter 900ms ease, background 900ms ease;
 }
 
 .stage-canvas-host[data-director-source="ai"] .stage-world-motif,
@@ -677,15 +675,14 @@ h1 {
   grid-template-columns: minmax(220px, 30%) minmax(0, 1fr);
   gap: clamp(22px, 3.6vw, 68px);
   padding: clamp(34px, 5.4vw, 96px) clamp(38px, 5.8vw, 104px);
-  transition: grid-template-columns 680ms cubic-bezier(0.22, 1, 0.36, 1), gap 680ms cubic-bezier(0.22, 1, 0.36, 1), padding 680ms cubic-bezier(0.22, 1, 0.36, 1);
 }
 
 .stage-now-playing-layout[data-layout-transition-phase="0"] {
-  animation: stage-layout-arrival-a 320ms cubic-bezier(0.22, 1, 0.36, 1);
+  animation: stage-layout-arrival-a 200ms cubic-bezier(0.23, 1, 0.32, 1);
 }
 
 .stage-now-playing-layout[data-layout-transition-phase="1"] {
-  animation: stage-layout-arrival-b 320ms cubic-bezier(0.22, 1, 0.36, 1);
+  animation: stage-layout-arrival-b 200ms cubic-bezier(0.23, 1, 0.32, 1);
 }
 
 @keyframes stage-layout-arrival-a {
@@ -800,21 +797,8 @@ h1 {
 )
   :is(.stage-now-playing-info, .stage-lyric-viewport) {
   transition:
-    opacity 720ms ease,
-    transform 760ms cubic-bezier(0.22, 1, 0.36, 1);
-}
-
-.stage-canvas-host:is(
-  [data-director-source="local"][data-shell-layout="lower-leading-dock"],
-  [data-director-source="ai"][data-world-spatial="cinematic"],
-  [data-director-source="ai"][data-world-spatial="orbital"],
-  [data-director-source="ai"][data-world-spatial="chorusWall"],
-  [data-director-source="cache"][data-world-spatial="cinematic"],
-  [data-director-source="cache"][data-world-spatial="orbital"],
-  [data-director-source="cache"][data-world-spatial="chorusWall"]
-)
-  .stage-lyric-viewport {
-  animation: stage-directed-arrival 820ms cubic-bezier(0.22, 1, 0.36, 1) both;
+    opacity 200ms cubic-bezier(0.23, 1, 0.32, 1),
+    transform 200ms cubic-bezier(0.23, 1, 0.32, 1);
 }
 
 .stage-canvas-host:is([data-director-source="ai"], [data-director-source="cache"]):where([data-world-spatial="anchored"], [data-world-spatial="panoramic"], [data-world-spatial="splitStage"])[data-director-layout="monument"] .stage-now-playing-layout {
@@ -878,11 +862,6 @@ h1 {
   animation: stage-directed-cover-pulse 4.8s cubic-bezier(0.45, 0, 0.55, 1) infinite;
 }
 
-@keyframes stage-directed-arrival {
-  from { opacity: 0.28; transform: translate3d(0, 14px, 0) scale(0.988); }
-  to { opacity: 1; transform: translate3d(0, 0, 0) scale(1); }
-}
-
 @keyframes stage-directed-cover-pulse {
   0%, 100% { filter: saturate(1.02) brightness(0.99); transform: scale(1); }
   48% { filter: saturate(1.10) brightness(1.025); transform: scale(1.018); }
@@ -891,16 +870,14 @@ h1 {
 .stage-canvas-host[data-world-artwork="portal"] .stage-artwork-frame {
   box-shadow:
     0 44px 110px rgba(0, 0, 0, 0.30),
-    0 0 var(--stage-world-glow-portal, 135px) color-mix(in srgb, var(--stage-signal, #ffffff) 22%, transparent),
-    inset 0 0 0 1px rgba(255, 255, 255, 0.18);
+    0 0 var(--stage-world-glow-portal, 135px) color-mix(in srgb, var(--stage-signal, #ffffff) 22%, transparent);
 }
 
 .stage-canvas-host[data-director-cover-effect="portal"] .stage-artwork-frame {
   transform: scale(1.035);
   box-shadow:
     0 48px 120px rgba(0, 0, 0, 0.28),
-    0 0 var(--stage-world-glow-directed, 174px) color-mix(in srgb, var(--stage-signal, #ffffff) 30%, transparent),
-    inset 0 0 0 1px rgba(255, 255, 255, 0.20);
+    0 0 var(--stage-world-glow-directed, 174px) color-mix(in srgb, var(--stage-signal, #ffffff) 30%, transparent);
 }
 
 .stage-canvas-host[data-director-cover-effect="island"] .stage-artwork-frame {
@@ -938,14 +915,10 @@ h1 {
   aspect-ratio: var(--stage-artwork-aspect, 1);
   max-height: min(52vh, 540px);
   overflow: hidden;
-  border-radius: clamp(13px, 1.15vw, 22px);
-  background: rgba(255, 255, 255, 0.08);
-  box-shadow:
-    0 34px 72px rgba(0, 0, 0, 0.27),
-    0 8px 24px rgba(0, 0, 0, 0.19),
-    0 0 68px color-mix(in srgb, var(--stage-signal, #ffffff) 10%, transparent),
-    inset 0 0 0 1px rgba(255, 255, 255, 0.16);
-  transition: width 680ms cubic-bezier(0.22, 1, 0.36, 1), border-radius 680ms cubic-bezier(0.22, 1, 0.36, 1), box-shadow 680ms ease, transform 760ms cubic-bezier(0.22, 1, 0.36, 1);
+  border-radius: clamp(8px, 0.65vw, 12px);
+  background: transparent;
+  box-shadow: 0 28px 64px rgba(0, 0, 0, 0.24);
+  transition: transform 200ms cubic-bezier(0.23, 1, 0.32, 1);
 }
 
 .stage-canvas-host[data-artwork-shape="landscape"] .stage-artwork-frame {
@@ -954,14 +927,6 @@ h1 {
 
 .stage-canvas-host[data-artwork-shape="portrait"] .stage-artwork-frame {
   width: min(82%, 360px);
-}
-
-.stage-artwork-frame::after {
-  position: absolute;
-  inset: 0;
-  background: linear-gradient(132deg, rgba(255, 255, 255, 0.17), transparent 27% 73%, rgba(255, 255, 255, 0.035));
-  pointer-events: none;
-  content: "";
 }
 
 .stage-artwork,
@@ -1001,12 +966,18 @@ h1 {
   animation-play-state: paused;
 }
 
-.stage-canvas-host[data-reduce-motion="true"] .stage-lyric-viewport {
-  animation: none;
+.stage-canvas-host[data-reduce-motion="true"] .stage-now-playing-layout {
+  animation-name: stage-layout-arrival-opacity;
 }
 
-.stage-canvas-host[data-reduce-motion="true"] .stage-now-playing-layout {
-  animation: none;
+.stage-canvas-host[data-reduce-motion="true"]
+  :is(.stage-now-playing-info, .stage-lyric-viewport, .stage-artwork-frame) {
+  transition: none;
+}
+
+@keyframes stage-layout-arrival-opacity {
+  from { opacity: 0.68; transform: none; }
+  to { opacity: 1; transform: none; }
 }
 
 .stage-artwork-fallback {

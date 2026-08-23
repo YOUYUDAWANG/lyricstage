@@ -536,6 +536,22 @@ describe("YouTube Music companion isolated content script lifecycle (real DOM sh
     );
   });
 
+  it("ignores the YTM site-root image placeholder and falls back to the current video thumbnail", () => {
+    const env = createEnvironment({
+      playerBarArtworkURL: "https://music.youtube.com/",
+      mediaSessionArtworkURLs: [],
+      videoArtworkURL: "https://i.ytimg.com/vi/ZmCRFGcON-I/hq720.jpg?sqp=video",
+    });
+    vm.runInContext(contentScriptSource, env.context);
+    env.clock.advance(40);
+    const snapshotMessage = env.sentMessages.find((message) =>
+      (message as { type?: string }).type === "youtube-music-source-snapshot"
+    ) as { snapshot?: { track?: { artworkURL?: string } } } | undefined;
+    expect(snapshotMessage?.snapshot?.track?.artworkURL).toBe(
+      "https://i.ytimg.com/vi/ZmCRFGcON-I/hq720.jpg?sqp=video",
+    );
+  });
+
   it("constructs a public thumbnail fallback when YouTube Music exposes no artwork node", () => {
     const env = createEnvironment({
       playerBarArtworkURL: "",
