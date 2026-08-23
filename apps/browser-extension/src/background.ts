@@ -701,7 +701,7 @@ const directorError = (reason: string, timing?: DirectorTimingV1): DirectorResol
   type: "director-resolution-v1",
   status: "error",
   source: "network",
-  reason: reason.slice(0, 180),
+  reason: reason.slice(0, 420),
   ...(timing ? { timing } : {}),
 });
 

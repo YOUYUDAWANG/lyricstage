@@ -111,7 +111,7 @@ const configuration = (
 
 const providerPayload = (protocol: DirectorProviderProtocolV1) => {
   const text = JSON.stringify(aiFixture());
-  if (protocol === "gemini") return { candidates: [{ content: { parts: [{ text }] } }] };
+  if (protocol === "gemini") return { output_text: text, candidates: [{ content: { parts: [{ text }] } }] };
   if (protocol === "anthropic") return { content: [{ type: "text", text }] };
   if (protocol === "openai-responses") return { output_text: text };
   return { choices: [{ message: { content: text } }] };
@@ -159,7 +159,7 @@ describe("Director BYOK provider adapters", () => {
   for (const [protocol, endpoint, expectedPath] of [
     ["openai-compatible", "https://example.test/v1", "/v1/chat/completions"],
     ["openai-responses", "https://example.test/v1", "/v1/responses"],
-    ["gemini", "https://example.test/v1beta", "/v1beta/models/fixture-model:generateContent"],
+    ["gemini", "https://example.test/v1beta", "/v1beta/interactions"],
     ["anthropic", "https://example.test/v1", "/v1/messages"],
   ] as const) {
     it(`compiles ${protocol} JSON through the local Director contract`, async () => {
@@ -169,6 +169,20 @@ describe("Director BYOK provider adapters", () => {
         const body = String(init?.body);
         expect(body).not.toContain("https://www.youtube.com/watch?v=abcdefghijk");
         expect(body).not.toContain("secret-fixture-key");
+        if (protocol === "gemini") {
+          const payload = JSON.parse(body) as {
+            model?: string;
+            response_format?: { type?: string; mime_type?: string; schema?: unknown };
+            system_instruction?: string;
+            store?: boolean;
+          };
+          expect(payload.model).toBe("fixture-model");
+          expect(payload.response_format?.type).toBe("text");
+          expect(payload.response_format?.mime_type).toBe("application/json");
+          expect(payload.response_format?.schema).toEqual(directorIntentSchemaV1);
+          expect(payload.system_instruction).toBe(directorIntentSystemPromptV1);
+          expect(payload.store).toBe(false);
+        }
         return new Response(JSON.stringify(providerPayload(protocol)), { status: 200, headers: { "Content-Type": "application/json" } });
       });
       const result = await executeDirectorBYOKV1(configuration(protocol, endpoint), requestFixture(), fetchMock as typeof fetch);
@@ -182,6 +196,31 @@ describe("Director BYOK provider adapters", () => {
     });
   }
 
+  it("falls back to generateContent when the Gemini Interactions endpoint is unavailable", async () => {
+    const paths: string[] = [];
+    const payloads: Array<Record<string, unknown>> = [];
+    const fetchMock = vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
+      paths.push(new URL(String(input)).pathname);
+      payloads.push(JSON.parse(String(init?.body)) as Record<string, unknown>);
+      return paths.length === 1
+        ? new Response("interactions unavailable", { status: 404 })
+        : new Response(JSON.stringify(providerPayload("gemini")), { status: 200, headers: { "Content-Type": "application/json" } });
+    });
+    const result = await executeDirectorBYOKV1(
+      configuration("gemini", "https://generativelanguage.googleapis.com/v1beta", "gemini-2.5-flash"),
+      requestFixture(),
+      fetchMock as typeof fetch,
+    );
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(paths).toEqual([
+      "/v1beta/interactions",
+      "/v1beta/models/gemini-2.5-flash:generateContent",
+    ]);
+    expect(payloads[0]?.response_format).toBeTruthy();
+    expect((payloads[1]?.generationConfig as Record<string, unknown>)?.responseFormat).toBeTruthy();
+    expect(result.diagnostics.attempts.map((attempt) => attempt.outcome)).toEqual(["http-error", "ready"]);
+  });
+
   it("uses the fallback provider after an authentication failure", async () => {
     const config = configuration("openai-responses", "https://primary.test/v1");
     config.fallback = { protocol: "anthropic", endpoint: "https://fallback.test/v1", model: "backup", apiKey: "backup-key" };
@@ -191,6 +230,53 @@ describe("Director BYOK provider adapters", () => {
     const result = await executeDirectorBYOKV1(config, requestFixture(), fetchMock as typeof fetch);
     expect(result.provider.protocol).toBe("anthropic");
     expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it("keeps a bounded structured Gemini permission reason without the raw response wrapper", async () => {
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify({
+      error: {
+        code: 403,
+        status: "PERMISSION_DENIED",
+        message: "Requests to this API method are blocked for this project.",
+        details: [{ reason: "API_KEY_SERVICE_BLOCKED" }],
+      },
+    }), { status: 403, headers: { "Content-Type": "application/json" } }));
+    await expect(executeDirectorBYOKV1(
+      configuration("gemini", "https://generativelanguage.googleapis.com/v1beta", "gemini-3.7-flash"),
+      requestFixture(),
+      fetchMock as typeof fetch,
+    )).rejects.toThrow("PERMISSION_DENIED · Requests to this API method are blocked for this project. · API_KEY_SERVICE_BLOCKED");
+  });
+
+  it("repairs invalid scenic evidence locally instead of discarding the whole AI direction", async () => {
+    const invalid = aiFixture() as any;
+    invalid.blocking = { version: "song-blocking-v1", baseLayout: "invalid-layout", transitions: [] };
+    invalid.effects = [];
+    invalid.gestures = [];
+    invalid.dramaticScore.signatureMoments = invalid.dramaticScore.signatureMoments.map((moment: any) => ({
+      ...moment,
+      evidence: { ...moment.evidence, sectionTriggers: ["invented_trigger"] },
+    }));
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify({
+      output_text: JSON.stringify(invalid),
+    }), { status: 200, headers: { "Content-Type": "application/json" } }));
+    const result = await executeDirectorBYOKV1(
+      configuration("openai-responses", "https://primary.test/v1"),
+      requestFixture(),
+      fetchMock as typeof fetch,
+    );
+    const response = result.response as {
+      degraded?: boolean;
+      effects?: unknown[];
+      gestures?: unknown[];
+      dramaticScore?: { signatureMoments?: unknown[] };
+    };
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(response.degraded).toBe(false);
+    expect(response.effects?.length).toBeGreaterThan(0);
+    expect(response.gestures?.length).toBeGreaterThan(0);
+    expect(response.dramaticScore?.signatureMoments?.length).toBeGreaterThanOrEqual(2);
+    expect(result.diagnostics.attempts.map((attempt) => attempt.outcome)).toEqual(["ready"]);
   });
 
   it("retries one transient provider failure before falling back", async () => {

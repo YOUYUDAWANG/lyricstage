@@ -165,7 +165,11 @@ export const directorTimingCopy = (config: DirectorConfigView | undefined): stri
   if (timing.cache === "hit") return `最近一次：缓存命中 · ${timing.totalMs}ms`;
   const provider = timing.attempts.at(-1);
   const providerLabel = provider ? `${provider.protocol} / ${provider.model}` : "未发起模型请求";
-  return `最近一次：总计 ${timing.totalMs}ms · 模型 ${timing.providerMs}ms · 合同 ${timing.contractMs}ms · ${timing.attempts.length} 次 · ${providerLabel}`;
+  const attempts = timing.attempts.map((attempt) => {
+    const status = attempt.status === undefined ? "无 HTTP" : `HTTP ${attempt.status}`;
+    return `#${attempt.sequence} ${attempt.format} ${status} ${attempt.outcome}`;
+  }).join("；");
+  return `最近一次：总计 ${timing.totalMs}ms · 模型 ${timing.providerMs}ms · 合同 ${timing.contractMs}ms · ${timing.attempts.length} 次 · ${providerLabel}${attempts ? ` · ${attempts}` : ""}`;
 };
 
 export const summarizeLyricsConfig = (config: LyricsConfigView | undefined): string =>

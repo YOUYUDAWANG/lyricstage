@@ -1,4 +1,6 @@
+import type { LyricDocumentV0 } from "@lyricstage/contracts";
 import { performanceDirectionSkill } from "./directorBrowserSkill";
+import { compileLocalDirectorPlanV1 } from "./directorPlan";
 
 type JSONRecord = Record<string, unknown>;
 
@@ -78,6 +80,92 @@ export const compactDirectorPromptInputV1 = (value: any): unknown => ({
     } : {}),
   })) : [],
 });
+
+const lyricDocumentFromDirectorInput = (input: any): LyricDocumentV0 => ({
+  version: "lyric-document-v0",
+  recordingID: typeof input.recordingID === "string" ? input.recordingID : "director-local-repair",
+  durationMs: Math.max(1, Math.round((typeof input.duration === "number" ? input.duration : 0) * 1000)),
+  lines: Array.isArray(input.lines) ? input.lines.map((line: any, fallbackIndex: number) => ({
+    lineIndex: Number.isInteger(line.index) ? line.index : fallbackIndex,
+    fromMs: Math.max(0, Math.round((typeof line.from === "number" ? line.from : 0) * 1000)),
+    toMs: Math.max(1, Math.round((typeof line.to === "number" ? line.to : 0) * 1000)),
+    text: typeof line.text === "string" ? line.text : "",
+    words: Array.isArray(line.words) ? line.words.map((word: any, wordIndex: number) => ({
+      wordIndex: Number.isInteger(word.index) ? word.index : wordIndex,
+      fromMs: Math.max(0, Math.round((typeof word.from === "number" ? word.from : line.from ?? 0) * 1000)),
+      toMs: Math.max(1, Math.round((typeof word.to === "number" ? word.to : line.to ?? 0) * 1000)),
+      text: typeof word.text === "string" ? word.text : "",
+    })) : [],
+    ...(typeof line.voiceRole === "string" ? { voiceRole: line.voiceRole } : {}),
+    ...(typeof line.layerID === "string" ? { layerID: line.layerID } : {}),
+    ...(typeof line.overlapGroup === "string" ? { overlapGroup: line.overlapGroup } : {}),
+  })) : [],
+});
+
+export const repairDirectorIntentV1 = (
+  input: any,
+  aiValue: unknown,
+  degradedReason: unknown,
+): unknown => {
+  if (!aiValue || typeof aiValue !== "object" || Array.isArray(aiValue)) return aiValue;
+  const reason = typeof degradedReason === "string" ? degradedReason : "";
+  if (!reason) return aiValue;
+  const value = aiValue as JSONRecord;
+  const hasAIDramaturgy = [value.concept, value.motif, value.intensityArc]
+    .every((item) => typeof item === "string" && item.trim().length > 0)
+    && value.world !== null
+    && typeof value.world === "object"
+    && !Array.isArray(value.world);
+  if (!hasAIDramaturgy) return aiValue;
+  const lyrics = lyricDocumentFromDirectorInput(input);
+  if (lyrics.lines.length === 0) return aiValue;
+  const local = compileLocalDirectorPlanV1(lyrics);
+  const repaired: JSONRecord = { ...value };
+
+  if (reason.includes("sections")) {
+    repaired.sections = local.sections.map((section) => ({
+      fromLineIndex: section.fromLineIndex,
+      toLineIndex: section.toLineIndex,
+      artDirection: section.artDirection,
+      layout: section.layout,
+      typography: section.typography,
+      paletteIndex: section.paletteIndex,
+      intensity: section.intensity,
+    }));
+    repaired.blocking = local.blocking;
+  } else if (reason.includes("blocking")) {
+    const sections = Array.isArray(value.sections) ? value.sections : [];
+    const firstLayout = sections.find((section) => section && typeof section === "object" && typeof (section as JSONRecord).layout === "string") as JSONRecord | undefined;
+    const baseLayout = typeof firstLayout?.layout === "string" ? firstLayout.layout : local.blocking.baseLayout;
+    repaired.sections = sections.map((section) => section && typeof section === "object" && !Array.isArray(section)
+      ? { ...(section as JSONRecord), layout: baseLayout }
+      : section);
+    repaired.blocking = { version: "song-blocking-v1", baseLayout, transitions: [] };
+  }
+
+  if (reason.includes("effects")) {
+    const repairedSections = Array.isArray(repaired.sections) ? repaired.sections : local.sections;
+    const finalSectionIndex = Math.max(0, repairedSections.length - 1);
+    const finalLineIndex = lyrics.lines.at(-1)!.lineIndex;
+    repaired.effects = [{
+      sectionIndex: finalSectionIndex,
+      cardID: "custom",
+      presentation: "reading",
+      primary: { primitive: "field.drift", intensity: 0.28 },
+      support: [],
+      evidence: {
+        songMotif: typeof repaired.motif === "string" ? repaired.motif : local.motif,
+        sectionTriggers: ["final_resolution"],
+        lineIndices: [finalLineIndex],
+        rationale: "A restrained local field resolves the AI premise while invalid scenic evidence is omitted.",
+        confidence: 0.74,
+      },
+    }];
+  }
+  if (reason.includes("gestures")) repaired.gestures = local.gestures;
+  if (reason.includes("dramaticScore")) repaired.dramaticScore = local.dramaticScore;
+  return repaired;
+};
 
 const behaviors = new Set(["settle", "assemble", "gravityDrop", "ripple", "stretch", "echo", "drift", "focus", "converge"]);
 const alignments = new Set(["leading", "center", "trailing"]);

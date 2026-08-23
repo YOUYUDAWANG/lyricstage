@@ -155,6 +155,6 @@ describe("extension settings model", () => {
       inputBytes: 12_000, outputBytes: 4_000,
       attempts: [{ sequence: 1, protocol: "gemini", model: "flash", format: "json-schema", status: 200, elapsedMs: 8_350, responseBytes: 4_000, outcome: "ready" }],
       completedAt: "2026-08-23T00:00:00.000Z",
-    } })).toBe("最近一次：总计 8400ms · 模型 8350ms · 合同 6ms · 1 次 · gemini / flash");
+    } })).toBe("最近一次：总计 8400ms · 模型 8350ms · 合同 6ms · 1 次 · gemini / flash · #1 json-schema HTTP 200 ready");
   });
 });

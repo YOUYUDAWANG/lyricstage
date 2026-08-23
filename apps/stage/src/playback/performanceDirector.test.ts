@@ -207,6 +207,30 @@ describe("requestAutomaticDirectorPlan", () => {
     })).toBe("本地演出 · 扩展需刷新");
     expect(directorStatusLabel({
       type: "director-resolution-v1",
+      status: "error",
+      source: "network",
+      timing: {
+        version: "director-timing-v1", cache: "miss", totalMs: 430, cacheMs: 1,
+        requestBuildMs: 2, providerMs: 420, contractMs: 0, adaptationMs: 0,
+        inputBytes: 12_000, outputBytes: 120,
+        attempts: [{ sequence: 1, protocol: "gemini", model: "flash", format: "json-schema", status: 400, elapsedMs: 420, responseBytes: 120, outcome: "http-error" }],
+        completedAt: "2026-08-23T00:00:00.000Z",
+      },
+    })).toBe("本地演出 · AI HTTP 400");
+    expect(directorStatusLabel({
+      type: "director-resolution-v1",
+      status: "error",
+      source: "network",
+      timing: {
+        version: "director-timing-v1", cache: "miss", totalMs: 430, cacheMs: 1,
+        requestBuildMs: 2, providerMs: 420, contractMs: 0, adaptationMs: 0,
+        inputBytes: 12_000, outputBytes: 120,
+        attempts: [{ sequence: 1, protocol: "gemini", model: "flash", format: "json-schema", status: 200, elapsedMs: 420, responseBytes: 120, outcome: "contract-degraded" }],
+        completedAt: "2026-08-23T00:00:00.000Z",
+      },
+    })).toBe("本地演出 · AI 合同未通过");
+    expect(directorStatusLabel({
+      type: "director-resolution-v1",
       status: "unavailable",
       source: "local",
       reason: "extension-bridge-unavailable",
@@ -223,6 +247,19 @@ describe("requestAutomaticDirectorPlan", () => {
         completedAt: "2026-08-23T00:00:00.000Z",
       },
     })).toContain("模型 12360ms");
+    expect(directorStatusDetail({
+      type: "director-resolution-v1",
+      status: "error",
+      source: "network",
+      reason: "gemini:flash:HTTP 403 · permission denied",
+      timing: {
+        version: "director-timing-v1", cache: "miss", totalMs: 185, cacheMs: 1,
+        requestBuildMs: 3, providerMs: 134, contractMs: 0, adaptationMs: 0,
+        inputBytes: 12_000, outputBytes: 240,
+        attempts: [{ sequence: 1, protocol: "gemini", model: "flash", format: "json-schema", status: 403, elapsedMs: 134, responseBytes: 240, outcome: "http-error" }],
+        completedAt: "2026-08-23T00:00:00.000Z",
+      },
+    })).toContain("permission denied · 总计 185ms");
   });
 });
 

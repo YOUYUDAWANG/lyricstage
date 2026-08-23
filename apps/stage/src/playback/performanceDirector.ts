@@ -142,6 +142,16 @@ export const directorStatusLabel = (
     if (state.reason?.startsWith("extension-bridge-")) return "本地演出 · 扩展桥接中断";
     if (state.reason?.includes("401")) return "本地演出 · AI 鉴权失败";
     if (state.reason?.toLowerCase().includes("abort")) return "本地演出 · AI 生成超时";
+    const attempt = state.timing?.attempts.at(-1);
+    if (attempt?.outcome === "http-error") {
+      return attempt.status === 401 || attempt.status === 403
+        ? "本地演出 · AI 鉴权失败"
+        : `本地演出 · AI HTTP ${attempt.status ?? "错误"}`;
+    }
+    if (attempt?.outcome === "contract-degraded") return "本地演出 · AI 合同未通过";
+    if (attempt?.outcome === "parse-error") return "本地演出 · AI 响应解析失败";
+    if (attempt?.outcome === "timeout") return "本地演出 · AI 生成超时";
+    if (attempt?.outcome === "network-error") return "本地演出 · AI 网络失败";
     return "本地演出 · AI 暂不可用";
   }
   if (state.status === "unavailable" && state.reason === "director-not-configured") {
@@ -157,5 +167,6 @@ export const directorStatusDetail = (state: DirectorLookupState): string | undef
   if (state.status === "requesting") return "同曲只生成一次；音乐分析稍后在本地融合";
   if (!("timing" in state) || !state.timing) return state.reason;
   const timing = state.timing;
-  return `总计 ${timing.totalMs}ms · 模型 ${timing.providerMs}ms · 合同 ${timing.contractMs}ms · ${timing.attempts.length} 次 · 输入 ${Math.round(timing.inputBytes / 1024)}KB`;
+  const timingDetail = `总计 ${timing.totalMs}ms · 模型 ${timing.providerMs}ms · 合同 ${timing.contractMs}ms · ${timing.attempts.length} 次 · 输入 ${Math.round(timing.inputBytes / 1024)}KB`;
+  return state.reason ? `${state.reason} · ${timingDetail}` : timingDetail;
 };

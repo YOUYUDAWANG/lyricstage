@@ -64,6 +64,7 @@ import {
 } from "./playback/fullscreenCaptureLifecycle";
 import { lyricDocumentFromCandidate } from "./playback/lyricsCandidateDocument";
 import {
+  directorStatusDetail,
   directorStatusLabel,
   requestAutomaticDirectorPlan,
   type DirectorLookupState,
@@ -1160,6 +1161,7 @@ export default function App({ embedded = embeddedStageFromLocation, onEmbeddedRe
             title={columnTitle}
             artist={columnArtist}
             directorStatus={directorStatusLabel(directorLookupState)}
+            directorStatusReason={directorStatusDetail(directorLookupState)}
             automaticStatus={automaticLyrics.status}
             message={message}
             candidates={automaticLyrics.candidates}

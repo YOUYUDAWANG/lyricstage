@@ -9,6 +9,7 @@ import {
   directorIntentSchemaV1,
   directorIntentSystemPromptV1,
   expandDirectorIntentV1,
+  repairDirectorIntentV1,
 } from "./directorIntent";
 import type { DirectorAttemptTimingV1 } from "./directorPlan";
 
@@ -216,6 +217,29 @@ const diagnostics = (context: AttemptContext, contractMs: number): DirectorProvi
   attempts: context.attempts.map((attempt) => ({ ...attempt })),
 });
 
+const providerHTTPErrorDetail = (text: string): string => {
+  const compact = text.trim().replace(/\s+/gu, " ");
+  if (!compact) return "";
+  try {
+    const payload = JSON.parse(text) as {
+      error?: {
+        status?: unknown;
+        message?: unknown;
+        details?: Array<{ reason?: unknown }>;
+      };
+    };
+    const status = typeof payload.error?.status === "string" ? payload.error.status.trim() : "";
+    const message = typeof payload.error?.message === "string" ? payload.error.message.trim() : "";
+    const reason = payload.error?.details?.find((detail) => typeof detail?.reason === "string")?.reason;
+    const parts = [status, message, typeof reason === "string" ? reason.trim() : ""]
+      .filter((value, index, values) => value && values.indexOf(value) === index);
+    if (parts.length > 0) return parts.join(" · ").replace(/\s+/gu, " ").slice(0, 360);
+  } catch {
+    // Non-JSON providers still get a bounded single-line diagnostic below.
+  }
+  return compact.slice(0, 360);
+};
+
 const requestJSON = async (
   provider: DirectorProviderConfigurationV1,
   format: string,
@@ -251,7 +275,7 @@ const requestJSON = async (
     attempt.elapsedMs = Date.now() - startedAt;
     if (!response.ok) {
       attempt.outcome = "http-error";
-      const detail = text.trim().replace(/\s+/gu, " ").slice(0, 240);
+      const detail = providerHTTPErrorDetail(text);
       throw new ProviderHTTPError(response.status, `HTTP ${response.status}${detail ? ` · ${detail}` : ""}`);
     }
     try {
@@ -404,11 +428,63 @@ const gemini = async (
   fetchImplementation: typeof fetch,
 ): Promise<unknown> => {
   const model = provider.model.replace(/^models\//u, "");
+  if (!/:generateContent$/u.test(provider.endpoint)) {
+    const interactionsURL = `${provider.endpoint}/interactions`;
+    try {
+      const body = JSON.stringify({
+        model,
+        input: userPrompt,
+        system_instruction: directorIntentSystemPromptV1,
+        response_format: {
+          type: "text",
+          mime_type: "application/json",
+          schema: directorIntentSchemaV1,
+        },
+        store: false,
+        generation_config: {
+          max_output_tokens: 8_192,
+          thinking_level: "low",
+        },
+      });
+      const raw = await requestJSON(provider, "interactions-json-schema", interactionsURL, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          ...(provider.apiKey ? { "x-goog-api-key": provider.apiKey } : {}),
+        },
+        body,
+      }, context, fetchImplementation) as {
+        output_text?: unknown;
+        steps?: Array<{ type?: unknown; content?: Array<{ type?: unknown; text?: unknown }> }>;
+      };
+      const text = typeof raw.output_text === "string"
+        ? raw.output_text
+        : raw.steps?.flatMap((step) => step.type === "model_output" ? step.content ?? [] : [])
+          .flatMap((part) => part.type === "text" && typeof part.text === "string" ? [part.text] : [])
+          .join("") ?? "";
+      return parseProviderObject(text, context, "Gemini Interactions 响应缺少文本");
+    } catch (error) {
+      if (!(error instanceof ProviderHTTPError) || ![400, 404, 405, 422].includes(error.status)) throw error;
+    }
+  }
   const url = /:generateContent$/u.test(provider.endpoint)
     ? provider.endpoint
     : `${provider.endpoint}/models/${encodeURIComponent(model)}:generateContent`;
   const generationConfigs: Array<{ name: string; value: Record<string, unknown> }> = [
-    { name: "json-schema", value: { temperature: 0.45, maxOutputTokens: 8_192, responseMimeType: "application/json", responseJsonSchema: directorIntentSchemaV1 } },
+    {
+      name: "json-schema",
+      value: {
+        temperature: 0.45,
+        maxOutputTokens: 8_192,
+        responseFormat: {
+          text: {
+            mimeType: "application/json",
+            schema: directorIntentSchemaV1,
+          },
+        },
+      },
+    },
+    { name: "legacy-json-schema", value: { temperature: 0.45, maxOutputTokens: 8_192, responseMimeType: "application/json", responseJsonSchema: directorIntentSchemaV1 } },
     { name: "json-object", value: { temperature: 0.45, maxOutputTokens: 8_192, responseMimeType: "application/json" } },
   ];
   let lastError: unknown;
@@ -513,10 +589,17 @@ export const executeDirectorBYOKV1 = async (
         const aiValue = await generate(provider, userPrompt, context, fetchImplementation);
         const contractStartedAt = performance.now();
         const expanded = expandDirectorIntentV1(input, aiValue);
-        const response = finalizeFullscreenResponse(input, expanded, `${directorVersion}-byok-intent-v1`) as {
+        let response = finalizeFullscreenResponse(input, expanded, `${directorVersion}-byok-intent-v1`) as {
           degraded?: unknown;
           degradedReason?: unknown;
         };
+        if (response.degraded === true) {
+          const repaired = repairDirectorIntentV1(input, expanded, response.degradedReason);
+          response = finalizeFullscreenResponse(input, repaired, `${directorVersion}-byok-intent-v1`) as {
+            degraded?: unknown;
+            degradedReason?: unknown;
+          };
+        }
         contractMs += performance.now() - contractStartedAt;
         if (response.degraded !== true) {
           return { response, provider: publicProvider(provider), diagnostics: diagnostics(context, contractMs) };
