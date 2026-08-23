@@ -44,6 +44,34 @@ button, select, input { font: inherit; }
 .lab-memory-previous { top: 18%; right: 8%; font-size: clamp(20px, 2.1vw, 34px); text-align: right; }
 .lab-memory-next { left: 8%; bottom: 15%; font-size: clamp(18px, 1.8vw, 30px); }
 
+.director-v2-experiment-stage { position: relative; width: 100%; aspect-ratio: 16 / 9; overflow: hidden; margin-top: 14px; border: 1px solid #ffffff14; border-radius: 16px; background: radial-gradient(circle at 76% 22%, #45d5ff1f, transparent 36%), #07080b; box-shadow: 0 24px 64px #0007; }
+.director-v2-experiment-stage canvas { display: block; width: 100%; height: 100%; }
+.director-v2-experiment-label { position: absolute; top: 16px; left: 18px; display: flex; align-items: center; gap: 9px; border-radius: 999px; padding: 6px 10px 6px 7px; color: #ffffffa8; background: #050507bd; backdrop-filter: blur(12px); font: 9px ui-monospace, monospace; }
+.director-v2-experiment-label strong { display: grid; width: 22px; height: 22px; place-items: center; border-radius: 50%; color: #08090b; background: #a9efff; font-size: 11px; }
+.director-v2-experiment-effect { position: absolute; right: 18px; bottom: 16px; color: #ffffff78; font: 9px ui-monospace, monospace; }
+
+.director-v2-gate { margin-top: 14px; border: 1px solid #ffffff14; border-radius: 14px; padding: 14px; background: #0e0f13; }
+.director-v2-gate > header { display: flex; align-items: end; justify-content: space-between; gap: 18px; }
+.director-v2-gate > header > div { display: grid; gap: 5px; }
+.director-v2-gate > header span { color: #a9efff; font: 9px ui-monospace, monospace; letter-spacing: .09em; }
+.director-v2-gate > header strong { color: #ffffffdc; font-size: 15px; }
+.director-v2-gate[data-gate-status="passed"] > header strong { color: #75e7a9; }
+.director-v2-gate[data-gate-status="failed"] > header strong { color: #ff7598; }
+.director-v2-gate > header small { max-width: 300px; color: #ffffff50; font-size: 9px; line-height: 1.4; text-align: right; }
+.director-v2-variants { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; margin-top: 14px; }
+.director-v2-variants button { display: grid; min-width: 0; gap: 4px; border: 1px solid #ffffff12; border-radius: 10px; padding: 10px; color: #ffffff85; text-align: left; background: #ffffff06; cursor: pointer; }
+.director-v2-variants button[aria-pressed="true"] { border-color: #a9efff70; color: #fff; background: #a9efff12; }
+.director-v2-variants b { color: #a9efff; font: 700 15px ui-monospace, monospace; }
+.director-v2-variants span { overflow: hidden; font-size: 10px; text-overflow: ellipsis; white-space: nowrap; }
+.director-v2-variants small { color: #ffffff42; font: 8px ui-monospace, monospace; }
+.director-v2-active-facts { display: grid; grid-template-columns: auto 1fr; gap: 6px 10px; margin-top: 12px; border-radius: 9px; padding: 10px; background: #050507; }
+.director-v2-active-facts span { color: #ff8eaa; font: 8px ui-monospace, monospace; text-transform: uppercase; }
+.director-v2-active-facts code { overflow: hidden; color: #a9efff; font: 8px ui-monospace, monospace; text-overflow: ellipsis; white-space: nowrap; }
+.director-v2-review-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 7px; margin-top: 12px; }
+.director-v2-review-grid label { display: grid; grid-template-columns: 1fr 74px; align-items: center; gap: 8px; min-height: 36px; border-top: 1px solid #ffffff0d; padding-top: 7px; color: #ffffff9c; font-size: 9px; }
+.director-v2-review-grid select { min-height: 28px; border: 1px solid #ffffff16; border-radius: 7px; color: #fff; background: #17171b; font-size: 9px; }
+.director-v2-gate > p { margin: 12px 0 0; color: #ffffff4a; font-size: 9px; }
+
 .lab-transport { display: grid; grid-template-columns: auto auto auto auto minmax(180px, 1fr) 90px 60px; gap: 8px; align-items: center; margin-top: 12px; padding: 10px; border: 1px solid #ffffff10; border-radius: 12px; background: #111115; }
 .lab-transport button { min-height: 34px; border: 0; border-radius: 8px; padding: 0 13px; color: #fff; background: #ffffff10; cursor: pointer; }
 .lab-transport input { width: 100%; accent-color: #ff4d7d; }

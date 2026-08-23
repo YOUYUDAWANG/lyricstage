@@ -2,7 +2,9 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { lyricFixtures, type LyricDocumentV0 } from "@lyricstage/contracts";
 import {
   compileEnvironmentSceneV1,
+  compileDirectorV2ExperimentV1,
   defaultEnvironmentTuningV1,
+  directorV2ManualFixtures,
   motionClipsV1,
   sampleMotionClipV1,
   TimedTextIndexV1,
@@ -10,8 +12,11 @@ import {
   type EnvironmentTuningV1,
   type MotionClipV1,
   type TimedTextUnitV1,
+  type DirectorV2ExperimentVariantID,
 } from "@lyricstage/performance";
 import { GpuEnvironment, type GpuRendererStatus } from "./GpuEnvironment";
+import { DirectorV2ExperimentStage } from "./DirectorV2ExperimentStage";
+import { DirectorV2GatePanel } from "./DirectorV2GatePanel";
 import type { TheatreAuthoringHandle } from "./theatreAuthoring";
 import { rollingArrivalFixturesV1 } from "./rollingArrivalFixtures";
 
@@ -91,6 +96,8 @@ function LabStage({
 
 export default function App() {
   const [fixtureName, setFixtureName] = useState<keyof typeof fixtures>("逐字混排");
+  const [directorFixtureID, setDirectorFixtureID] = useState(directorV2ManualFixtures[0]!.id);
+  const [directorVariantID, setDirectorVariantID] = useState<DirectorV2ExperimentVariantID>("B");
   const [clipID, setClipID] = useState(motionClipsV1[0]!.id);
   const [rollingFixtureID, setRollingFixtureID] = useState(rollingArrivalFixturesV1[0]!.id);
   const [timeMs, setTimeMs] = useState(0);
@@ -105,6 +112,13 @@ export default function App() {
   const anchorRef = useRef({ wallMs: 0, mediaMs: 0 });
   const authoringRef = useRef<TheatreAuthoringHandle | null>(null);
   const lyrics = fixtures[fixtureName];
+  const directorFixture = directorV2ManualFixtures.find((fixture) => fixture.id === directorFixtureID)!;
+  const directorLyrics = Object.values(lyricFixtures).find((candidate) => candidate.recordingID === directorFixture.recordingID)!;
+  const directorExperiment = useMemo(
+    () => compileDirectorV2ExperimentV1(directorLyrics, directorFixture),
+    [directorFixture, directorLyrics],
+  )!;
+  const directorVariant = directorExperiment.variants.find((variant) => variant.id === directorVariantID)!;
   const clip = motionClipsV1.find((candidate) => candidate.id === clipID) ?? motionClipsV1[0]!;
   const index = useMemo(() => new TimedTextIndexV1(lyrics), [lyrics]);
   const environment = useMemo(() => compileEnvironmentSceneV1(lyrics.recordingID), [lyrics.recordingID]);
@@ -180,6 +194,18 @@ export default function App() {
     setPlaying(false);
     setFixtureName(name);
     setTimeMs(0);
+    const matching = directorV2ManualFixtures.find((fixture) => fixture.recordingID === fixtures[name].recordingID);
+    if (matching) setDirectorFixtureID(matching.id);
+  };
+
+  const selectDirectorFixture = (fixtureID: string) => {
+    const selected = directorV2ManualFixtures.find((fixture) => fixture.id === fixtureID)!;
+    const matchingName = Object.entries(fixtures).find(([, candidate]) => candidate.recordingID === selected.recordingID)?.[0] as keyof typeof fixtures | undefined;
+    setPlaying(false);
+    setDirectorFixtureID(fixtureID);
+    setDirectorVariantID("B");
+    if (matchingName) setFixtureName(matchingName);
+    setTimeMs(0);
   };
 
   return (
@@ -189,7 +215,7 @@ export default function App() {
           <p>LYRICSTAGE / 01</p>
           <h1>Performance Lab</h1>
         </div>
-        <span>fixture-only · no YTM · no AI · GPU {gpuStatus}</span>
+        <span>manual cue gate · no YTM · no AI · GPU {gpuStatus}</span>
       </header>
 
       <div className="lab-workspace">
@@ -207,6 +233,14 @@ export default function App() {
             </select>
           </label>
           <label>
+            Director V2 fixture
+            <select value={directorFixtureID} onChange={(event) => selectDirectorFixture(event.target.value)}>
+              {directorV2ManualFixtures.map((fixture) => (
+                <option key={fixture.id} value={fixture.id}>{fixture.category}</option>
+              ))}
+            </select>
+          </label>
+          <label>
             Rolling arrival
             <select value={rollingFixtureID} onChange={(event) => setRollingFixtureID(event.target.value as typeof rollingFixtureID)}>
               {rollingArrivalFixturesV1.map((fixture) => <option key={fixture.id} value={fixture.id}>{fixture.label}</option>)}
@@ -220,6 +254,8 @@ export default function App() {
             <span>scene seed</span><strong>{environment.seed}</strong>
             <span>authoring</span><strong>{authoringStatus}</strong>
             <span>rolling</span><strong>{rollingFixtureState}</strong>
+            <span>gate variant</span><strong>{directorVariantID}</strong>
+            <span>recipe events</span><strong>{directorVariant.metrics.recipeEventCount}</strong>
           </div>
           {authoringError && <p className="lab-authoring-error">{authoringError}</p>}
           {authoringStatus === "ready" && (
@@ -247,6 +283,19 @@ export default function App() {
             tuning={environmentTuning}
             structureEnergy={structureEnergy}
             onRendererStatus={setGpuStatus}
+          />
+          <DirectorV2ExperimentStage
+            lyrics={directorLyrics}
+            plan={directorVariant.plan}
+            timeMs={Math.min(directorLyrics.durationMs, timeMs)}
+            variantID={directorVariant.id}
+            variantLabel={directorVariant.label}
+          />
+          <DirectorV2GatePanel
+            key={directorExperiment.fixtureID}
+            experiment={directorExperiment}
+            activeVariantID={directorVariantID}
+            onSelectVariant={setDirectorVariantID}
           />
           <div className="lab-transport">
             <button type="button" onClick={() => setPlaying((value) => !value)}>{playing ? "Pause" : "Play"}</button>
@@ -301,6 +350,20 @@ export default function App() {
             orbs: environment.orbs.length,
             structureEnergy,
             tuning: environmentTuning,
+          }, null, 2)}</pre>
+          <h2>Director V2 gate</h2>
+          <pre>{JSON.stringify({
+            fixture: directorExperiment.fixtureID,
+            variant: directorVariant.id,
+            metrics: directorVariant.metrics,
+            events: directorVariant.compiled?.recipeEvents.map((event) => ({
+              cueID: event.cueID,
+              recipe: event.recipe,
+              branch: event.branch,
+              creates: event.promiseCreates,
+              consumes: event.promiseConsumes,
+            })) ?? [],
+            promises: directorVariant.compiled?.promises ?? [],
           }, null, 2)}</pre>
         </aside>
       </div>

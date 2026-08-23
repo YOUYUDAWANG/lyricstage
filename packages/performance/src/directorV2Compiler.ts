@@ -316,7 +316,11 @@ const promiseFactFor = (
 const chooseRecipeBranch = (
   context: SignatureCueContextV1,
   consumedPromise?: ObservableVisualPromiseV1,
+  branchPolicy: "contextual" | "context-free" = "contextual",
 ): SignatureRecipeBranchV1 => {
+  if (branchPolicy === "context-free") {
+    return context.cue.role === "rupture" ? "separation" : context.cue.role === "release" ? "reveal" : "traceReturn";
+  }
   if (context.cue.role === "rupture") {
     return context.window.arcIntent === "break" ? "vacuum" : "separation";
   }
@@ -341,6 +345,7 @@ const resolveSignatureRecipes = (
   lyrics: LyricDocumentV0,
   fixture: DirectorV2ManualFixtureV1,
   contexts: SignatureCueContextV1[],
+  branchPolicy: "contextual" | "context-free",
 ): { events: ResolvedSignatureRecipeEventV1[]; promises: ObservableVisualPromiseV1[] } => {
   const events: ResolvedSignatureRecipeEventV1[] = [];
   const promises: ObservableVisualPromiseV1[] = [];
@@ -355,7 +360,7 @@ const resolveSignatureRecipes = (
       ? nearestCompatiblePromise(promises, fixture.motifAnchor, context.influence.coreRange.fromLineIndex)
       : undefined;
     if (recipe === "recall" && !consumed) return;
-    const branch = chooseRecipeBranch(context, consumed);
+    const branch = chooseRecipeBranch(context, consumed, branchPolicy);
     const effectID = effectIDFor(context.cue.id, recipe, branch);
     const event: ResolvedSignatureRecipeEventV1 = {
       cueID: context.cue.id,
@@ -571,6 +576,7 @@ export const compileManualDirectorV2V1 = (
   lyrics: LyricDocumentV0,
   localPlan: DirectorPlanV1,
   fixture: DirectorV2ManualFixtureV1,
+  options: { recipeBranchPolicy?: "contextual" | "context-free" } = {},
 ): CompiledManualDirectorV2V1 | null => {
   if (
     localPlan.recordingID !== lyrics.recordingID
@@ -592,7 +598,12 @@ export const compileManualDirectorV2V1 = (
       contextByCueID.set(cue.id, { cue, window, influence });
     });
   });
-  const signature = resolveSignatureRecipes(lyrics, fixture, [...contextByCueID.values()]);
+  const signature = resolveSignatureRecipes(
+    lyrics,
+    fixture,
+    [...contextByCueID.values()],
+    options.recipeBranchPolicy ?? "contextual",
+  );
   const eventByCueID = new Map(signature.events.map((event) => [event.cueID, event]));
   const lineByIndex = new Map(lyrics.lines.map((line) => [line.lineIndex, line]));
   const directives = localPlan.directives.map((original) => {

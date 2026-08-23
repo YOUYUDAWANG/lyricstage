@@ -15,3 +15,6 @@ export * from "./rollingDirector";
 export * from "./rollingDirectorPrompt";
 export * from "./directorCacheReview";
 export * from "./vocalTiming";
+export * from "./directorV2Fixtures";
+export * from "./directorV2Compiler";
+export * from "./directorV2Experiment";

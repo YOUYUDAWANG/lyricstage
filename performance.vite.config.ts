@@ -10,7 +10,9 @@ export default defineConfig({
   resolve: {
     alias: {
       "@lyricstage/contracts": fromRoot("./packages/contracts/src/index.ts"),
+      "@lyricstage/core": fromRoot("./packages/core/src/index.ts"),
       "@lyricstage/performance": fromRoot("./packages/performance/src/index.ts"),
+      "@lyricstage/renderer": fromRoot("./packages/renderer/src/index.ts"),
     },
   },
   build: {
