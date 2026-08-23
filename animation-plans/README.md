@@ -1,5 +1,7 @@
 # LyricStage Director V2 animation roadmap
 
+> **Status: SUPERSEDED.** This roadmap is retained as design history. The only implementation architecture is [009 — Director V2 final architecture](009-director-v2-final-architecture.md). Do not implement the targets, dependencies, or density quotas below unless 009 is explicitly superseded by a later ADR.
+
 This roadmap turns LyricStage from a reliable but conservative rolling lyric stage into a layered, memorable real-time performance system.
 
 For external review, start with [the Chinese expert review brief](EXPERT_REVIEW_BRIEF.zh-CN.md). It is self-contained and distinguishes the recommended architecture from ideas that should be reused, reduced, or deferred.
@@ -13,14 +15,15 @@ For external review, start with [the Chinese expert review brief](EXPERT_REVIEW_
 
 | Plan | Title | Severity | Status | Depends on |
 |---|---|---:|---|---|
-| [001](001-return-multiple-scenes-per-window.md) | Return multiple scenes per rolling window | HIGH | TODO | — |
-| [002](002-let-ai-direct-every-lyric-line.md) | Let AI direct every lyric line | HIGH | TODO | 001 |
-| [003](003-add-a-local-audio-reactive-bus.md) | Add a local audio-reactive bus | HIGH | TODO | 001 |
-| [004](004-make-layout-transitions-dramatic.md) | Make layout transitions dramatic | HIGH | TODO | 001, 003 |
-| [005](005-build-signature-choreography-clips.md) | Build signature choreography clips | HIGH | TODO | 002, 003, 004 |
-| [006](006-build-the-director-review-studio.md) | Build the Director Review studio | MEDIUM | TODO | 001, 002, 005 |
-| [007](007-version-visual-identity-packs.md) | Version visual identity packs | MEDIUM | TODO | 004, 005 |
-| [008](008-gate-release-on-artistic-quality.md) | Gate release on artistic quality | HIGH | TODO | 001–007 |
+| [001](001-return-multiple-scenes-per-window.md) | Return multiple scenes per rolling window | HIGH | SUPERSEDED | [009](009-director-v2-final-architecture.md) |
+| [002](002-let-ai-direct-every-lyric-line.md) | Let AI direct every lyric line | HIGH | SUPERSEDED | [009](009-director-v2-final-architecture.md) |
+| [003](003-add-a-local-audio-reactive-bus.md) | Add a local audio-reactive bus | HIGH | SUPERSEDED | [009](009-director-v2-final-architecture.md) |
+| [004](004-make-layout-transitions-dramatic.md) | Make layout transitions dramatic | HIGH | SUPERSEDED | [009](009-director-v2-final-architecture.md) |
+| [005](005-build-signature-choreography-clips.md) | Build signature choreography clips | HIGH | SUPERSEDED | [009](009-director-v2-final-architecture.md) |
+| [006](006-build-the-director-review-studio.md) | Build the Director Review studio | MEDIUM | SUPERSEDED | [009](009-director-v2-final-architecture.md) |
+| [007](007-version-visual-identity-packs.md) | Version visual identity packs | MEDIUM | SUPERSEDED | [009](009-director-v2-final-architecture.md) |
+| [008](008-gate-release-on-artistic-quality.md) | Gate release on artistic quality | HIGH | SUPERSEDED | [009](009-director-v2-final-architecture.md) |
+| [009](009-director-v2-final-architecture.md) | Director V2 final architecture | HIGH | FROZEN | steps 1–10 |
 
 ## Product phases
 

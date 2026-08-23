@@ -1,6 +1,7 @@
 # 006 — Build the Director Review studio
 
-- **Status**: TODO
+- **Status**: SUPERSEDED
+- **Superseded by**: [009 — Director V2 final architecture](009-director-v2-final-architecture.md)
 - **Commit**: `82a5e21`
 - **Severity**: MEDIUM
 - **Category**: Missed opportunity / cohesion

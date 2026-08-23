@@ -1,6 +1,7 @@
 # 004 — Make layout transitions dramatic
 
-- **Status**: TODO
+- **Status**: SUPERSEDED
+- **Superseded by**: [009 — Director V2 final architecture](009-director-v2-final-architecture.md)
 - **Commit**: `82a5e21`
 - **Severity**: HIGH
 - **Category**: Physicality / cohesion / interruptibility

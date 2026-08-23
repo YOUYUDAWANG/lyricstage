@@ -1,9 +1,11 @@
 # LyricStage Director V2 专家评审说明
 
+> **状态：已被取代。** 本文保留为专家评审历史。唯一可实施架构是 [009 — Director V2 final architecture](009-director-v2-final-architecture.md)；除非由后续 ADR 明确取代 009，不得实施本文中的阶段、密度目标、MotionClip、Reactive Bus、Theatre 导出或多场景 Provider 路线。
+
 - **文档目的**：邀请资深动画导演、创意技术总监、实时图形工程师或音乐可视化研究者，对 LyricStage 下一代 AI 演出系统进行独立评审。
 - **目标基线**：`origin/main@82a5e21`
 - **当前产品版本**：0.3.1
-- **评审状态**：设计阶段，尚未实施 Director V2
+- **评审状态**：已完成；实施裁决见 009
 - **希望得到的结果**：指出设计中合理、过度、遗漏或错误的部分，并给出优先级明确的修订建议。
 
 ---
