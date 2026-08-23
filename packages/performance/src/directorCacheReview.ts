@@ -80,6 +80,7 @@ const summaryCacheEpochs = new Set([
   "rolling-director-generation-v1.3-window-intent-v2",
   "rolling-director-generation-v1.4-window-intent-density-v2",
   "rolling-director-generation-v1.5-narrative-density-v2",
+  "rolling-director-generation-v1.6-local-repair-provenance-v2",
 ]);
 const warningOrder: readonly DirectorDiversityWarningV1[] = [
   "minimum-budget", "single-scale", "static-without-evidence", "repeated-tuple", "coverage-gap", "local-repair-heavy",

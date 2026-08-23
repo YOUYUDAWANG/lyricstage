@@ -557,9 +557,11 @@ export function StageCanvas({
       data-director-mode={directorMode}
       data-bible-source={bibleSource ?? "local"}
       data-scene-count={rollingCards.length}
+      data-scene-ranges={rollingCards.map((card) => `${card.fromLineIndex}-${card.toLineIndex}:${card.fromMs}-${card.toMs}`).join("|")}
       data-scene-id={observedScene?.sceneID}
       data-scene-coverage-ms={Math.round(observedSceneCoverageMs)}
       data-director-state={directorLookupState.status}
+      data-director-reason={directorLookupState.reason}
       data-director-version={observedPlan.directorVersion}
       data-layout-change-count={observedPlan.blocking.transitions.length}
       data-gesture-count={observedPlan.gestures.length}

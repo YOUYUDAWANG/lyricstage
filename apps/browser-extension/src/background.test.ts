@@ -796,8 +796,9 @@ describe("YouTube Music background routing", () => {
     });
     expect(responses.slice(1).every((response) => response.status === "ready"
       && response.source === "local" && response.reason.includes("scene-negative-cache"))).toBe(true);
-    expect(Object.values((storage.get("lyricstage-director-scene-cache-v1") as Record<string, unknown> | undefined) ?? {}))
-      .toHaveLength(0);
+    const localSceneCache = storage.get("lyricstage-director-scene-cache-v1") as Record<string, any> | undefined;
+    expect(Object.values(localSceneCache ?? {}).length).toBeGreaterThan(0);
+    expect(Object.values(localSceneCache ?? {}).every((entry) => entry.provenance === "local-repair")).toBe(true);
     expect(fetcher).toHaveBeenCalledTimes(3);
   });
 
@@ -1173,7 +1174,7 @@ describe("YouTube Music background routing", () => {
     expect(requestedStateHashes[0]).not.toBe(forged.stateHash);
   });
 
-  it("keeps local continuity out of the AI-positive cache and retries after a short negative TTL", async () => {
+  it("persists local continuity separately from AI-positive cache and retries the next window after the negative TTL", async () => {
     await send({
       type: "youtube-music-save-director-config",
       configuration: {
@@ -1205,20 +1206,26 @@ describe("YouTube Music background routing", () => {
       type: "youtube-music-resolve-director-coverage-v1", track, lyrics, bible,
       playheadMs: 60_000, desiredHorizonMs: 60_000,
     };
-    expect(await sendResolved(request, sender(10))).toMatchObject({
+    const fallback = await sendResolved(request, sender(10));
+    expect(fallback).toMatchObject({
       status: "ready", source: "local", reason: expect.stringContaining("scene-local-continuity-fallback"),
     });
     const callsAfterFallback = invalidFetcher.mock.calls.length;
     const storedAfterFallback = storage.get("lyricstage-director-scene-cache-v1") as Record<string, any> | undefined;
-    expect(Object.values(storedAfterFallback ?? {})).toHaveLength(0);
+    expect(Object.values(storedAfterFallback ?? {}).length).toBeGreaterThan(0);
+    expect(Object.values(storedAfterFallback ?? {}).every((entry) => entry.provenance === "local-repair")).toBe(true);
 
     expect(await sendResolved(request, sender(10))).toMatchObject({
-      status: "ready", source: "local", reason: expect.stringContaining("scene-negative-cache"),
+      status: "ready", source: "cache",
     });
     expect(invalidFetcher).toHaveBeenCalledTimes(callsAfterFallback);
 
     vi.setSystemTime(Date.now() + 61_000);
-    expect(await sendResolved(request, sender(10))).toMatchObject({ status: "ready", source: "local" });
+    const nextRequest = {
+      ...request,
+      playheadMs: Math.max(...fallback.cards.map((card: any) => card.toMs)),
+    };
+    expect(await sendResolved(nextRequest, sender(10))).toMatchObject({ status: "ready", source: "local" });
     expect(invalidFetcher.mock.calls.length).toBeGreaterThan(callsAfterFallback);
   });
 
@@ -1254,8 +1261,101 @@ describe("YouTube Music background routing", () => {
       status: "ready", source: "local", reason: expect.stringContaining("scene-local-continuity-fallback"),
     });
     expect(response.cards.length).toBeGreaterThan(1);
-    expect(Object.values((storage.get("lyricstage-director-scene-cache-v1") as Record<string, unknown> | undefined) ?? {}))
-      .toHaveLength(0);
+    expect(Object.values((storage.get("lyricstage-director-scene-cache-v1") as Record<string, any> | undefined) ?? {})
+      .every((entry) => entry.provenance === "local-repair")).toBe(true);
+  });
+
+  it("appends a dense local Scene pack after earlier AI-positive windows when the provider later fails", async () => {
+    await send({
+      type: "youtube-music-save-director-config",
+      configuration: {
+        version: "lyricstage-director-byok-v1",
+        primary: { protocol: "openai-responses", endpoint: "https://api.openai.com/v1", model: "fixture", apiKey: "rolling-secret" },
+      },
+    }, sender(10));
+    const lyrics = {
+      ...rollingLyrics(),
+      durationMs: 480_000,
+      lines: Array.from({ length: 120 }, (_, lineIndex) => ({
+        lineIndex,
+        fromMs: lineIndex * 4_000,
+        toMs: (lineIndex + 1) * 4_000,
+        text: `连续滚动密度验收第 ${lineIndex + 1} 句`,
+        voiceRole: lineIndex % 16 >= 12 ? "choir" as const : "lead" as const,
+      })),
+    };
+    const track = { ...rollingTrack(), durationMs: lyrics.durationMs };
+    const bible = compileLocalDirectorBibleV1(lyrics);
+    let sceneRequest = 0;
+    const fetcher = vi.fn(async (_input: string | URL | Request, init?: RequestInit) => {
+      const payload = JSON.parse(String(init?.body)) as any;
+      if (payload.instructions?.includes("whole-song constitution")) {
+        return new Response(JSON.stringify({ output_text: JSON.stringify(bible) }), { status: 200 });
+      }
+      const prompt = JSON.parse(payload.input[0].content[0].text) as any;
+      sceneRequest += 1;
+      const output = sceneRequest <= 2 ? {
+        version: "window-intent-v2",
+        spatialIntent: "open",
+        coverRole: "portal",
+        arcIntent: "lift",
+        cues: [],
+      } : {
+        version: "scene-pack-v1",
+        bibleIdentity: prompt.bible.bibleIdentity,
+        entryStateHash: prompt.state.stateHash,
+        scenes: [{ fromLineIndex: prompt.window.fromLineIndex, toLineIndex: prompt.window.toLineIndex, intention: "invalid later window" }],
+      };
+      return new Response(JSON.stringify({ output_text: JSON.stringify(output) }), { status: 200 });
+    });
+    vi.stubGlobal("fetch", fetcher);
+    expect(await sendResolved({ type: "youtube-music-resolve-director-bible-v1", track, lyrics }, sender(10)))
+      .toMatchObject({ status: "ready" });
+
+    let targetMs = 1;
+    let priorCards: any[] = [];
+    const seenSceneIDs = new Set<string>();
+    for (let index = 0; index < 2; index += 1) {
+      const response = await sendResolved({
+        type: "youtube-music-resolve-director-coverage-v1", track, lyrics, bible,
+        playheadMs: targetMs, desiredHorizonMs: 60_000,
+      }, sender(10));
+      expect(response).toMatchObject({ status: "ready", source: "network" });
+      const addedCards = response.cards.filter((card: any) => !seenSceneIDs.has(card.sceneID));
+      expect(addedCards.length).toBeGreaterThanOrEqual(4);
+      expect(addedCards.length).toBeLessThanOrEqual(6);
+      response.cards.forEach((card: any) => seenSceneIDs.add(card.sceneID));
+      priorCards = response.cards;
+      targetMs = response.coverage.toMs;
+    }
+
+    const fallback = await sendResolved({
+      type: "youtube-music-resolve-director-coverage-v1", track, lyrics, bible,
+      playheadMs: targetMs, desiredHorizonMs: 60_000,
+    }, sender(10));
+    expect(fallback).toMatchObject({
+      status: "ready",
+      source: "local",
+      reason: expect.stringContaining("scene-local-continuity-fallback"),
+      coverage: { aheadMs: expect.any(Number) },
+    });
+    expect(fallback.cards.length).toBeGreaterThan(priorCards.length);
+    const fallbackAddedCards = fallback.cards.filter((card: any) => !seenSceneIDs.has(card.sceneID));
+    expect(fallbackAddedCards.length).toBeGreaterThanOrEqual(4);
+    expect(fallbackAddedCards.length).toBeLessThanOrEqual(6);
+    expect(fallback.cards.some((card: any) => card.toMs > targetMs)).toBe(true);
+
+    const nextTargetMs = Math.max(...fallback.cards.map((card: any) => card.toMs));
+    const nextFallback = await sendResolved({
+      type: "youtube-music-resolve-director-coverage-v1", track, lyrics, bible,
+      playheadMs: nextTargetMs, desiredHorizonMs: 60_000,
+    }, sender(10));
+    expect(nextFallback).toMatchObject({ status: "ready", source: "local" });
+    expect(nextFallback.cards.length).toBeGreaterThan(fallback.cards.length);
+    const nextAddedCards = nextFallback.cards.filter((card: any) => !fallback.cards.some((prior: any) => prior.sceneID === card.sceneID));
+    expect(nextAddedCards.length).toBeGreaterThanOrEqual(4);
+    expect(nextAddedCards.length).toBeLessThanOrEqual(6);
+    expect(nextFallback.cards.some((card: any) => card.toMs > nextTargetMs)).toBe(true);
   });
 
   it("discovers models with a matching stored provider key without exposing it", async () => {

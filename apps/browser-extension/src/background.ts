@@ -672,7 +672,6 @@ const sceneCacheIdentity = (
   fromLineIndex,
   entryStateHash,
 });
-
 const cachedDirectorScenes = async (
   track: LyricsLookupTrackV0,
   lyrics: LyricDocumentV0,
@@ -682,7 +681,7 @@ const cachedDirectorScenes = async (
   const now = Date.now();
   const entries = Object.values(await readDirectorSceneCache()).filter((entry) =>
     entry.epoch === rollingDirectorEpoch && entry.fingerprint === fingerprint && entry.trackID === track.trackID
-    && entry.schemaVersion === scenePackSchemaVersion && entry.provenance === "ai-positive"
+    && entry.schemaVersion === scenePackSchemaVersion && ["ai-positive", "local-repair"].includes(entry.provenance)
     && entry.bibleIdentity === bible.bibleIdentity && entry.expiresAtUnixMs > now);
   const cards: SceneCardV1[] = [];
   let accumulatedState = initialRollingPerformanceStateV1(bible);
@@ -712,7 +711,6 @@ const cachedDirectorScenes = async (
   }
   return cards.sort((a, b) => a.fromLineIndex - b.fromLineIndex);
 };
-
 const saveDirectorSceneCache = async (
   track: LyricsLookupTrackV0,
   lyrics: LyricDocumentV0,
@@ -724,7 +722,7 @@ const saveDirectorSceneCache = async (
   bibleExpiresAtUnixMs: number,
   timing?: unknown,
   reachedFinalWindow = false,
-  isCurrent?: () => boolean,
+  isCurrent?: () => boolean, provenance: StoredDirectorSceneCacheEntry["provenance"] = "ai-positive",
 ): Promise<void> => {
   const createdAtUnixMs = Date.now();
   const fromLineIndex = cards[0]!.fromLineIndex;
@@ -733,7 +731,7 @@ const saveDirectorSceneCache = async (
     fingerprint,
     epoch: rollingDirectorEpoch,
     schemaVersion: scenePackSchemaVersion,
-    provenance: "ai-positive",
+    provenance,
     createdAtUnixMs,
     expiresAtUnixMs: Math.min(bibleExpiresAtUnixMs, createdAtUnixMs + 30 * 24 * 60 * 60 * 1_000),
     trackID: track.trackID,
@@ -746,7 +744,7 @@ const saveDirectorSceneCache = async (
     cards,
   };
   entry.summary = summarizeDirectorCacheEntryV1({
-    lyrics, track, cacheEpoch: rollingDirectorEpoch, source: "network",
+    lyrics, track, cacheEpoch: rollingDirectorEpoch, source: provenance === "ai-positive" ? "network" : "local",
     createdAtUnixMs: entry.createdAtUnixMs, expiresAtUnixMs: entry.expiresAtUnixMs, bible,
     cards: [...new Map([...priorCards, ...cards].map((card) => [card.sceneID, card])).values()],
     timing, reachedFinalWindow,
@@ -763,7 +761,6 @@ const saveDirectorSceneCache = async (
   });
   await rollingDirectorCacheWrite;
 };
-
 const directorCacheSummariesV1 = async (): Promise<DirectorCacheSummaryV1[]> => {
   const candidates = [
     ...Object.values(await readDirectorBibleCache()).map((entry) => entry.summary),
@@ -797,7 +794,6 @@ const markDirectorCacheReachedFinalWindowV1 = async (trackID: string): Promise<v
   });
   await rollingDirectorCacheWrite;
 };
-
 const rollingEntryStatesForWindow = async (
   track: LyricsLookupTrackV0,
   lyrics: LyricDocumentV0,
@@ -810,7 +806,7 @@ const rollingEntryStatesForWindow = async (
   if (checkpoint) candidates.push(checkpoint);
   const entries = Object.values(await readDirectorSceneCache()).filter((entry) =>
     entry.epoch === rollingDirectorEpoch && entry.fingerprint === fingerprint && entry.trackID === track.trackID
-    && entry.schemaVersion === scenePackSchemaVersion && entry.provenance === "ai-positive"
+    && entry.schemaVersion === scenePackSchemaVersion && ["ai-positive", "local-repair"].includes(entry.provenance)
     && entry.bibleIdentity === bible.bibleIdentity && entry.expiresAtUnixMs > Date.now());
   let accumulatedState = initialRollingPerformanceStateV1(bible);
   let lastAccepted: SceneCardV1 | undefined;
@@ -820,6 +816,8 @@ const rollingEntryStatesForWindow = async (
       : undefined;
     let state = accumulatedState.stateHash === entry.entryStateHash
       ? accumulatedState
+      : isRollingPerformanceStateV1(entry.entryState, bible) && entry.entryState.stateHash === entry.entryStateHash
+        ? entry.entryState
       : gapCheckpoint?.stateHash === entry.entryStateHash
         ? gapCheckpoint
         : undefined;
@@ -1286,6 +1284,11 @@ const resolveDirectorCoverageV1 = async (
     if (localCards.length === 0 || !await rollingSceneStillCurrent(owner, track, lyrics, fingerprint, generation, sceneEpoch)) {
       return staleScene(timing);
     }
+    await saveDirectorSceneCache(
+      track, lyrics, fingerprint, sanitizedBible, state, localCards, cards, bibleCache.expiresAtUnixMs,
+      timing, targetMs >= lyrics.durationMs - 20_000, sceneIsCurrent, "local-repair",
+    );
+    if (!sceneIsCurrent()) return staleScene(timing);
     ledger.generatedCoverage = [...ledger.generatedCoverage, {
       fromLineIndex: localCards[0]!.fromLineIndex,
       toLineIndex: localCards.at(-1)!.toLineIndex,
