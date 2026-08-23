@@ -1009,9 +1009,7 @@ export const compileDirectorPlanFromRollingV1 = (
   let state = initialRollingPerformanceStateV1(bible);
   for (const candidate of cardValues) {
     let card = sanitizeSceneCardV1(lyrics, bible, state, candidate);
-    const lastAccepted = accepted.at(-1);
-    const hasForwardGap = !lastAccepted || candidate.fromLineIndex > lastAccepted.toLineIndex + 1;
-    if (!card && hasForwardGap) {
+    if (!card && accepted.length === 0) {
       const checkpoint = checkpointRollingPerformanceStateV1(lyrics, bible, candidate.fromLineIndex);
       if (checkpoint && checkpoint.stateHash === candidate.entryStateHash) {
         card = sanitizeSceneCardV1(lyrics, bible, checkpoint, candidate);

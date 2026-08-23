@@ -64,6 +64,8 @@ export interface StoredDirectorBibleCacheEntry {
 export interface StoredDirectorSceneCacheEntry {
   fingerprint: string;
   epoch: string;
+  schemaVersion: "scene-pack-v1";
+  provenance: "ai-positive";
   createdAtUnixMs: number;
   expiresAtUnixMs: number;
   trackID: string;
