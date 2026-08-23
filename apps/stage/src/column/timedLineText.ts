@@ -1,4 +1,5 @@
 import type { LyricLineV0 } from "@lyricstage/contracts";
+import type { LyricsCandidateV0 } from "@lyricstage/lyrics";
 import { estimateWordTimingV1 } from "@lyricstage/performance";
 
 export type TimedLineSegment =
@@ -86,6 +87,14 @@ export const retainCandidatesAfterChoice = <T,>(
   previous: readonly T[],
   chosen: T,
 ): T[] => (previous.length > 0 ? [...previous] : [chosen]);
+
+export const alternativeLyricsCandidates = (
+  candidates: readonly LyricsCandidateV0[],
+  selectedCandidateKey?: string,
+  limit = 5,
+): LyricsCandidateV0[] => candidates
+  .filter((candidate) => `${candidate.provider}:${candidate.id}` !== selectedCandidateKey)
+  .slice(0, Math.max(0, limit));
 
 export const MESSAGE_REQUEST_HIDE = "lyricstage-request-hide" as const;
 

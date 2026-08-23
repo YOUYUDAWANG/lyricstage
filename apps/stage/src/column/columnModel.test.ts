@@ -1,8 +1,11 @@
 import { describe, expect, it } from "vitest";
 import { lyricFixtures } from "@lyricstage/contracts";
 import {
+  columnToolAfterLyricsSearch,
+  eventPathStartsInEditableControl,
   lineMaskProgress,
   linePhase,
+  lyricLineTabIndex,
   mapVoiceClass,
   resolveColumnSurfaceState,
   toggledColumnTool,
@@ -17,7 +20,40 @@ describe("columnModel", () => {
     expect(toggledColumnTool("versions", "versions")).toBeNull();
   });
 
+  it("moves a successful manual search from the covered form to its candidate list", () => {
+    expect(columnToolAfterLyricsSearch("search", "searching", "candidates", 2)).toBe("versions");
+    expect(columnToolAfterLyricsSearch("search", "searching", "miss", 0)).toBe("search");
+    expect(columnToolAfterLyricsSearch("search", "searching", "error", 0)).toBe("search");
+    expect(columnToolAfterLyricsSearch("search", "candidates", "candidates", 2)).toBe("search");
+  });
+
+  it("recognizes editable origins across a retargeted Shadow DOM event path", () => {
+    expect(eventPathStartsInEditableControl([{ tagName: "INPUT" }, { tagName: "DIV" }])).toBe(true);
+    expect(eventPathStartsInEditableControl([{ tagName: "DIV", isContentEditable: true }])).toBe(true);
+    expect(eventPathStartsInEditableControl([{ tagName: "DIV", getAttribute: (name: string) => name === "role" ? "textbox" : null }])).toBe(true);
+    expect(eventPathStartsInEditableControl([{ tagName: "BUTTON" }])).toBe(false);
+  });
+
+  it("keeps only the active lyric line in the sequential tab order", () => {
+    expect(lyricLineTabIndex(4, 4, 0)).toBe(0);
+    expect(lyricLineTabIndex(3, 4, 0)).toBe(-1);
+    expect(lyricLineTabIndex(0, -1, 0)).toBe(0);
+  });
+
   it("maps lifecycle states without collapsing to a blank surface", () => {
+    expect(
+      resolveColumnSurfaceState({
+        bridgeAvailable: false,
+        bridgeConnected: false,
+        hasSnapshot: false,
+        disconnected: true,
+        automaticStatus: "error",
+        hasMatchingLyrics: false,
+        timeMs: 0,
+        lyrics: null,
+      }),
+    ).toBe("bridgeUnavailable");
+
     expect(
       resolveColumnSurfaceState({
         bridgeAvailable: true,

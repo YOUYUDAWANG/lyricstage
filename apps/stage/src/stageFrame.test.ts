@@ -19,6 +19,7 @@ const input = (timeMs: number, changes: Partial<StageFrameInputV1> = {}): StageF
   palette,
   sectionIntensity: 0.72,
   reduceMotion: false,
+  lightweight: false,
   vjMode: false,
   showGuides: false,
   ...changes,

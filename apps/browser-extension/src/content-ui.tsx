@@ -82,7 +82,30 @@ const reconcileHosts = () => {
   }
 };
 
-const hostObserver = new MutationObserver(reconcileHosts);
+const collectStageHosts = (node: Node, hosts: Set<HTMLElement>) => {
+  if (!(node instanceof Element)) return;
+  if (node instanceof HTMLElement && node.matches(stageHostSelector)) hosts.add(node);
+  for (const host of node.querySelectorAll<HTMLElement>(stageHostSelector)) hosts.add(host);
+};
+
+const reconcileHostMutations = (records: MutationRecord[]) => {
+  const touchedHosts = new Set<HTMLElement>();
+  for (const record of records) {
+    for (const node of record.addedNodes) collectStageHosts(node, touchedHosts);
+    for (const node of record.removedNodes) collectStageHosts(node, touchedHosts);
+  }
+
+  for (const [host, root] of mountedRoots) {
+    if (host.isConnected) continue;
+    mountedRoots.delete(host);
+    root.unmount();
+  }
+  for (const host of touchedHosts) {
+    if (host.isConnected) mountHost(host);
+  }
+};
+
+const hostObserver = new MutationObserver(reconcileHostMutations);
 let stopped = false;
 const stop = () => {
   if (stopped) return;

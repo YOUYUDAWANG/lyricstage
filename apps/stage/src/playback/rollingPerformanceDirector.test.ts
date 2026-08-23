@@ -134,6 +134,20 @@ describe("rolling Performance Director", () => {
     expect(reset.state.compiledPlan.planIdentity).toBe(local.planIdentity);
   });
 
+  it("releases an obsolete pending window when a seek needs a new request", () => {
+    const oldWindow = selectRollingRequestedWindowV1(fixture, cards[0]!.fromMs)!;
+    const pending = {
+      ...withBible(),
+      status: "coverage-requesting" as const,
+      pendingWindow: oldWindow,
+    };
+    const target = Math.min(fixture.durationMs, cards[0]!.toMs + 100);
+    const seek = handleRollingSeekV1(pending, local, target);
+    expect(seek.state.status).toBe("ready");
+    expect(seek.state.pendingWindow).toBeUndefined();
+    expect(shouldRefillRollingCoverageV1(seek.state, target, fixture.durationMs, false, target)).toBe(true);
+  });
+
   it("does not bridge disjoint checkpoint cards by a small timestamp gap", () => {
     const first = cards[0]!;
     const disjoint = {
@@ -222,5 +236,6 @@ describe("rolling Performance Director", () => {
     expect(appSource).toContain("const priorRollingState = rollingDirectorStateRef.current");
     expect(appSource).toContain("setRollingDirectorState(priorRollingState)");
     expect(appSource).toContain("setRollingForceLocal(priorForceLocal)");
+    expect(appSource).toContain("requestEpoch !== rollingCoverageRequestEpochRef.current");
   });
 });

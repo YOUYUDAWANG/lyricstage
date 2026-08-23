@@ -37,6 +37,7 @@ export interface StageFrameV1 {
   environmentScene: EnvironmentSceneV1;
   palette: DirectedStagePaletteV1;
   reduceMotion: boolean;
+  lightweight: boolean;
   vjMode: boolean;
   showGuides: boolean;
   ambient: StageAmbientFrameV1;
@@ -51,6 +52,7 @@ export interface StageFrameInputV1 {
   palette: DirectedStagePaletteV1;
   sectionIntensity: number;
   reduceMotion: boolean;
+  lightweight: boolean;
   vjMode: boolean;
   showGuides: boolean;
 }
@@ -319,6 +321,7 @@ const createFrame = (input: StageFrameInputV1): StageFrameV1 => ({
   environmentScene: input.environmentScene,
   palette: input.palette,
   reduceMotion: input.reduceMotion,
+  lightweight: input.lightweight,
   vjMode: input.vjMode,
   showGuides: input.showGuides,
   ambient: sampleStageAmbientIntoV1(
@@ -353,6 +356,7 @@ export const writeStageFrameV1 = (
   frame.environmentScene = input.environmentScene;
   frame.palette = input.palette;
   frame.reduceMotion = input.reduceMotion;
+  frame.lightweight = input.lightweight;
   frame.vjMode = input.vjMode;
   frame.showGuides = input.showGuides;
   sampleStageAmbientIntoV1(input.plan, input.timeMs, input.sectionIntensity, input.reduceMotion, frame.ambient);
@@ -395,6 +399,7 @@ export const applyStageFrameDOMV1 = (
   host.dataset.worldArtwork = plan.world.artworkRole;
   host.dataset.worldTexture = plan.world.texture;
   host.dataset.reduceMotion = frame.reduceMotion ? "true" : "false";
+  host.dataset.lightweight = frame.lightweight ? "true" : "false";
   if (motif) {
     motif.style.transform = transformFor(
       ambient.motifTranslateXPct,

@@ -163,10 +163,15 @@ describe("YouTube Music companion isolated content script lifecycle (real DOM sh
     playerBarTimeText?: string;
     playerBarTitle?: string;
     playerBarArtist?: string;
+    playerBarBylineText?: string;
+    playerBarBylineLinks?: Array<{ text: string; href: string }>;
     playerBarArtworkURL?: string;
     playerBarVideoID?: string;
     playerVideoID?: string;
     mediaSessionArtworkURLs?: string[];
+    mediaSessionTitle?: string;
+    mediaSessionArtist?: string;
+    mediaSessionAlbum?: string;
     videoArtworkURL?: string;
     mediaElements?: Array<Partial<Pick<
       FakeMediaElement,
@@ -177,6 +182,14 @@ describe("YouTube Music companion isolated content script lifecycle (real DOM sh
     const clock = new FakeClock();
     const clearIntervalFn = vi.fn();
     const disconnectFn = vi.fn();
+    const mutationObservers: Array<{
+      callback: (records: Array<{
+        target?: unknown;
+        addedNodes?: unknown[];
+        removedNodes?: unknown[];
+      }>) => void;
+      targets: Set<unknown>;
+    }> = [];
     const runtimeListeners: Array<
       (message: unknown, sender: unknown, respond: (value: unknown) => void) => unknown
     > = [];
@@ -188,6 +201,8 @@ describe("YouTube Music companion isolated content script lifecycle (real DOM sh
     let mediaAvailable = true;
     let playerBarTitle = overrides.playerBarTitle ?? "You & 合図";
     let playerBarArtist = overrides.playerBarArtist ?? "音乃瀬奏";
+    let playerBarArtworkURL = overrides.playerBarArtworkURL
+      ?? "https://yt3.googleusercontent.com/cover-id=w60-h60-l90-rj";
     let playerBarVideoID = overrides.playerBarVideoID;
     let playerVideoID = overrides.playerVideoID;
     const locationValue = {
@@ -200,6 +215,14 @@ describe("YouTube Music companion isolated content script lifecycle (real DOM sh
       Object.assign(new FakeMediaElement(), values)
     );
     const media = mediaElements[0];
+    const mediaSessionMetadata = {
+      title: overrides.mediaSessionTitle ?? "Media Session Title",
+      artist: overrides.mediaSessionArtist ?? "Media Session Artist",
+      album: overrides.mediaSessionAlbum ?? "",
+      artwork: (overrides.mediaSessionArtworkURLs
+        ?? ["https://i.ytimg.com/vi/ZmCRFGcON-I/hqdefault.jpg"]
+      ).map((src) => ({ src })),
+    };
     const documentElement = new FakeElement();
     if (overrides.contentUIMarker ?? true) {
       documentElement.setAttribute("data-lyricstage-content-ui", "direct-shadow-v2");
@@ -281,13 +304,15 @@ describe("YouTube Music companion isolated content script lifecycle (real DOM sh
           };
         }
         if (selector.includes(".title")) return { textContent: playerBarTitle };
+        if (selector.includes(".byline") || selector.includes(".subtitle")) {
+          return { textContent: overrides.playerBarBylineText ?? playerBarArtist };
+        }
         if (selector.includes(".time-info")) {
           return { textContent: overrides.playerBarTimeText ?? "0:12 / 2:39" };
         }
         if (selector.includes("img")) {
           return {
-            currentSrc: overrides.playerBarArtworkURL
-              ?? "https://yt3.googleusercontent.com/cover-id=w60-h60-l90-rj",
+            currentSrc: playerBarArtworkURL,
           };
         }
         if (selector.includes("play-pause-button")) return transportControls.playPause;
@@ -295,7 +320,11 @@ describe("YouTube Music companion isolated content script lifecycle (real DOM sh
         if (selector.includes("next-button")) return transportControls.next;
         return null;
       },
-      querySelectorAll: () => [{ textContent: playerBarArtist }],
+      querySelectorAll: () => overrides.playerBarBylineLinks?.map(({ text, href }) => ({
+        textContent: text,
+        href,
+        getAttribute: (name: string) => name === "href" ? href : null,
+      })) ?? [{ textContent: playerBarArtist, getAttribute: () => null }],
     };
 
     const FakeDate = class extends Date {
@@ -303,6 +332,24 @@ describe("YouTube Music companion isolated content script lifecycle (real DOM sh
         return clock.now;
       }
     };
+
+    const documentQuerySelector = vi.fn((selector: string) => {
+      if (selector === "video, audio") return mediaAvailable ? media : null;
+      if (selector === "ytmusic-player-bar") return playerBarAvailable ? playerBar : null;
+      if (selector.includes("ytp-title-link")) {
+        return playerVideoID
+          ? { getAttribute: () => `https://music.youtube.com/watch?list=RDAMVMfixture&v=${playerVideoID}` }
+          : null;
+      }
+      if (selector.includes('img[src*="/vi/')) {
+        return overrides.videoArtworkURL
+          ? { currentSrc: overrides.videoArtworkURL, src: overrides.videoArtworkURL }
+          : null;
+      }
+      if (selector.includes("ytmusic-player-page#player-page")) return sidePanel;
+      if (selector.includes("tp-yt-paper-tabs")) return tabList;
+      return null;
+    });
 
     const context = vm.createContext({
       chrome: {
@@ -334,41 +381,36 @@ describe("YouTube Music companion isolated content script lifecycle (real DOM sh
           createdElements.push(element);
           return element;
         },
-        querySelector: (selector: string) => {
-          if (selector === "video, audio") return mediaAvailable ? media : null;
-          if (selector === "ytmusic-player-bar") return playerBarAvailable ? playerBar : null;
-          if (selector.includes("ytp-title-link")) {
-            return playerVideoID
-              ? { getAttribute: () => `https://music.youtube.com/watch?list=RDAMVMfixture&v=${playerVideoID}` }
-              : null;
-          }
-          if (selector.includes('img[src*="/vi/')) {
-            return overrides.videoArtworkURL
-              ? { currentSrc: overrides.videoArtworkURL, src: overrides.videoArtworkURL }
-              : null;
-          }
-          if (selector.includes("ytmusic-player-page#player-page")) return sidePanel;
-          if (selector.includes("tp-yt-paper-tabs")) return tabList;
-          return null;
-        },
+        querySelector: documentQuerySelector,
         querySelectorAll: (selector: string) => selector === "video, audio" && mediaAvailable ? mediaElements : [],
       },
       HTMLMediaElement: FakeMediaElement,
       navigator: {
         mediaSession: {
-          metadata: {
-            title: "Media Session Title",
-            artist: "Media Session Artist",
-            artwork: (overrides.mediaSessionArtworkURLs
-              ?? ["https://i.ytimg.com/vi/ZmCRFGcON-I/hqdefault.jpg"]
-            ).map((src) => ({ src })),
-          },
+          metadata: mediaSessionMetadata,
         },
       },
       location: locationValue,
       MutationObserver: class {
-        observe() {}
-        disconnect = disconnectFn;
+        readonly entry: (typeof mutationObservers)[number];
+
+        constructor(callback: (records: Array<{
+          target?: unknown;
+          addedNodes?: unknown[];
+          removedNodes?: unknown[];
+        }>) => void) {
+          this.entry = { callback, targets: new Set<unknown>() };
+          mutationObservers.push(this.entry);
+        }
+
+        observe(target: unknown) {
+          this.entry.targets.add(target);
+        }
+
+        disconnect = () => {
+          this.entry.targets.clear();
+          disconnectFn();
+        };
       },
       setTimeout: clock.setTimeout,
       clearTimeout: clock.clearTimeout,
@@ -428,7 +470,17 @@ describe("YouTube Music companion isolated content script lifecycle (real DOM sh
       media,
       mediaElements,
       transportControls,
+      playerBar,
       documentElement,
+      documentQuerySelector,
+      emitMutations: (
+        target: unknown,
+        records: Array<{ target?: unknown; addedNodes?: unknown[]; removedNodes?: unknown[] }>,
+      ) => {
+        for (const observer of mutationObservers) {
+          if (observer.targets.has(target)) observer.callback(records);
+        }
+      },
       setInvalidateRuntime: (value: boolean) => {
         invalidateRuntime = value;
       },
@@ -440,6 +492,9 @@ describe("YouTube Music companion isolated content script lifecycle (real DOM sh
       },
       setPlayerBarArtist: (value: string) => {
         playerBarArtist = value;
+      },
+      setMediaSessionMetadata: (value: Partial<typeof mediaSessionMetadata>) => {
+        Object.assign(mediaSessionMetadata, value);
       },
       setPlayerBarVideoID: (value: string | undefined) => {
         playerBarVideoID = value;
@@ -497,6 +552,53 @@ describe("YouTube Music companion isolated content script lifecycle (real DOM sh
     expect(snapshotMessage?.snapshot?.track?.artworkURL).toBe(
       "https://yt3.googleusercontent.com/cover-id=w1200-h1200-l90-rj",
     );
+  });
+
+  it("ignores unrelated mutation storms and deduplicates unchanged player snapshots", () => {
+    const env = createEnvironment();
+    vm.runInContext(contentScriptSource, env.context);
+    env.clock.advance(40);
+    const snapshots = () => env.sentMessages.filter((message) =>
+      (message as { type?: string }).type === "youtube-music-source-snapshot"
+    );
+    expect(snapshots()).toHaveLength(1);
+    env.documentQuerySelector.mockClear();
+
+    const unrelated = new FakeElement();
+    env.emitMutations(env.documentElement, Array.from({ length: 200 }, () => ({
+      target: unrelated,
+      addedNodes: [unrelated],
+      removedNodes: [],
+    })));
+    env.clock.advance(100);
+    expect(snapshots()).toHaveLength(1);
+    expect(env.documentQuerySelector).not.toHaveBeenCalled();
+
+    env.emitMutations(env.playerBar, Array.from({ length: 200 }, () => ({
+      target: env.playerBar,
+      addedNodes: [],
+      removedNodes: [],
+    })));
+    env.clock.advance(100);
+    expect(snapshots()).toHaveLength(1);
+  });
+
+  it("keeps an unchanged paused snapshot alive without restoring the 500 ms flood", () => {
+    const env = createEnvironment({ mediaElements: [{ paused: true }] });
+    vm.runInContext(contentScriptSource, env.context);
+    env.clock.advance(40);
+    const snapshots = () => env.sentMessages.filter((message) =>
+      (message as { type?: string }).type === "youtube-music-source-snapshot"
+    );
+    expect(snapshots()).toHaveLength(1);
+
+    env.clock.advance(1_499);
+    env.getHeartbeatCallback()?.();
+    expect(snapshots()).toHaveLength(1);
+
+    env.clock.advance(1);
+    env.getHeartbeatCallback()?.();
+    expect(snapshots()).toHaveLength(2);
   });
 
   it("prefers the current player-bar video identity when the SPA URL is stale", () => {
@@ -571,6 +673,54 @@ describe("YouTube Music companion isolated content script lifecycle (real DOM sh
     );
   });
 
+  it("keeps an album-first YTM byline from becoming the artist", () => {
+    const env = createEnvironment({
+      playerBarTitle: "愛のまま",
+      playerBarBylineText: "愛のまま • 花譜 • 岸田繁 • 2026",
+      playerBarBylineLinks: [
+        { text: "愛のまま", href: "/browse/MPREb_fixture_album" },
+        { text: "花譜", href: "/channel/UC_kaf_fixture" },
+        { text: "岸田繁", href: "/browse/UC_kishida_fixture" },
+      ],
+      mediaSessionTitle: "愛のまま",
+      mediaSessionArtist: "花譜、岸田繁",
+    });
+    vm.runInContext(contentScriptSource, env.context);
+    env.clock.advance(40);
+
+    const snapshotMessage = env.sentMessages.find((message) =>
+      (message as { type?: string }).type === "youtube-music-source-snapshot"
+    ) as { snapshot?: { track?: { artist?: string; album?: string } } } | undefined;
+    expect(snapshotMessage?.snapshot?.track).toMatchObject({
+      artist: "花譜、岸田繁",
+      album: "愛のまま",
+    });
+  });
+
+  it("combines artist links from the complete byline when Media Session is incomplete", () => {
+    const env = createEnvironment({
+      playerBarTitle: "愛のまま",
+      playerBarBylineText: "愛のまま • 花譜 • 岸田繁",
+      playerBarBylineLinks: [
+        { text: "愛のまま", href: "/browse/MPREb_fixture_album" },
+        { text: "花譜", href: "/channel/UC_kaf_fixture" },
+        { text: "岸田繁", href: "/browse/UC_kishida_fixture" },
+      ],
+      mediaSessionTitle: "愛のまま",
+      mediaSessionArtist: "",
+    });
+    vm.runInContext(contentScriptSource, env.context);
+    env.clock.advance(40);
+
+    const snapshotMessage = env.sentMessages.find((message) =>
+      (message as { type?: string }).type === "youtube-music-source-snapshot"
+    ) as { snapshot?: { track?: { artist?: string; album?: string } } } | undefined;
+    expect(snapshotMessage?.snapshot?.track).toMatchObject({
+      artist: "花譜、岸田繁",
+      album: "愛のまま",
+    });
+  });
+
   it("uses the media element whose time and duration match the current player bar", () => {
     const env = createEnvironment({
       playerBarTimeText: "0:50 / 4:19",
@@ -620,6 +770,7 @@ describe("YouTube Music companion isolated content script lifecycle (real DOM sh
     env.clock.advance(40);
     env.media.currentTime = 193.7;
     env.getHeartbeatCallback()?.();
+    env.clock.advance(250);
 
     const snapshots = env.sentMessages.filter((message) =>
       (message as { type?: string }).type === "youtube-music-source-snapshot"
@@ -631,6 +782,7 @@ describe("YouTube Music companion isolated content script lifecycle (real DOM sh
 
     env.media.currentTime = 20;
     env.getHeartbeatCallback()?.();
+    env.clock.advance(250);
     const afterSeek = env.sentMessages.filter((message) =>
       (message as { type?: string }).type === "youtube-music-source-snapshot"
     ) as Array<{ snapshot?: { playback?: { currentTimeMs?: number } } }>;
@@ -666,6 +818,86 @@ describe("YouTube Music companion isolated content script lifecycle (real DOM sh
     });
   });
 
+  it("enriches an initial tuple when the content script starts mid-transition", () => {
+    const env = createEnvironment();
+    vm.runInContext(contentScriptSource, env.context);
+    env.clock.advance(40);
+
+    env.setPlayerBarTitle("Loaded Track");
+    env.setPlayerBarArtist("Loaded Artist");
+    env.setMediaSessionMetadata({ title: "Loaded Track", artist: "Loaded Artist" });
+    env.getHeartbeatCallback()?.();
+    env.clock.advance(250);
+    env.getHeartbeatCallback()?.();
+
+    const snapshots = env.sentMessages.filter((message) =>
+      (message as { type?: string }).type === "youtube-music-source-snapshot"
+    ) as Array<{ snapshot?: { track?: { trackID?: string; title?: string; artist?: string } } }>;
+    expect(snapshots.at(-1)?.snapshot?.track).toMatchObject({
+      trackID: "ZmCRFGcON-I",
+      title: "Loaded Track",
+      artist: "Loaded Artist",
+    });
+  });
+
+  it("holds metadata-first navigation until a new video identity is stable and rejects stale controls", () => {
+    const env = createEnvironment({
+      playerBarArtworkURL: "https://yt3.googleusercontent.com/old-cover=w60-h60-l90-rj",
+    });
+    vm.runInContext(contentScriptSource, env.context);
+    env.clock.advance(40);
+    const snapshots = () => env.sentMessages.filter((message) =>
+      (message as { type?: string }).type === "youtube-music-source-snapshot"
+    ) as Array<{ snapshot?: { track?: { trackID?: string; title?: string; artworkURL?: string } } }>;
+    expect(snapshots()).toHaveLength(1);
+
+    env.setPlayerBarTitle("New Metadata First Track");
+    env.setPlayerBarArtist("New Metadata First Artist");
+    env.setMediaSessionMetadata({
+      title: "New Metadata First Track",
+      artist: "New Metadata First Artist",
+    });
+    env.getHeartbeatCallback()?.();
+    env.clock.advance(3_500);
+    env.getHeartbeatCallback()?.();
+    expect(snapshots()).toHaveLength(1);
+    expect(env.sentMessages.some((message) =>
+      (message as { type?: string }).type === "youtube-music-source-disconnect"
+    )).toBe(false);
+
+    const seekResponse = vi.fn();
+    env.runtimeListeners[0]?.(
+      { type: "youtube-music-seek-to", timeMs: 72_500, expectedTrackID: "ZmCRFGcON-I" },
+      undefined,
+      seekResponse,
+    );
+    const transportResponse = vi.fn();
+    env.runtimeListeners[0]?.(
+      { type: "youtube-music-transport-command", action: "pause", expectedTrackID: "ZmCRFGcON-I" },
+      undefined,
+      transportResponse,
+    );
+    expect(env.media.currentTime).toBe(12);
+    expect(env.transportControls.playPause.click).not.toHaveBeenCalled();
+    expect(seekResponse).toHaveBeenCalledWith({ ok: false, reason: "track-transition" });
+    expect(transportResponse).toHaveBeenCalledWith({ ok: false, reason: "track-transition" });
+
+    env.setLocationHref("https://music.youtube.com/watch?v=abcdefghijk");
+    env.getHeartbeatCallback()?.();
+    env.clock.advance(249);
+    env.getHeartbeatCallback()?.();
+    expect(snapshots()).toHaveLength(1);
+    env.clock.advance(1);
+    env.getHeartbeatCallback()?.();
+
+    expect(snapshots()).toHaveLength(2);
+    expect(snapshots().at(-1)?.snapshot?.track).toMatchObject({
+      trackID: "abcdefghijk",
+      title: "New Metadata First Track",
+      artworkURL: "https://i.ytimg.com/vi/abcdefghijk/hqdefault.jpg",
+    });
+  });
+
   it("bounds the SPA tuple hold when two recordings have identical metadata", () => {
     const env = createEnvironment();
     vm.runInContext(contentScriptSource, env.context);
@@ -685,6 +917,33 @@ describe("YouTube Music companion isolated content script lifecycle (real DOM sh
       (message as { type?: string }).type === "youtube-music-source-snapshot"
     ) as Array<{ snapshot?: { track?: { trackID?: string } } }>;
     expect(snapshots.at(-1)?.snapshot?.track?.trackID).toBe("abcdefghijk");
+  });
+
+  it("enriches artist metadata shortly after a stable new-ID title handoff", () => {
+    const env = createEnvironment();
+    vm.runInContext(contentScriptSource, env.context);
+    env.clock.advance(40);
+
+    env.setLocationHref("https://music.youtube.com/watch?v=abcdefghijk");
+    env.setPlayerBarTitle("Enriched Track");
+    env.getHeartbeatCallback()?.();
+    env.clock.advance(250);
+    env.getHeartbeatCallback()?.();
+
+    env.setPlayerBarArtist("Enriched Artist");
+    env.setMediaSessionMetadata({ title: "Enriched Track", artist: "Enriched Artist" });
+    env.getHeartbeatCallback()?.();
+    env.clock.advance(250);
+    env.getHeartbeatCallback()?.();
+
+    const snapshots = env.sentMessages.filter((message) =>
+      (message as { type?: string }).type === "youtube-music-source-snapshot"
+    ) as Array<{ snapshot?: { track?: { trackID?: string; title?: string; artist?: string } } }>;
+    expect(snapshots.at(-1)?.snapshot?.track).toMatchObject({
+      trackID: "abcdefghijk",
+      title: "Enriched Track",
+      artist: "Enriched Artist",
+    });
   });
 
   it("uses the internal player identity when queue playback advances without changing the page URL", () => {
@@ -711,6 +970,31 @@ describe("YouTube Music companion isolated content script lifecycle (real DOM sh
     env.setPlayerVideoID(undefined);
     env.getHeartbeatCallback()?.();
     expect(snapshots.at(-1)?.snapshot?.track?.trackID).toBe("abcdefghijk");
+  });
+
+  it("allows repeated A-B-A-B queue playback while the page URL stays fixed", () => {
+    const firstID = "ZmCRFGcON-I";
+    const secondID = "abcdefghijk";
+    const env = createEnvironment({ playerVideoID: firstID });
+    vm.runInContext(contentScriptSource, env.context);
+    env.clock.advance(40);
+
+    const transition = (trackID: string, title: string, artist: string) => {
+      env.setPlayerVideoID(trackID);
+      env.setPlayerBarTitle(title);
+      env.setPlayerBarArtist(artist);
+      env.getHeartbeatCallback()?.();
+      env.clock.advance(250);
+      env.getHeartbeatCallback()?.();
+      const snapshots = env.sentMessages.filter((message) =>
+        (message as { type?: string }).type === "youtube-music-source-snapshot"
+      ) as Array<{ snapshot?: { track?: { trackID?: string; title?: string } } }>;
+      expect(snapshots.at(-1)?.snapshot?.track).toMatchObject({ trackID, title });
+    };
+
+    transition(secondID, "Queue B", "Artist B");
+    transition(firstID, "Queue A replay", "Artist A");
+    transition(secondID, "Queue B replay", "Artist B");
   });
 
   it("keeps native lyrics visible while the direct Shadow DOM column is not ready", () => {
@@ -1084,6 +1368,8 @@ describe("YouTube Music companion isolated content script lifecycle (real DOM sh
     env.clock.advance(1000);
     env.setMediaAvailable(true);
     env.getHeartbeatCallback()?.();
+    env.clock.advance(1000);
+    env.getHeartbeatCallback()?.();
 
     expect(env.sentMessages.some((message) =>
       (message as { type?: string }).type === "youtube-music-source-disconnect"
@@ -1363,6 +1649,8 @@ describe("YouTube Music companion isolated content script lifecycle (real DOM sh
       matches: ["https://music.youtube.com/*"],
     }]);
     expect(contentUISource).toContain('const contentUIStopEvent = "lyricstage-content-ui-stop-v2"');
+    expect(contentUISource).toContain("new MutationObserver(reconcileHostMutations)");
+    expect(contentUISource).not.toContain("new MutationObserver(reconcileHosts)");
     expect(contentUISource).toContain("hostObserver.disconnect()");
     expect(contentUISource).toContain("root.unmount()");
     expect(contentUISource).toContain('const stageHostSelector = "#lyricstage-enhanced-lyrics-v2"');

@@ -28,6 +28,7 @@ const drawCanvas2D = (
   stageFrame: StageFrameV1,
 ) => {
   const frame = stageFrame.environment;
+  const lightweight = stageFrame.lightweight;
   clearCanvasBackingStoreV1(context);
   context.save();
   context.globalAlpha = 0.72;
@@ -75,12 +76,13 @@ const draw = (
   stageFrame: StageFrameV1,
 ) => {
   const frame = stageFrame.environment;
+  const lightweight = stageFrame.lightweight;
   graphics.clear();
   graphics.rect(0, 0, width, height).fill({ color: frame.background, alpha: 0.72 });
   frame.orbs.forEach((orb) => {
     const radius = orb.radius * Math.max(width, height) * 1.42;
     const glowColor = mixNumericColor(orb.color, frame.paper, 0.34);
-    const ringCount = 40;
+    const ringCount = lightweight ? 10 : stageFrame.reduceMotion ? 16 : 28;
     for (let ring = ringCount; ring >= 1; ring -= 1) {
       const radialPosition = ring / ringCount;
       const softness = (1 - radialPosition) ** 1.65;
@@ -118,6 +120,7 @@ export const PerformanceEnvironment = forwardRef<PerformanceEnvironmentHandle, {
   const failedRef = useRef(false);
   const latestFrameRef = useRef<StageFrameV1 | null>(null);
   const sizeRef = useRef({ width: 1, height: 1 });
+  const webGLBackingKeyRef = useRef("");
   const onStatusRef = useRef(onStatus);
   onStatusRef.current = onStatus;
 
@@ -133,6 +136,17 @@ export const PerformanceEnvironment = forwardRef<PerformanceEnvironmentHandle, {
     if (failedRef.current || !frame) return;
     try {
       if (application && graphics) {
+        const { width, height } = sizeRef.current;
+        if (width >= 2 && height >= 2) {
+          const requestedScale = frame.lightweight ? 1 : Math.min(window.devicePixelRatio || 1, 2);
+          const backing = canvasBackingStoreForV1(width, height, requestedScale);
+          const resolution = Math.min(backing.scaleX, backing.scaleY);
+          const backingKey = `${width}:${height}:${resolution}`;
+          if (webGLBackingKeyRef.current !== backingKey) {
+            application.renderer.resize(width, height, resolution);
+            webGLBackingKeyRef.current = backingKey;
+          }
+        }
         draw(
           graphics,
           application.screen.width,
@@ -148,7 +162,7 @@ export const PerformanceEnvironment = forwardRef<PerformanceEnvironmentHandle, {
       if (!host || !canvas || !context) return;
       const { width, height } = sizeRef.current;
       if (width < 2 || height < 2) return;
-      const dpr = Math.min(window.devicePixelRatio || 1, 2);
+      const dpr = frame.lightweight ? 1 : Math.min(window.devicePixelRatio || 1, 2);
       const backing = canvasBackingStoreForV1(width, height, dpr);
       if (canvas.width !== backing.pixelWidth || canvas.height !== backing.pixelHeight) {
         canvas.width = backing.pixelWidth;
@@ -289,6 +303,7 @@ export const PerformanceEnvironment = forwardRef<PerformanceEnvironmentHandle, {
       observer.disconnect();
       graphicsRef.current = null;
       applicationRef.current = null;
+      webGLBackingKeyRef.current = "";
       fallbackContextRef.current = null;
       fallbackCanvasRef.current?.remove();
       fallbackCanvasRef.current = null;

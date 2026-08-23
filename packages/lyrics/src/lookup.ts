@@ -23,6 +23,35 @@ export interface LayeredLyricsLookupOptionsV0 {
   identity?: LyricsLookupIdentityV0;
 }
 
+export const layeredLyricsLookupTimeoutMilliseconds = 16_000;
+export const lddcLyricsLookupTimeoutMilliseconds = 4_000;
+
+const throwIfAborted = (signal: AbortSignal): void => {
+  if (!signal.aborted) return;
+  throw signal.reason ?? new DOMException("歌词搜索已取消", "AbortError");
+};
+
+const withSourceDeadline = async <T>(
+  parent: AbortSignal,
+  milliseconds: number,
+  load: (signal: AbortSignal) => Promise<T>,
+): Promise<T> => {
+  const controller = new AbortController();
+  const abortFromParent = () => controller.abort(parent.reason);
+  if (parent.aborted) abortFromParent();
+  else parent.addEventListener("abort", abortFromParent, { once: true });
+  const timeout = setTimeout(
+    () => controller.abort(new DOMException("私有歌词源超时", "TimeoutError")),
+    milliseconds,
+  );
+  try {
+    return await load(controller.signal);
+  } finally {
+    clearTimeout(timeout);
+    parent.removeEventListener("abort", abortFromParent);
+  }
+};
+
 export const lookupLayeredLyrics = async (
   track: LyricsLookupTrackV0,
   options: LayeredLyricsLookupOptionsV0 = {},
@@ -31,36 +60,59 @@ export const lookupLayeredLyrics = async (
   const pooled: LyricsCandidateV0[] = [];
   const failures: unknown[] = [];
   let successfulSources = 0;
-  const append = async (task: Promise<LyricsCandidateV0[]>): Promise<boolean> => {
+  const controller = new AbortController();
+  const abortFromCaller = () => controller.abort(
+    options.signal?.reason ?? new DOMException("歌词搜索已取消", "AbortError"),
+  );
+  if (options.signal?.aborted) abortFromCaller();
+  else options.signal?.addEventListener("abort", abortFromCaller, { once: true });
+  const timeout = setTimeout(
+    () => controller.abort(new DOMException("歌词搜索超时", "TimeoutError")),
+    layeredLyricsLookupTimeoutMilliseconds,
+  );
+  const append = async (load: () => Promise<LyricsCandidateV0[]>): Promise<boolean> => {
+    throwIfAborted(controller.signal);
     try {
-      const candidates = await task;
+      const candidates = await load();
+      throwIfAborted(controller.signal);
       successfulSources += 1;
       pooled.push(...candidates);
       return candidates.some((candidate) => isSafeIdentityMatch(track, identity, candidate));
     } catch (error) {
+      throwIfAborted(controller.signal);
       failures.push(error);
       return false;
     }
   };
-  if (options.lddc && await append(lookupLDDCLyrics(track, options.lddc, options.signal, identity))) {
+  try {
+    if (options.lddc && await append(
+      () => withSourceDeadline(controller.signal, lddcLyricsLookupTimeoutMilliseconds, (signal) =>
+        lookupLDDCLyrics(track, options.lddc!, signal, identity)),
+    )) {
+      return responseFromCandidates(track, identity, pooled);
+    }
+    if (await append(
+      () => lookupLRCLibLyrics(track, controller.signal, identity).then((response) => response.candidates),
+    )) {
+      return responseFromCandidates(track, identity, pooled);
+    }
+    if (options.lddc && identity.isCover && identity.originalArtists.length > 0) {
+      await append(() => withSourceDeadline(controller.signal, lddcLyricsLookupTimeoutMilliseconds, (signal) =>
+        lookupLDDCLyrics(track, options.lddc!, signal, identity, identity.originalArtists)));
+    }
+    await append(() => lookupKugouLyrics(track, controller.signal, identity));
+    if (successfulSources === 0) throw failures[0] ?? new Error("歌词源暂时不可用");
     return responseFromCandidates(track, identity, pooled);
+  } catch (error) {
+    const reason = controller.signal.reason as { name?: unknown } | undefined;
+    if (!options.signal?.aborted && reason?.name === "TimeoutError" && successfulSources > 0) {
+      return responseFromCandidates(track, identity, pooled);
+    }
+    throw error;
+  } finally {
+    clearTimeout(timeout);
+    options.signal?.removeEventListener("abort", abortFromCaller);
   }
-  if (await append(lookupLRCLibLyrics(track, options.signal, identity)
-    .then((response) => response.candidates))) {
-    return responseFromCandidates(track, identity, pooled);
-  }
-  if (options.lddc && identity.isCover && identity.originalArtists.length > 0) {
-    await append(lookupLDDCLyrics(
-      track,
-      options.lddc,
-      options.signal,
-      identity,
-      identity.originalArtists,
-    ));
-  }
-  await append(lookupKugouLyrics(track, options.signal, identity));
-  if (successfulSources === 0) throw failures[0] ?? new Error("歌词源暂时不可用");
-  return responseFromCandidates(track, identity, pooled);
 };
 
 const responseFromCandidates = (

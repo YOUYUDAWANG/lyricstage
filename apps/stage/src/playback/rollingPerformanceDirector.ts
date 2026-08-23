@@ -256,9 +256,12 @@ export const handleRollingSeekV1 = (
   targetMs: number,
 ): { state: RollingDirectorRuntimeStateV1; useLocalImmediately: boolean } => {
   const covered = rollingCoverageAtV1(state.cards, targetMs).aheadMs > 0;
+  const current = state.status === "coverage-requesting"
+    ? { ...state, status: "ready" as const, pendingWindow: undefined }
+    : state;
   return covered
-    ? { state, useLocalImmediately: false }
-    : { state: { ...state, compiledPlan: localPlan, coverageFromMs: targetMs, coverageToMs: targetMs }, useLocalImmediately: true };
+    ? { state: current, useLocalImmediately: false }
+    : { state: { ...current, compiledPlan: localPlan, coverageFromMs: targetMs, coverageToMs: targetMs }, useLocalImmediately: true };
 };
 
 export const rollingDirectorStatusCopyV1 = (state: RollingDirectorRuntimeStateV1): string => {

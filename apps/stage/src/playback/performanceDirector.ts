@@ -235,6 +235,8 @@ export const directorStatusLabel = (
     if (state.reason === "extension-context-invalidated") return "本地演出 · 扩展需刷新";
     if (state.reason?.startsWith("extension-bridge-")) return "本地演出 · 扩展桥接中断";
     if (state.reason?.includes("401")) return "本地演出 · AI 鉴权失败";
+    if (state.reason?.includes("403")) return "本地演出 · AI 无访问权限";
+    if (state.reason?.includes("budget")) return "本地演出 · 本曲 AI 预算已用完";
     if (state.reason?.toLowerCase().includes("abort")) return "本地演出 · AI 生成超时";
     const attempt = state.timing?.attempts.at(-1);
     if (attempt?.outcome === "http-error") {

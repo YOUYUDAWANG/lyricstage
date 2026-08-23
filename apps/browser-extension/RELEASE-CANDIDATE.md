@@ -1,4 +1,4 @@
-# LyricStage for YouTube Music 0.3.1 Release Candidate
+# LyricStage for YouTube Music 0.3.2 Release Candidate
 
 Build artifact: `extension-dist`
 
@@ -24,19 +24,29 @@ Build artifact: `extension-dist`
 - [x] Fullscreen has no top/bottom floating chrome. Reading keeps previous/current/next visible; Hero is line-window scoped; Duet and Aperture preserve their own spatial rules.
 - [x] Latin text wraps at word boundaries, long CJK remains complete, and Reading motion cannot delay or obscure source-owned reveal.
 - [x] System reduced-motion and lightweight mode override personal VJ intensity.
-- [x] Production extension excludes Theatre Studio, `MediaRecorder`, `captureStream`, eval and CommonJS require; `tabCapture` is limited to user-started, in-memory feature analysis in the offscreen document.
+- [x] Fullscreen no longer starts audio analysis and no user-facing vocal-enhancement or local-lyric-upload action remains in the extension surface.
+- [x] Track identity, metadata, artwork and controls commit atomically after a stable player-ID transition; stale controls fail closed.
+- [x] Lyrics lookup has a 16-second total deadline, best-effort byte-bounded caches and isolated manual candidates.
+- [x] Rolling Director ownership, generation and cancellation are scoped per tab; same-tab track changes abort old provider work.
+- [x] The fullscreen environment shares the lyric frame coordinator, caches scene geometry, caps high-DPI backing stores and renders reduced-motion/lightweight scenes statically.
 - [x] The initial content scripts stay below the committed launch budget; the embedded Column loads as an extension ES module and the Pixi/fullscreen renderer remains in a lazy chunk until Stage is requested.
 - [x] The committed CI suite covers Web and Director contracts, source authority/clock reset, capture ownership, MV3 worker rehydration, four BYOK protocols, Legacy and Rolling budgets, Key-free cache identity, coverage thresholds, deterministic extension artifacts, bundle budgets, and a real Chromium extension-page smoke. Exact counts and artifact evidence belong to the current CI run rather than this document.
 - [x] TypeScript and `build:all` pass; the aggregate build explicitly rebuilds standalone Stage, Performance Lab and both Manifest V3 extension surfaces, followed by CSP verification.
 - [x] A clean temporary source copy independently rebuilt every file in `extension-dist` byte-for-byte; source `content.js` and `manifest.json` are packaged verbatim.
 - [x] The Companion no longer depends on `director.hachi-mi.uk`; the existing 1.5.8/V4 service and deployment files remain an optional gateway/rollback implementation and are not a source of user provider Keys.
 - [x] The client cache epoch is `fullscreen-director-v4-client-contract-v8.6-byok-v1`, and cache identity includes protocol/endpoint/model but excludes API Key.
-- [x] Local browser continuous benchmark: 240 Canvas frames, P95 0.30ms, P99 0.30ms, max 0.40ms, WebGL active.
+- [x] Full-frame metrics now include environment, DOM synchronization and lyric drawing instead of timing only the final Canvas call.
 - [x] AMLL 0.5.2/TTML 1.0.1 ADR keeps one glyph renderer and one clock; repository license/NOTICE is AGPL-3.0-only.
 
 ## Manual Chrome gates
 
-- [x] After deleting duplicate unpacked instances, installed the final Vite 8.2.2 `extension-dist` as one fresh instance under the original Chrome ID `majlfdidelchofnfodcijoppcgpmbelc` and refreshed YouTube Music. The page reported `data-lyricstage-content-script="isolated-v3"`; Lyrics mounted exactly one v2 host and zero legacy hosts; Related removed it and Lyrics remounted one host without a recorded mount failure. Multi-tab seek isolation, pause/resume and artwork fallback were also exercised on the release line. In automation where Fullscreen API ownership was denied, the UI stayed in Column, created no viewport canvas, and emitted no LyricStage warning/error loop.
+- [x] Reloaded the reviewed 0.3.2 artifact from the stable non-worktree directory under the original Chrome ID `majlfdidelchofnfodcijoppcgpmbelc`; Chrome reported 0.3.2 and `Reloaded`.
+- [x] On a fixed `Xk1FVQHDM7w&list=LM` route, queue changes kept the native player title, Stage title, artwork and duration on the same recording; `夏祭り → なにが悪い → 夏祭り → なにが悪い` did not restore stale controls or artwork.
+- [x] After the repeated queue transition, keyboard progress seek moved the current `なにが悪い` clock to 0:33 without returning to the prior song. The lyrics tools menu focused its first action, manual search submitted, and the successful result replaced the form with the candidate panel.
+- [x] Popup showed the live song, public lyrics fallback and configured Director without the removed vocal-enhancement or local-upload actions. The YTM log contained no LyricStage warning/error loop; the only warnings came from another extension.
+- [ ] Complete a later hands-on gate for new-origin model discovery/page-close permission revocation and 5K/Retina lightweight plus forced WebGL context restore. Browser automation intentionally did not bypass Chrome's internal-extension-page URL policy.
+
+- [x] The 0.3.1 baseline was installed under the original Chrome ID and covered one v2 host, zero legacy hosts, navigation remount, multi-tab seek isolation, pause/resume and artwork fallback. This is historical evidence, not 0.3.2 acceptance.
 
 - [x] A previous `web/extension-dist` 0.2.1 build was reloaded and established the baseline YTM UI gates below; these are historical evidence, not validation of the current candidate.
 - [x] Native Lyrics Column mounts exactly once; Related hides the extension and restores native content, then Lyrics remounts once.

@@ -1,12 +1,14 @@
-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import type { LyricDocumentV0 } from "@lyricstage/contracts";
 import { lyricsProviderLabel, type LyricsCandidateV0 } from "@lyricstage/lyrics";
 import { prepareTimeline } from "@lyricstage/core";
-import { vocalAwareVirtualTimeMs, type VocalTimingMapV1 } from "@lyricstage/performance";
 import {
   activeLineIndicesAt,
+  columnToolAfterLyricsSearch,
+  eventPathStartsInEditableControl,
   formatClock,
   linePhase,
+  lyricLineTabIndex,
   mapVoiceClass,
   resolveColumnSurfaceState,
   toggledColumnTool,
@@ -15,7 +17,7 @@ import {
   type ColumnSurfaceState,
 } from "./columnModel";
 import { activeScrollKey, shouldScrollForActiveChange } from "./embeddedFullscreen";
-import { alignTimedLineSegments, wordProgressFromTiming } from "./timedLineText";
+import { alignTimedLineSegments, alternativeLyricsCandidates, wordProgressFromTiming } from "./timedLineText";
 import {
   clampLyricsOffsetMs,
   formatLyricsOffset,
@@ -36,6 +38,7 @@ export interface ColumnStageViewProps {
   automaticStatus: AutomaticLyricsStatus;
   message: string;
   candidates: LyricsCandidateV0[];
+  selectedCandidateKey?: string;
   hasMatchingLyrics: boolean;
   lyrics: LyricDocumentV0;
   timeMs: number;
@@ -49,15 +52,19 @@ export interface ColumnStageViewProps {
   onManualSearch: (title: string, artist: string) => void;
   canEnterFullscreen: boolean;
   lightweight: boolean;
-  vocalTimingMap?: VocalTimingMapV1;
   lyricsOffsetMs: number;
   onSetLyricsOffset: (offsetMs: number) => void;
   onAlignCurrentLine: (lineIndex: number) => void;
   onSeekLine: (timeMs: number) => void;
+  interactionNotice?: string;
+  onReconnect?: () => void;
+  onReloadSource?: () => void;
 }
 
 const stateCopy = (state: ColumnSurfaceState, message: string): { title: string; body: string } => {
   switch (state) {
+    case "bridgeUnavailable":
+      return { title: "扩展已更新", body: "刷新 YouTube Music 后即可重新连接歌词舞台。" };
     case "awaitingTrack":
       return { title: "等待播放", body: "在 YouTube Music 播放歌曲后，歌词将在此显示。" };
     case "searching":
@@ -75,7 +82,7 @@ const stateCopy = (state: ColumnSurfaceState, message: string): { title: string;
     case "paused":
       return { title: "已暂停", body: "歌词已冻结，播放后继续跟随。" };
     case "disconnected":
-      return { title: "连接中断", body: "回到 YouTube Music 后会自动恢复。" };
+      return { title: "连接中断", body: "自动重试已停止，可在此重新连接。" };
     case "boot":
       return { title: "LyricStage", body: "连接中" };
     default:
@@ -95,6 +102,7 @@ export function ColumnStageView({
   automaticStatus,
   message,
   candidates,
+  selectedCandidateKey,
   hasMatchingLyrics,
   lyrics,
   timeMs,
@@ -108,16 +116,22 @@ export function ColumnStageView({
   onManualSearch,
   canEnterFullscreen,
   lightweight,
-  vocalTimingMap,
   lyricsOffsetMs,
   onSetLyricsOffset,
   onAlignCurrentLine,
   onSeekLine,
+  interactionNotice,
+  onReconnect,
+  onReloadSource,
 }: ColumnStageViewProps) {
   const streamRef = useRef<HTMLDivElement>(null);
   const activeRef = useRef<HTMLDivElement>(null);
   const toolbarRef = useRef<HTMLDivElement>(null);
+  const moreButtonRef = useRef<HTMLButtonElement>(null);
+  const toolsMenuRef = useRef<HTMLDivElement>(null);
+  const toolPanelRef = useRef<HTMLElement>(null);
   const lastActiveKeyRef = useRef<string>("");
+  const previousAutomaticStatusRef = useRef(automaticStatus);
   const enterFullscreenRef = useRef(onEnterFullscreen);
   enterFullscreenRef.current = onEnterFullscreen;
   const [activeTool, setActiveTool] = useState<ColumnTool | null>(null);
@@ -127,6 +141,13 @@ export function ColumnStageView({
   const frozen = disconnected || playbackState === "paused" || playbackState === "ended";
   const lyricTimeMs = lyricsTimeForPlaybackMs(timeMs, lyricsOffsetMs, durationMs);
   const lyricsOffsetLabel = lyricsOffsetMs === 0 ? "" : ` · 歌词${formatLyricsOffset(lyricsOffsetMs)}`;
+
+  const closeTool = useCallback((restoreFocus = true) => {
+    if (activeTool === "versions" && showVersionPicker) onShowVersions();
+    setActiveTool(null);
+    setShowToolsMenu(false);
+    if (restoreFocus) requestAnimationFrame(() => moreButtonRef.current?.focus({ preventScroll: true }));
+  }, [activeTool, onShowVersions, showVersionPicker]);
 
   useEffect(() => {
     setManualTitle(title);
@@ -139,7 +160,16 @@ export function ColumnStageView({
   }, [activeTool, showVersionPicker]);
 
   useEffect(() => {
-    if (!showToolsMenu) return;
+    const previousStatus = previousAutomaticStatusRef.current;
+    previousAutomaticStatusRef.current = automaticStatus;
+    const next = columnToolAfterLyricsSearch(activeTool, previousStatus, automaticStatus, candidates.length);
+    if (next === activeTool) return;
+    if (next === "versions" && !showVersionPicker) onShowVersions();
+    setActiveTool(next);
+  }, [activeTool, automaticStatus, candidates.length, onShowVersions, showVersionPicker]);
+
+  useEffect(() => {
+    if (!showToolsMenu && !activeTool) return;
     const closeOnOutsidePointer = (event: PointerEvent) => {
       const toolbar = toolbarRef.current;
       if (toolbar && !event.composedPath().includes(toolbar)) {
@@ -147,7 +177,14 @@ export function ColumnStageView({
       }
     };
     const closeOnEscape = (event: KeyboardEvent) => {
-      if (event.key === "Escape") setShowToolsMenu(false);
+      if (event.key !== "Escape") return;
+      event.preventDefault();
+      event.stopPropagation();
+      if (activeTool) closeTool();
+      else {
+        setShowToolsMenu(false);
+        requestAnimationFrame(() => moreButtonRef.current?.focus({ preventScroll: true }));
+      }
     };
     window.addEventListener("pointerdown", closeOnOutsidePointer, true);
     window.addEventListener("keydown", closeOnEscape, true);
@@ -155,7 +192,22 @@ export function ColumnStageView({
       window.removeEventListener("pointerdown", closeOnOutsidePointer, true);
       window.removeEventListener("keydown", closeOnEscape, true);
     };
-  }, [showToolsMenu]);
+  }, [activeTool, closeTool, showToolsMenu]);
+
+  useLayoutEffect(() => {
+    if (showToolsMenu && !activeTool) {
+      toolsMenuRef.current?.querySelector<HTMLElement>("button:not([disabled])")?.focus({ preventScroll: true });
+    }
+  }, [activeTool, showToolsMenu]);
+
+  useLayoutEffect(() => {
+    if (!activeTool) return;
+    const panel = toolPanelRef.current;
+    const target = panel?.querySelector<HTMLElement>(
+      ".column-manual-search input:not([disabled]), .column-timing-adjust button:not([disabled]), .column-candidate-list button:not([disabled])",
+    ) ?? panel?.querySelector<HTMLElement>("button:not([disabled])");
+    (target ?? panel)?.focus({ preventScroll: true });
+  }, [activeTool]);
 
   const surface = resolveColumnSurfaceState({
     bridgeAvailable,
@@ -230,20 +282,14 @@ export function ColumnStageView({
       (activeRect.top - streamRect.top) -
       streamRect.height * 0.3 +
       activeRect.height / 2;
-    stream.scrollTo({ top: Math.max(0, target), behavior: "smooth" });
-  }, [activeKey, frozen]);
+    stream.scrollTo({ top: Math.max(0, target), behavior: lightweight ? "auto" : "smooth" });
+  }, [activeKey, frozen, lightweight]);
 
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
       if (event.key === "f" || event.key === "F") {
         if (event.metaKey || event.ctrlKey || event.altKey) return;
-        const target = event.target;
-        if (
-          target instanceof HTMLElement &&
-          (target.tagName === "INPUT" || target.tagName === "TEXTAREA" || target.isContentEditable)
-        ) {
-          return;
-        }
+        if (eventPathStartsInEditableControl(event.composedPath())) return;
         if (!canEnterFullscreen) return;
         event.preventDefault();
         enterFullscreenRef.current();
@@ -261,19 +307,14 @@ export function ColumnStageView({
       surface === "interlude" ||
       surface === "paused" ||
       surface === "disconnected");
-  const showStateCard = surface !== "singing";
-  const limitedCandidates = candidates.slice(0, 5);
+  const showStateCard = surface !== "singing" && surface !== "paused";
+  const limitedCandidates = alternativeLyricsCandidates(candidates, selectedCandidateKey);
 
   const selectTool = (selected: ColumnTool) => {
     const next = toggledColumnTool(activeTool, selected);
     if ((next === "versions") !== showVersionPicker) onShowVersions();
     setActiveTool(next);
     setShowToolsMenu(false);
-  };
-
-  const closeTool = () => {
-    if (activeTool === "versions" && showVersionPicker) onShowVersions();
-    setActiveTool(null);
   };
 
   return (
@@ -293,6 +334,7 @@ export function ColumnStageView({
         </div>
         <div ref={toolbarRef} className="column-toolbar" role="toolbar" aria-label="歌词工具栏">
           <button
+            ref={moreButtonRef}
             type="button"
             className={`column-tool-button ${showToolsMenu ? "is-active" : ""}`}
             aria-expanded={showToolsMenu}
@@ -308,6 +350,7 @@ export function ColumnStageView({
             type="button"
             className="column-tool-button column-fullscreen-tool"
             disabled={!canEnterFullscreen}
+            data-column-enter-fullscreen="true"
             aria-label="进入全屏舞台"
             title={canEnterFullscreen ? "进入全屏舞台 (F)" : "请先匹配同步歌词"}
             onClick={onEnterFullscreen}
@@ -317,7 +360,7 @@ export function ColumnStageView({
             </svg>
           </button>
           {showToolsMenu && (
-            <div className="column-tools-menu" role="group" aria-label="更多歌词工具">
+            <div ref={toolsMenuRef} className="column-tools-menu" role="group" aria-label="更多歌词工具">
               <button
                 type="button"
                 className={activeTool === "timing" || lyricsOffsetMs !== 0 ? "is-active" : ""}
@@ -329,8 +372,13 @@ export function ColumnStageView({
               <button type="button" className={activeTool === "search" ? "is-active" : ""} onClick={() => selectTool("search")}>
                 <span>⌕</span><div><strong>手动搜索</strong><small>按歌名和歌手重搜</small></div>
               </button>
-              <button type="button" className={activeTool === "versions" ? "is-active" : ""} onClick={() => selectTool("versions")}>
-                <span>▱</span><div><strong>歌词版本</strong><small>查看其他匹配结果</small></div>
+              <button
+                type="button"
+                className={activeTool === "versions" ? "is-active" : ""}
+                disabled={limitedCandidates.length === 0}
+                onClick={() => selectTool("versions")}
+              >
+                <span>▱</span><div><strong>歌词版本</strong><small>{limitedCandidates.length > 0 ? "查看其他匹配结果" : "暂无其他结果"}</small></div>
               </button>
             </div>
           )}
@@ -338,7 +386,7 @@ export function ColumnStageView({
       </header>
 
       {activeTool && (
-        <section className="column-tool-panel" role="dialog" aria-label={{
+        <section ref={toolPanelRef} tabIndex={-1} className="column-tool-panel" role="dialog" aria-label={{
           timing: "歌词时间轴",
           search: "手动搜索歌词",
           versions: "选择歌词版本",
@@ -349,7 +397,7 @@ export function ColumnStageView({
               search: "手动搜索歌词",
               versions: "选择歌词版本",
             }[activeTool]}</strong>
-            <button type="button" aria-label="关闭歌词工具" onClick={closeTool}>×</button>
+            <button type="button" aria-label="关闭歌词工具" onClick={() => closeTool()}>×</button>
           </header>
 
           {activeTool === "timing" && hasMatchingLyrics && (
@@ -450,9 +498,15 @@ export function ColumnStageView({
         </section>
       )}
 
-      {(surface === "paused" || surface === "disconnected") && (
+      {surface === "paused" && (
         <div className="column-banner" role="status">
           {copy.title} · {copy.body}
+        </div>
+      )}
+
+      {interactionNotice && (
+        <div className="column-interaction-notice" role="status" aria-live="polite">
+          {interactionNotice}
         </div>
       )}
 
@@ -462,38 +516,6 @@ export function ColumnStageView({
             const phase = linePhase(line, lyricTimeMs, activeIndices);
             const voice = mapVoiceClass(line.voiceRole);
             const segments = lineSegments.get(line.lineIndex) ?? [{ kind: "plain" as const, text: line.text }];
-            const estimatedEndMs = segments.reduce((latest, segment) =>
-              segment.kind === "word" && segment.timingKind === "estimated"
-                ? Math.max(latest, segment.toMs)
-                : latest,
-            line.fromMs);
-            // VocalTimingMap samples live on the host playback axis. Convert the
-            // lyric estimate bounds to that axis before applying the acoustic
-            // warp, then convert the result back for word progress sampling.
-            // This keeps a persisted lyric offset from shifting text and audio
-            // evidence in opposite coordinate systems.
-            const estimatedPlaybackFromMs = playbackTimeForLyricsMs(
-              line.fromMs,
-              lyricsOffsetMs,
-              durationMs,
-            );
-            const estimatedPlaybackEndMs = playbackTimeForLyricsMs(
-              estimatedEndMs,
-              lyricsOffsetMs,
-              durationMs,
-            );
-            const estimatedTimeMs = estimatedEndMs > line.fromMs
-              ? lyricsTimeForPlaybackMs(
-                  vocalAwareVirtualTimeMs(
-                    estimatedPlaybackFromMs,
-                    estimatedPlaybackEndMs,
-                    timeMs,
-                    vocalTimingMap,
-                  ),
-                  lyricsOffsetMs,
-                  durationMs,
-                )
-              : lyricTimeMs;
             const distance =
               primaryActiveIndex < 0
                 ? Number.POSITIVE_INFINITY
@@ -505,14 +527,22 @@ export function ColumnStageView({
                 ref={phase === "active" ? activeRef : undefined}
                 className="column-line"
                 role="button"
-                tabIndex={0}
-                aria-label={`跳转到 ${formatClock(playbackTimeForLyricsMs(line.fromMs, lyricsOffsetMs, durationMs))}`}
+                tabIndex={lyricLineTabIndex(line.lineIndex, primaryActiveIndex, lyrics.lines[0]?.lineIndex ?? line.lineIndex)}
+                aria-label={`${line.text}，跳转到 ${formatClock(playbackTimeForLyricsMs(line.fromMs, lyricsOffsetMs, durationMs))}`}
                 title={`跳转到 ${formatClock(playbackTimeForLyricsMs(line.fromMs, lyricsOffsetMs, durationMs))}`}
                 data-phase={phase}
                 data-voice={voice}
                 data-proximity={proximity}
                 onClick={() => onSeekLine(playbackTimeForLyricsMs(line.fromMs, lyricsOffsetMs, durationMs))}
                 onKeyDown={(event) => {
+                  if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+                    event.preventDefault();
+                    const lines = Array.from(streamRef.current?.querySelectorAll<HTMLElement>(".column-line") ?? []);
+                    const current = lines.indexOf(event.currentTarget);
+                    const next = event.key === "ArrowDown" ? current + 1 : current - 1;
+                    lines[Math.min(lines.length - 1, Math.max(0, next))]?.focus({ preventScroll: false });
+                    return;
+                  }
                   if (event.key !== "Enter" && event.key !== " ") return;
                   event.preventDefault();
                   onSeekLine(playbackTimeForLyricsMs(line.fromMs, lyricsOffsetMs, durationMs));
@@ -521,11 +551,9 @@ export function ColumnStageView({
                 <span className="column-line-words">
                   {segments.map((segment, index) => {
                     if (segment.kind === "word") {
-                      const progress = wordProgressFromTiming(
-                        segment.timingKind === "estimated" ? estimatedTimeMs : lyricTimeMs,
-                        segment.fromMs,
-                        segment.toMs,
-                      );
+                      const progress = phase === "active"
+                        ? wordProgressFromTiming(lyricTimeMs, segment.fromMs, segment.toMs)
+                        : phase === "past" ? 1 : 0;
                       return (
                         <span
                           key={`${line.lineIndex}:word:${segment.wordIndex}:${index}`}
@@ -581,6 +609,21 @@ export function ColumnStageView({
                   </button>
                 ))}
               </div>
+            )}
+            {(surface === "miss" || surface === "error") && (
+              <button type="button" className="column-recovery-action" onClick={() => selectTool("search")}>
+                手动搜索歌词
+              </button>
+            )}
+            {surface === "disconnected" && onReconnect && (
+              <button type="button" className="column-recovery-action" onClick={onReconnect}>
+                重新连接
+              </button>
+            )}
+            {surface === "bridgeUnavailable" && onReloadSource && (
+              <button type="button" className="column-recovery-action" onClick={onReloadSource}>
+                刷新 YouTube Music
+              </button>
             )}
           </div>
         )}

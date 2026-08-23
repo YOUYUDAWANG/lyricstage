@@ -23,6 +23,8 @@ export const backgroundStorageKeys = {
 export const directorCacheEpoch = "fullscreen-director-v4-client-contract-v8.7-byok-intent-v1";
 export const rollingDirectorEpoch = "rolling-director-generation-v1.3-window-intent-v2";
 export const lyricsCacheLimit = 100;
+export const lyricsCacheByteLimit = 1_500_000;
+export const localLyricsByteLimit = 1_500_000;
 export const directorCacheLimit = 100;
 export const sponsorBlockCategories = [
   "sponsor", "selfpromo", "interaction", "intro", "outro", "preview", "filler", "music_offtopic",
@@ -31,6 +33,7 @@ export const sponsorBlockCategories = [
 export interface StoredLyricsCacheEntry {
   fingerprint: string;
   expiresAtUnixMs: number;
+  updatedAtUnixMs?: number;
   response: LyricsLookupResponseV0;
 }
 export type StoredLyricsCache = Record<string, StoredLyricsCacheEntry>;
@@ -42,6 +45,36 @@ export interface StoredLocalLyricsEntry {
   updatedAtUnixMs: number;
 }
 export type StoredLocalLyrics = Record<string, StoredLocalLyricsEntry>;
+
+const jsonByteLength = (value: unknown): number => {
+  const serialized = JSON.stringify(value);
+  return serialized === undefined ? 0 : new TextEncoder().encode(serialized).byteLength;
+};
+
+/**
+ * Keeps the caller's newest-first ordering while applying both count and exact
+ * UTF-8 JSON byte budgets. Chrome storage quotas are byte based, so a record
+ * count alone is not a meaningful bound for large synchronized lyrics.
+ */
+export const boundedStorageRecord = <T>(
+  entries: Array<[string, T]>,
+  maxEntries: number,
+  maxBytes: number,
+): Record<string, T> => {
+  const selected: Array<[string, T]> = [];
+  let bytes = 2; // Opening and closing braces.
+  for (const [key, value] of entries) {
+    if (selected.length >= maxEntries) break;
+    const serializedValue = JSON.stringify(value);
+    if (serializedValue === undefined) continue;
+    const contribution = jsonByteLength(key) + 1 + new TextEncoder().encode(serializedValue).byteLength
+      + (selected.length > 0 ? 1 : 0);
+    if (bytes + contribution > maxBytes) continue;
+    selected.push([key, value]);
+    bytes += contribution;
+  }
+  return Object.fromEntries(selected);
+};
 
 export interface StoredDirectorCacheEntry {
   fingerprint: string;

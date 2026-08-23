@@ -1,5 +1,10 @@
 import { describe, expect, it, vi } from "vitest";
-import { lookupLayeredLyrics, type LyricsLookupTrackV0 } from "./index";
+import {
+  layeredLyricsLookupTimeoutMilliseconds,
+  lddcLyricsLookupTimeoutMilliseconds,
+  lookupLayeredLyrics,
+  type LyricsLookupTrackV0,
+} from "./index";
 
 const track: LyricsLookupTrackV0 = {
   provider: "youtubeMusic",
@@ -181,6 +186,124 @@ describe("layered lyrics lookup", () => {
       })).toBe(true);
     } finally {
       fetchMock.mockRestore();
+    }
+  });
+
+  it("abandons a stalled optional LDDC early and continues to a public match", async () => {
+    vi.useFakeTimers();
+    const observedSignals: AbortSignal[] = [];
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockImplementation((input, init) => {
+      const url = new URL(String(input));
+      if (url.hostname === "lrclib.net") return Promise.resolve(new Response(JSON.stringify({
+        id: 1,
+        trackName: track.title,
+        artistName: track.artist,
+        duration: 240,
+        syncedLyrics: "[00:01.00]test",
+      }), { status: 200 }));
+      return new Promise((_resolve, reject) => {
+        const signal = init?.signal;
+        if (!signal) return;
+        observedSignals.push(signal);
+        signal.addEventListener("abort", () => reject(signal.reason), { once: true });
+      });
+    });
+    try {
+      const lookup = lookupLayeredLyrics(track, {
+        lddc: { endpoint: "https://lyrics.example/api/", token: "secret" },
+      });
+      await vi.advanceTimersByTimeAsync(lddcLyricsLookupTimeoutMilliseconds);
+      await expect(lookup).resolves.toMatchObject({ status: "match", match: { provider: "lrclib" } });
+      expect(observedSignals).toHaveLength(1);
+      expect(observedSignals[0]?.aborted).toBe(true);
+    } finally {
+      fetchMock.mockRestore();
+      vi.useRealTimers();
+    }
+  });
+
+  it("aborts a lookup with no completed source at the whole-lookup deadline", async () => {
+    vi.useFakeTimers();
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockImplementation((_input, init) =>
+      new Promise((_resolve, reject) => {
+        const signal = init?.signal;
+        signal?.addEventListener("abort", () => reject(signal.reason), { once: true });
+      }));
+    try {
+      const lookup = lookupLayeredLyrics(track);
+      const rejected = expect(lookup).rejects.toMatchObject({ name: "TimeoutError" });
+      await vi.advanceTimersByTimeAsync(layeredLyricsLookupTimeoutMilliseconds);
+      await rejected;
+    } finally {
+      fetchMock.mockRestore();
+      vi.useRealTimers();
+    }
+  });
+
+  it("returns the completed-source result after aborting a stalled fallback at the deadline", async () => {
+    vi.useFakeTimers();
+    const kugouSignals: AbortSignal[] = [];
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockImplementation((input, init) => {
+      const url = new URL(String(input));
+      if (url.hostname === "lrclib.net") {
+        return Promise.resolve(url.pathname === "/api/get"
+          ? new Response("", { status: 404 })
+          : new Response("[]", { status: 200 }));
+      }
+      return new Promise((_resolve, reject) => {
+        const signal = init?.signal;
+        if (!signal) return;
+        kugouSignals.push(signal);
+        signal.addEventListener("abort", () => reject(signal.reason), { once: true });
+      });
+    });
+    try {
+      const lookup = lookupLayeredLyrics(track);
+      await vi.advanceTimersByTimeAsync(layeredLyricsLookupTimeoutMilliseconds);
+      await expect(lookup).resolves.toMatchObject({ status: "miss", candidates: [] });
+      expect(kugouSignals.length).toBeGreaterThan(0);
+      expect(kugouSignals.every((signal) => signal.aborted)).toBe(true);
+    } finally {
+      fetchMock.mockRestore();
+      vi.useRealTimers();
+    }
+  });
+
+  it("keeps earlier candidates when a later source stalls until the deadline", async () => {
+    vi.useFakeTimers();
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockImplementation((input, init) => {
+      const url = new URL(String(input));
+      if (url.hostname === "lyrics.example") {
+        return Promise.resolve(new Response(JSON.stringify({
+          schema: "bilimusic-lddc-lyrics-v1",
+          candidates: [{
+            source: "netease",
+            id: "partial",
+            title: track.title,
+            artist: track.artist,
+            durationSeconds: 250,
+            timingKind: "line",
+            lyricLines: [{ startMilliseconds: 1_000, endMilliseconds: 3_000, text: "partial" }],
+          }],
+        }), { status: 200 }));
+      }
+      return new Promise((_resolve, reject) => {
+        const signal = init?.signal;
+        signal?.addEventListener("abort", () => reject(signal.reason), { once: true });
+      });
+    });
+    try {
+      const lookup = lookupLayeredLyrics(track, {
+        lddc: { endpoint: "https://lyrics.example/api/", token: "secret" },
+      });
+      await vi.advanceTimersByTimeAsync(layeredLyricsLookupTimeoutMilliseconds);
+      await expect(lookup).resolves.toMatchObject({
+        status: "candidates",
+        candidates: [{ provider: "netease", id: "partial" }],
+      });
+    } finally {
+      fetchMock.mockRestore();
+      vi.useRealTimers();
     }
   });
 });
