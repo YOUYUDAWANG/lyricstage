@@ -50,6 +50,8 @@
   let sponsorBlockControlHost = null;
   let sponsorBlockTitleCompat = null;
   let lastKnownVideoID = "";
+  let lastPlayerVideoID = "";
+  let lastLocationVideoID = "";
   let acceptedTrackTuple = null;
   let pendingTrackTuple = null;
   const savedNativeRenderers = new Map();
@@ -137,25 +139,76 @@
     return `https://i.ytimg.com/vi/${safeTrackID}/hqdefault.jpg`;
   };
 
+  const videoIDFromHref = (href) => {
+    if (!href) return "";
+    try {
+      return new URL(href, location.origin).searchParams.get("v") ?? "";
+    } catch {
+      return "";
+    }
+  };
+
   const currentVideoID = (playerBar) => {
-    const href = playerBar?.querySelector?.('a[href*="watch?v="]')?.getAttribute?.("href");
-    if (href) {
-      try {
-        const fromBar = new URL(href, location.origin).searchParams.get("v") ?? "";
-        if (fromBar) {
-          lastKnownVideoID = fromBar;
-          return fromBar;
-        }
-      } catch {
-        // Keep the last recording identity across YouTube Music SPA routes.
+    const locationVideoID = videoIDFromHref(location.href);
+    const hrefs = [
+      document.querySelector?.(
+        '#movie_player a.ytp-title-link[href*="watch?"][href*="v="], ytmusic-player a.ytp-title-link[href*="watch?"][href*="v="]',
+      )?.getAttribute?.("href"),
+      playerBar?.querySelector?.('a[href*="watch?v="], a[href*="watch?"][href*="v="]')?.getAttribute?.("href"),
+      document.querySelector?.(
+        'ytmusic-player-queue-item[selected] a[href*="watch?v="], ytmusic-player-queue-item[selected] a[href*="watch?"][href*="v="]',
+      )?.getAttribute?.("href"),
+    ];
+    for (const href of hrefs) {
+      const videoID = videoIDFromHref(href);
+      if (videoID) {
+        lastPlayerVideoID = videoID;
+        if (locationVideoID) lastLocationVideoID = locationVideoID;
+        lastKnownVideoID = videoID;
+        return videoID;
       }
     }
-    const fromLocation = new URL(location.href).searchParams.get("v");
-    if (fromLocation) {
-      lastKnownVideoID = fromLocation;
-      return fromLocation;
+    if (locationVideoID && locationVideoID !== lastLocationVideoID) {
+      lastLocationVideoID = locationVideoID;
+      lastKnownVideoID = locationVideoID;
+      return locationVideoID;
+    }
+    if (lastPlayerVideoID) return lastPlayerVideoID;
+    if (locationVideoID) {
+      lastLocationVideoID = locationVideoID;
+      lastKnownVideoID = locationVideoID;
+      return locationVideoID;
     }
     return lastKnownVideoID;
+  };
+
+  const mediaSeekTarget = (media, barClock, requestedTimeMs) => {
+    const logicalDurationMs = barClock?.durationMs
+      ?? (Number.isFinite(media.duration) ? Math.max(0, media.duration * 1000) : 0);
+    const boundedLogicalMs = logicalDurationMs > 0
+      ? Math.min(requestedTimeMs, logicalDurationMs)
+      : requestedTimeMs;
+    if (!barClock) {
+      return {
+        logicalTimeMs: boundedLogicalMs,
+        mediaTimeSeconds: boundedLogicalMs / 1000,
+      };
+    }
+
+    const logicalNowMs = synchronizedCurrentTimeMs(media, barClock);
+    const mediaTimeSeconds = media.currentTime + (boundedLogicalMs - logicalNowMs) / 1000;
+    if (!Number.isFinite(mediaTimeSeconds)) return null;
+    const mediaDurationSeconds = Number.isFinite(media.duration) ? Math.max(0, media.duration) : 0;
+    if (
+      mediaTimeSeconds < -1.5
+      || (mediaDurationSeconds > 0 && mediaTimeSeconds > mediaDurationSeconds + 1.5)
+    ) return null;
+    return {
+      logicalTimeMs: boundedLogicalMs,
+      mediaTimeSeconds: mediaDurationSeconds > 0
+        ? Math.min(mediaDurationSeconds, Math.max(0, mediaTimeSeconds))
+        : Math.max(0, mediaTimeSeconds),
+    };
   };
 
   const isYouTubeMusicLocation = () => {
@@ -878,13 +931,19 @@
         return;
       }
       if (!commandMatchesCurrentTrack(message, playerBar, sendResponse)) return;
-      const requestedSeconds = requestedTimeMs / 1000;
-      const boundedSeconds = Number.isFinite(media.duration)
-        ? Math.min(requestedSeconds, Math.max(0, media.duration))
-        : requestedSeconds;
-      media.currentTime = boundedSeconds;
+      const target = mediaSeekTarget(media, playerBarClock(playerBar), requestedTimeMs);
+      if (!target) {
+        sendResponse({ ok: false, reason: "seek-timeline-unavailable" });
+        return;
+      }
+      media.currentTime = target.mediaTimeSeconds;
+      playbackClockAnchor = {
+        media,
+        mediaTimeMs: target.mediaTimeSeconds * 1000,
+        barTimeMs: target.logicalTimeMs,
+      };
       queueSend();
-      sendResponse({ ok: true, timeMs: Math.round(boundedSeconds * 1000) });
+      sendResponse({ ok: true, timeMs: Math.round(target.logicalTimeMs) });
       return;
     }
 

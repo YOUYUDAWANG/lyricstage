@@ -161,6 +161,7 @@ describe("YouTube Music companion isolated content script lifecycle (real DOM sh
     playerBarArtist?: string;
     playerBarArtworkURL?: string;
     playerBarVideoID?: string;
+    playerVideoID?: string;
     mediaSessionArtworkURLs?: string[];
     videoArtworkURL?: string;
     mediaElements?: Array<Partial<Pick<
@@ -184,6 +185,7 @@ describe("YouTube Music companion isolated content script lifecycle (real DOM sh
     let playerBarTitle = overrides.playerBarTitle ?? "You & 合図";
     let playerBarArtist = overrides.playerBarArtist ?? "音乃瀬奏";
     let playerBarVideoID = overrides.playerBarVideoID;
+    let playerVideoID = overrides.playerVideoID;
     const locationValue = {
       href: "https://music.youtube.com/watch?v=ZmCRFGcON-I",
       origin: "https://music.youtube.com",
@@ -331,6 +333,11 @@ describe("YouTube Music companion isolated content script lifecycle (real DOM sh
         querySelector: (selector: string) => {
           if (selector === "video, audio") return mediaAvailable ? media : null;
           if (selector === "ytmusic-player-bar") return playerBarAvailable ? playerBar : null;
+          if (selector.includes("ytp-title-link")) {
+            return playerVideoID
+              ? { getAttribute: () => `https://music.youtube.com/watch?list=RDAMVMfixture&v=${playerVideoID}` }
+              : null;
+          }
           if (selector.includes('img[src*="/vi/')) {
             return overrides.videoArtworkURL
               ? { currentSrc: overrides.videoArtworkURL, src: overrides.videoArtworkURL }
@@ -432,6 +439,9 @@ describe("YouTube Music companion isolated content script lifecycle (real DOM sh
       },
       setPlayerBarVideoID: (value: string | undefined) => {
         playerBarVideoID = value;
+      },
+      setPlayerVideoID: (value: string | undefined) => {
+        playerVideoID = value;
       },
       setLocationHref: (value: string) => {
         locationValue.href = value;
@@ -654,6 +664,32 @@ describe("YouTube Music companion isolated content script lifecycle (real DOM sh
     const snapshots = env.sentMessages.filter((message) =>
       (message as { type?: string }).type === "youtube-music-source-snapshot"
     ) as Array<{ snapshot?: { track?: { trackID?: string } } }>;
+    expect(snapshots.at(-1)?.snapshot?.track?.trackID).toBe("abcdefghijk");
+  });
+
+  it("uses the internal player identity when queue playback advances without changing the page URL", () => {
+    const env = createEnvironment({ playerVideoID: "ZmCRFGcON-I" });
+    vm.runInContext(contentScriptSource, env.context);
+    env.clock.advance(40);
+
+    env.setPlayerVideoID("abcdefghijk");
+    env.setPlayerBarTitle("New Queue Track");
+    env.setPlayerBarArtist("New Queue Artist");
+    env.getHeartbeatCallback()?.();
+    env.clock.advance(250);
+    env.getHeartbeatCallback()?.();
+
+    const snapshots = env.sentMessages.filter((message) =>
+      (message as { type?: string }).type === "youtube-music-source-snapshot"
+    ) as Array<{ snapshot?: { track?: { trackID?: string; title?: string; artist?: string } } }>;
+    expect(snapshots.at(-1)?.snapshot?.track).toMatchObject({
+      trackID: "abcdefghijk",
+      title: "New Queue Track",
+      artist: "New Queue Artist",
+    });
+
+    env.setPlayerVideoID(undefined);
+    env.getHeartbeatCallback()?.();
     expect(snapshots.at(-1)?.snapshot?.track?.trackID).toBe("abcdefghijk");
   });
 
@@ -1147,6 +1183,44 @@ describe("YouTube Music companion isolated content script lifecycle (real DOM sh
     expect(env.mediaElements[0]?.currentTime).toBe(193);
     expect(env.mediaElements[1]?.currentTime).toBe(72.5);
     expect(respond).toHaveBeenCalledWith({ ok: true, timeMs: 72_500 });
+  });
+
+  it("maps track-relative seeks onto YouTube Music's reused internal media timeline", () => {
+    const env = createEnvironment({
+      playerBarTimeText: "0:50 / 4:19",
+      mediaElements: [{ paused: false, currentTime: 193, duration: 402 }],
+    });
+    vm.runInContext(contentScriptSource, env.context);
+    const respond = vi.fn();
+
+    env.runtimeListeners[0]?.(
+      { type: "youtube-music-seek-to", timeMs: 72_500, expectedTrackID: "ZmCRFGcON-I" },
+      undefined,
+      respond,
+    );
+
+    expect(env.media.currentTime).toBe(215.5);
+    expect(respond).toHaveBeenCalledWith({ ok: true, timeMs: 72_500 });
+  });
+
+  it("rejects stale controls as soon as the internal player advances to another queue item", () => {
+    const env = createEnvironment({ playerVideoID: "ZmCRFGcON-I" });
+    vm.runInContext(contentScriptSource, env.context);
+    env.setPlayerVideoID("abcdefghijk");
+    const respond = vi.fn();
+
+    env.runtimeListeners[0]?.(
+      { type: "youtube-music-seek-to", timeMs: 72_500, expectedTrackID: "ZmCRFGcON-I" },
+      undefined,
+      respond,
+    );
+
+    expect(env.media.currentTime).toBe(12);
+    expect(respond).toHaveBeenCalledWith({
+      ok: false,
+      reason: "track-changed",
+      trackID: "abcdefghijk",
+    });
   });
 
   it("fails transport and seek closed when the expected track changed", () => {
