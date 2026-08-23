@@ -854,7 +854,7 @@ export const isDirectorPlanV1ForLyrics = (
   const directiveLines = new Set<number>();
   const validEffects = complete.effects.every((effect) => {
     const section = complete.sections.find((candidate) => candidate.id === effect.sectionID);
-    return section ? validateEffectRecipeV1(effect, section, validLines) : false;
+    return section ? validateEffectRecipeV1(effect, section, validLines, { fromMs: 0, toMs: lyrics.durationMs }) : false;
   });
   const validWorld = spatialModes.has(complete.world.spatialMode)
     && motionLaws.has(complete.world.motionLaw)

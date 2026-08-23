@@ -535,6 +535,36 @@ describe("EffectGrammarV1", () => {
       evidence: { ...base.evidence, lineIndices: [], rationale: "" },
     }, section, validLines)).toBe(false);
   });
+
+  it("allows only bounded internal custom consequences to outlive their source section", () => {
+    const plan = compileLocalDirectorPlanV1(lyricFixtures.longSongStructure);
+    const section = plan.sections[0]!;
+    const validLines = new Set(plan.directives.map((directive) => directive.lineIndex));
+    const consequence = {
+      version: "effect-recipe-v1" as const,
+      id: "test:cross-section-consequence",
+      cardID: "custom" as const,
+      sectionID: section.id,
+      fromMs: section.toMs,
+      toMs: plan.sections[1]!.toMs,
+      presentation: "reading" as const,
+      primary: { primitive: "memory.trail" as const, intensity: 0.3 },
+      support: [],
+      evidence: {
+        songMotif: plan.motif,
+        sectionTriggers: ["semantic_contrast" as const],
+        lineIndices: [section.toLineIndex, plan.sections[1]!.toLineIndex],
+        rationale: "A retained trace stays visible until a later bounded consumer.",
+        confidence: 0.82,
+      },
+    };
+    expect(validateEffectRecipeV1(consequence, section, validLines)).toBe(false);
+    expect(validateEffectRecipeV1(consequence, section, validLines, { fromMs: 0, toMs: plan.sections[1]!.toMs })).toBe(true);
+    expect(validateEffectRecipeV1({ ...consequence, toMs: lyricFixtures.longSongStructure.durationMs + 1 }, section, validLines, {
+      fromMs: 0,
+      toMs: lyricFixtures.longSongStructure.durationMs,
+    })).toBe(false);
+  });
 });
 
 describe("DirectorRequestPayloadV1", () => {

@@ -6,8 +6,17 @@ import type {
   ManualSemanticCueRoleV2,
   ManualSemanticCueV2,
   ManualWindowIntentFixtureV2,
+  SignatureRecipeBranchV1,
+  SignatureRecipeIDV1,
 } from "./directorV2Fixtures";
-import { lyricGraphemesV1 } from "./lyricChoreography";
+import type { EffectPrimitiveIDV1, EffectRecipeV1, PerformanceTriggerV1, StagePresentationV1 } from "./effectGrammar";
+import {
+  lyricGraphemesV1,
+  sanitizeLyricGesturesV1,
+  type LyricGesturePrimitiveV1,
+  type LyricGestureSemanticRoleV1,
+  type LyricGestureV1,
+} from "./lyricChoreography";
 
 export interface DirectorV2LineRangeV1 {
   fromLineIndex: number;
@@ -30,6 +39,36 @@ export interface CompiledManualDirectorV2V1 {
   plan: DirectorPlanV1;
   influences: CueInfluenceEnvelopeV1[];
   acceptedCueIDs: string[];
+  recipeEvents: ResolvedSignatureRecipeEventV1[];
+  promises: ObservableVisualPromiseV1[];
+}
+
+export type ObservablePromiseFactV1 = "trace" | "absence" | "displacement" | "incompleteMotif";
+
+export interface ObservableVisualPromiseV1 {
+  promiseID: string;
+  motifAnchor: string;
+  fact: ObservablePromiseFactV1;
+  visualPrimitive: EffectPrimitiveIDV1;
+  sourceCueID: string;
+  sourceRange: DirectorV2LineRangeV1;
+  sourceEffectID: string;
+  consequenceEffectID?: string;
+  status: "unresolved" | "consumed";
+  consumerCueID?: string;
+  consumerRange?: DirectorV2LineRangeV1;
+  consumerEffectID?: string;
+}
+
+export interface ResolvedSignatureRecipeEventV1 {
+  cueID: string;
+  recipe: SignatureRecipeIDV1;
+  branch: SignatureRecipeBranchV1;
+  influence: CueInfluenceEnvelopeV1;
+  effectID: string;
+  gestureID: string;
+  promiseCreates: string[];
+  promiseConsumes: string[];
 }
 
 const clamp = (value: number, minimum: number, maximum: number): number =>
@@ -243,6 +282,286 @@ const applyCore = (
   };
 };
 
+interface SignatureCueContextV1 {
+  cue: ManualSemanticCueV2;
+  window: ManualWindowIntentFixtureV2;
+  influence: CueInfluenceEnvelopeV1;
+}
+
+const recipeForRole = (role: ManualSemanticCueRoleV2): SignatureRecipeIDV1 | undefined =>
+  role === "rupture" || role === "release" || role === "recall" ? role : undefined;
+
+const effectIDFor = (
+  cueID: string,
+  recipe: SignatureRecipeIDV1,
+  branch: SignatureRecipeBranchV1,
+): string => `director-v2-effect:${cueID}:${recipe}:${branch}`;
+
+const gestureIDFor = (
+  cueID: string,
+  recipe: SignatureRecipeIDV1,
+  branch: SignatureRecipeBranchV1,
+): string => `director-v2-gesture:${cueID}:${recipe}:${branch}`;
+
+const promiseFactFor = (
+  recipe: SignatureRecipeIDV1,
+  branch: SignatureRecipeBranchV1,
+): { fact: ObservablePromiseFactV1; visualPrimitive: EffectPrimitiveIDV1 } => {
+  if (recipe === "rupture" && branch === "vacuum") return { fact: "absence", visualPrimitive: "field.aperture" };
+  if (recipe === "rupture") return { fact: "displacement", visualPrimitive: "memory.trail" };
+  if (recipe === "release" && branch === "expansion") return { fact: "incompleteMotif", visualPrimitive: "motif.recall" };
+  return { fact: "trace", visualPrimitive: "memory.trail" };
+};
+
+const chooseRecipeBranch = (
+  context: SignatureCueContextV1,
+  consumedPromise?: ObservableVisualPromiseV1,
+): SignatureRecipeBranchV1 => {
+  if (context.cue.role === "rupture") {
+    return context.window.arcIntent === "break" ? "vacuum" : "separation";
+  }
+  if (context.cue.role === "release") {
+    return context.window.spatialIntent === "open" ? "expansion" : "reveal";
+  }
+  return consumedPromise?.fact === "absence" ? "absenceResolve" : "traceReturn";
+};
+
+const nearestCompatiblePromise = (
+  promises: ObservableVisualPromiseV1[],
+  motifAnchor: string,
+  beforeLineIndex: number,
+): ObservableVisualPromiseV1 | undefined => promises
+  .filter((promise) => promise.status === "unresolved"
+    && promise.motifAnchor === motifAnchor
+    && promise.sourceRange.toLineIndex < beforeLineIndex)
+  .sort((left, right) => right.sourceRange.toLineIndex - left.sourceRange.toLineIndex
+    || left.promiseID.localeCompare(right.promiseID))[0];
+
+const resolveSignatureRecipes = (
+  lyrics: LyricDocumentV0,
+  fixture: DirectorV2ManualFixtureV1,
+  contexts: SignatureCueContextV1[],
+): { events: ResolvedSignatureRecipeEventV1[]; promises: ObservableVisualPromiseV1[] } => {
+  const events: ResolvedSignatureRecipeEventV1[] = [];
+  const promises: ObservableVisualPromiseV1[] = [];
+  const finalLineIndex = lyrics.lines.at(-1)?.lineIndex ?? 0;
+  const ordered = contexts
+    .filter((context) => recipeForRole(context.cue.role))
+    .sort((left, right) => left.cue.fromLineIndex - right.cue.fromLineIndex || left.cue.id.localeCompare(right.cue.id));
+  ordered.forEach((context, contextIndex) => {
+    const recipe = recipeForRole(context.cue.role)!;
+    const terminal = context.influence.coreRange.toLineIndex >= finalLineIndex;
+    const consumed = recipe === "recall" || (recipe === "release" && terminal)
+      ? nearestCompatiblePromise(promises, fixture.motifAnchor, context.influence.coreRange.fromLineIndex)
+      : undefined;
+    if (recipe === "recall" && !consumed) return;
+    const branch = chooseRecipeBranch(context, consumed);
+    const effectID = effectIDFor(context.cue.id, recipe, branch);
+    const event: ResolvedSignatureRecipeEventV1 = {
+      cueID: context.cue.id,
+      recipe,
+      branch,
+      influence: context.influence,
+      effectID,
+      gestureID: gestureIDFor(context.cue.id, recipe, branch),
+      promiseCreates: [],
+      promiseConsumes: [],
+    };
+    if (consumed) {
+      consumed.status = "consumed";
+      consumed.consumerCueID = context.cue.id;
+      consumed.consumerRange = context.influence.coreRange;
+      consumed.consumerEffectID = effectID;
+      event.promiseConsumes.push(consumed.promiseID);
+    }
+    const laterContexts = ordered.slice(contextIndex + 1);
+    const nextRecallIndex = laterContexts.findIndex((candidate) => candidate.cue.role === "recall");
+    const laterRecall = nextRecallIndex >= 0;
+    const laterRuptureBeforeRecall = laterRecall
+      && laterContexts.slice(0, nextRecallIndex).some((candidate) => candidate.cue.role === "rupture");
+    const createsPromise = !terminal && context.influence.recallEligibility
+      && (recipe === "rupture" || (recipe === "release"
+        && !nearestCompatiblePromise(promises, fixture.motifAnchor, context.influence.coreRange.fromLineIndex)
+        && !laterRuptureBeforeRecall
+        && laterRecall));
+    if (createsPromise) {
+      const promiseID = `promise:${recipe}:${fixture.motifAnchor}:${context.influence.coreRange.fromLineIndex}-${context.influence.coreRange.toLineIndex}`;
+      const visual = promiseFactFor(recipe, branch);
+      promises.push({
+        promiseID,
+        motifAnchor: fixture.motifAnchor,
+        fact: visual.fact,
+        visualPrimitive: visual.visualPrimitive,
+        sourceCueID: context.cue.id,
+        sourceRange: context.influence.coreRange,
+        sourceEffectID: effectID,
+        status: "unresolved",
+      });
+      event.promiseCreates.push(promiseID);
+    }
+    events.push(event);
+  });
+  return { events, promises };
+};
+
+const recipeEffectSpec = (
+  event: ResolvedSignatureRecipeEventV1,
+): {
+  presentation: StagePresentationV1;
+  primary: EffectPrimitiveIDV1;
+  support: EffectPrimitiveIDV1[];
+  trigger: PerformanceTriggerV1;
+} => {
+  if (event.recipe === "rupture" && event.branch === "separation") {
+    return { presentation: "section", primary: "geometry.cut", support: ["memory.trail"], trigger: "semantic_contrast" };
+  }
+  if (event.recipe === "rupture") {
+    return { presentation: "aperture", primary: "field.aperture", support: ["memory.trail"], trigger: "silence_gap" };
+  }
+  if (event.recipe === "release" && event.branch === "expansion") {
+    return { presentation: "section", primary: "geometry.expand", support: ["density.release", "motif.recall"], trigger: "density_release" };
+  }
+  if (event.recipe === "release") {
+    return { presentation: "section", primary: "transition.bloom", support: ["field.aperture", "memory.trail"], trigger: "density_release" };
+  }
+  if (event.branch === "absenceResolve") {
+    return { presentation: "reading", primary: "geometry.converge", support: ["field.aperture"], trigger: "repeated_hook" };
+  }
+  return { presentation: "reading", primary: "motif.recall", support: ["memory.trail"], trigger: "repeated_hook" };
+};
+
+const compileRecipeEffect = (
+  lyrics: LyricDocumentV0,
+  plan: DirectorPlanV1,
+  context: SignatureCueContextV1,
+  event: ResolvedSignatureRecipeEventV1,
+): EffectRecipeV1 => {
+  const line = lyrics.lines.find((candidate) => candidate.lineIndex === context.cue.fromLineIndex)!;
+  const section = sectionForLine(plan.sections, context.cue.fromLineIndex)!;
+  const spec = recipeEffectSpec(event);
+  const intensity = clamp(0.54 + section.intensity * 0.2 + context.cue.confidence * 0.08, 0.54, 0.82);
+  return {
+    version: "effect-recipe-v1",
+    id: event.effectID,
+    cardID: "custom",
+    sectionID: section.id,
+    fromMs: line.fromMs,
+    toMs: line.toMs,
+    presentation: spec.presentation,
+    primary: { primitive: spec.primary, intensity, direction: plan.directives.find((directive) => directive.lineIndex === line.lineIndex)?.direction ?? 1 },
+    support: spec.support.map((primitive) => ({ primitive, intensity: clamp(intensity * 0.72, 0.2, 0.75) })),
+    evidence: {
+      songMotif: plan.motif,
+      sectionTriggers: [spec.trigger],
+      lineIndices: context.cue.evidenceLineIndices,
+      rationale: `${event.recipe}/${event.branch} realizes the validated ${context.cue.role} cue without adding a renderer primitive.`,
+      confidence: clamp(0.72 + context.cue.confidence * 0.2, 0.72, 0.92),
+    },
+  };
+};
+
+const compileRecipeGesture = (
+  lyrics: LyricDocumentV0,
+  plan: DirectorPlanV1,
+  context: SignatureCueContextV1,
+  event: ResolvedSignatureRecipeEventV1,
+): LyricGestureV1 => {
+  const targetLineIndex = context.cue.focus?.lineIndex ?? context.cue.fromLineIndex;
+  const line = lyrics.lines.find((candidate) => candidate.lineIndex === targetLineIndex)!;
+  const pieces = lyricGraphemesV1(line.text);
+  const focus = context.cue.focus;
+  const phrasePrimitive: LyricGesturePrimitiveV1 = event.recipe === "rupture"
+    ? "phrase.breakReform"
+    : event.recipe === "release"
+      ? event.branch === "expansion" ? "phrase.arc" : "phrase.contour"
+      : event.branch === "traceReturn" ? "phrase.contour" : "phrase.breakReform";
+  const tokenPrimitive: LyricGesturePrimitiveV1 = event.recipe === "rupture"
+    ? "token.elasticFocus"
+    : event.recipe === "release" ? "token.halo" : "token.echo";
+  const semanticRole: LyricGestureSemanticRoleV1 = event.recipe === "rupture"
+    ? "rupture"
+    : event.recipe === "release" ? "resolution" : "repetition";
+  return {
+    version: "lyric-gesture-v1",
+    id: event.gestureID,
+    lineIndex: targetLineIndex,
+    scope: focus ? "token" : "phrase",
+    target: focus
+      ? { fromGrapheme: focus.fromGrapheme, toGrapheme: focus.toGrapheme, expectedText: focus.expectedText }
+      : { fromGrapheme: 0, toGrapheme: pieces.length, expectedText: line.text },
+    primitive: focus ? tokenPrimitive : phrasePrimitive,
+    driver: "structuralMoment",
+    space: "lyricToArtwork",
+    envelope: { attackMs: 260, holdMs: 180, releaseMs: 520 },
+    intensity: clamp(0.58 + context.cue.confidence * 0.18, 0.58, 0.78),
+    direction: plan.directives.find((directive) => directive.lineIndex === targetLineIndex)?.direction ?? 1,
+    paletteRole: event.recipe === "release" ? "warm" : event.recipe === "recall" ? "secondary" : "accent",
+    evidence: {
+      semanticRole,
+      rationale: `${event.recipe}/${event.branch} targets exact lyric truth inside the bounded cue core.`,
+      confidence: clamp(0.74 + context.cue.confidence * 0.18, 0.74, 0.92),
+    },
+  };
+};
+
+const compilePromiseConsequenceEffect = (
+  lyrics: LyricDocumentV0,
+  plan: DirectorPlanV1,
+  promise: ObservableVisualPromiseV1,
+): EffectRecipeV1 | undefined => {
+  if (!promise.consumerCueID || !promise.consumerRange) return undefined;
+  const source = lyrics.lines.find((line) => line.lineIndex === promise.sourceRange.toLineIndex);
+  const actualConsumer = lyrics.lines.find((line) => line.lineIndex === promise.consumerRange!.fromLineIndex);
+  if (!source || !actualConsumer || actualConsumer.fromMs <= source.toMs) return undefined;
+  const section = sectionForLine(plan.sections, promise.sourceRange.fromLineIndex)!;
+  const id = `director-v2-promise:${promise.promiseID}`;
+  promise.consequenceEffectID = id;
+  return {
+    version: "effect-recipe-v1",
+    id,
+    cardID: "custom",
+    sectionID: section.id,
+    fromMs: source.toMs,
+    toMs: actualConsumer.fromMs,
+    presentation: "reading",
+    primary: { primitive: promise.visualPrimitive, intensity: 0.32 },
+    support: [],
+    evidence: {
+      songMotif: plan.motif,
+      sectionTriggers: [promise.fact === "absence" ? "silence_gap" : "semantic_contrast"],
+      lineIndices: [promise.sourceRange.fromLineIndex, actualConsumer.lineIndex],
+      rationale: `The observable ${promise.fact} remains present until ${promise.consumerCueID} resolves the same promise.`,
+      confidence: 0.84,
+    },
+  };
+};
+
+const applyResolvedRecipeCore = (
+  directive: DirectorLineDirectiveV1,
+  event: ResolvedSignatureRecipeEventV1 | undefined,
+  suppressedRecall: boolean,
+): DirectorLineDirectiveV1 => {
+  if (suppressedRecall) return { ...directive, behavior: "settle", intensity: clamp(directive.intensity * 0.84, 0.35, 1.25) };
+  if (!event) return directive;
+  const behavior: DirectorLineDirectiveV1["behavior"] = event.branch === "separation"
+    ? "stretch"
+    : event.branch === "vacuum"
+      ? "settle"
+      : event.branch === "expansion"
+        ? "stretch"
+        : event.branch === "reveal"
+          ? "assemble"
+          : event.branch === "traceReturn"
+            ? "echo"
+            : "converge";
+  return {
+    ...directive,
+    behavior,
+    intensity: clamp(directive.intensity + (event.recipe === "rupture" ? 0.08 : 0.04), 0.35, 1.25),
+    fontScale: clamp(directive.fontScale + (event.branch === "expansion" ? 0.035 : event.branch === "vacuum" ? -0.025 : 0), 0.78, 1.22),
+  };
+};
+
 const reidentifyPlan = (plan: Omit<DirectorPlanV1, "planIdentity">): DirectorPlanV1 => ({
   ...plan,
   planIdentity: stableHash32({ ...plan, planIdentity: undefined }),
@@ -259,6 +578,7 @@ export const compileManualDirectorV2V1 = (
     || !sanitizeManualFixture(lyrics, fixture)
   ) return null;
   const cueByID = new Map<string, ManualSemanticCueV2>();
+  const contextByCueID = new Map<string, SignatureCueContextV1>();
   const windowByLine = new Map<number, ManualWindowIntentFixtureV2>();
   const influences: CueInfluenceEnvelopeV1[] = [];
   fixture.windows.forEach((window) => {
@@ -267,9 +587,13 @@ export const compileManualDirectorV2V1 = (
     }
     window.cues.forEach((cue) => {
       cueByID.set(cue.id, cue);
-      influences.push(deriveCueInfluenceEnvelopeV1(lyrics, localPlan, window, cue));
+      const influence = deriveCueInfluenceEnvelopeV1(lyrics, localPlan, window, cue);
+      influences.push(influence);
+      contextByCueID.set(cue.id, { cue, window, influence });
     });
   });
+  const signature = resolveSignatureRecipes(lyrics, fixture, [...contextByCueID.values()]);
+  const eventByCueID = new Map(signature.events.map((event) => [event.cueID, event]));
   const lineByIndex = new Map(lyrics.lines.map((line) => [line.lineIndex, line]));
   const directives = localPlan.directives.map((original) => {
     const window = windowByLine.get(original.lineIndex);
@@ -278,7 +602,9 @@ export const compileManualDirectorV2V1 = (
       : { ...original };
     const core = influences.find((influence) => rangeContains(influence.coreRange, original.lineIndex));
     if (core) {
-      return applyCore(directive, cueByID.get(core.cueID)!.role, lineByIndex.get(original.lineIndex)?.voiceRole);
+      const cue = cueByID.get(core.cueID)!;
+      const generic = applyCore(directive, cue.role, lineByIndex.get(original.lineIndex)?.voiceRole);
+      return applyResolvedRecipeCore(generic, eventByCueID.get(core.cueID), cue.role === "recall" && !eventByCueID.has(core.cueID));
     }
     const anticipation = influences.find((influence) => rangeContains(influence.anticipationRange, original.lineIndex));
     if (anticipation) directive = applyAnticipation(directive);
@@ -286,11 +612,31 @@ export const compileManualDirectorV2V1 = (
     if (consequence) directive = applyConsequence(directive);
     return directive;
   });
+  const provisionalPlan: DirectorPlanV1 = { ...localPlan, directives };
+  const recipeEffects = signature.events.map((event) => compileRecipeEffect(
+    lyrics,
+    provisionalPlan,
+    contextByCueID.get(event.cueID)!,
+    event,
+  ));
+  const consequenceEffects = signature.promises
+    .map((promise) => compilePromiseConsequenceEffect(lyrics, provisionalPlan, promise))
+    .filter((effect): effect is EffectRecipeV1 => Boolean(effect));
+  const recipeGestures = signature.events.map((event) => compileRecipeGesture(
+    lyrics,
+    provisionalPlan,
+    contextByCueID.get(event.cueID)!,
+    event,
+  ));
+  const gestures = sanitizeLyricGesturesV1(lyrics, [...localPlan.gestures, ...recipeGestures]);
+  if (!gestures) return null;
   const { planIdentity: _ignored, ...withoutIdentity } = localPlan;
   const plan = reidentifyPlan({
     ...withoutIdentity,
-    directorVersion: `${localPlan.directorVersion}+director-v2-manual`,
+    directorVersion: `${localPlan.directorVersion}+director-v2-manual-recipes`,
     directives,
+    effects: [...recipeEffects, ...consequenceEffects, ...localPlan.effects],
+    gestures,
   });
   return {
     version: "compiled-manual-director-v2-v1",
@@ -298,5 +644,7 @@ export const compileManualDirectorV2V1 = (
     plan,
     influences,
     acceptedCueIDs: influences.map((influence) => influence.cueID),
+    recipeEvents: signature.events,
+    promises: signature.promises,
   };
 };

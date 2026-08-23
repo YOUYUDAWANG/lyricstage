@@ -17,8 +17,10 @@ describe("Director V2 manual cue compiler", () => {
       expect(compiled, fixture.id).not.toBeNull();
       expect(isDirectorPlanV1ForLyrics(compiled!.plan, lyrics), fixture.id).toBe(true);
       expect(compiled!.plan.sections, fixture.id).toEqual(local.sections);
-      expect(compiled!.plan.effects, fixture.id).toEqual(local.effects);
-      expect(compiled!.plan.gestures, fixture.id).toEqual(local.gestures);
+      expect(compiled!.plan.effects.map((effect) => effect.id), fixture.id)
+        .toEqual(expect.arrayContaining(local.effects.map((effect) => effect.id)));
+      expect(compiled!.plan.gestures.map((gesture) => gesture.id), fixture.id)
+        .toEqual(expect.arrayContaining(local.gestures.map((gesture) => gesture.id)));
       expect(compiled!.plan.directives, fixture.id).toHaveLength(local.directives.length);
       expect(compiled!.acceptedCueIDs, fixture.id).toHaveLength(fixture.windows.flatMap((window) => window.cues).length);
     });
@@ -41,7 +43,7 @@ describe("Director V2 manual cue compiler", () => {
     const lyrics = lyricsByRecordingID.get(fixture.recordingID)!;
     const local = compileLocalDirectorPlanV1(lyrics);
     const compiled = compileManualDirectorV2V1(lyrics, local, fixture)!;
-    expect(compiled.plan.directives.find((directive) => directive.lineIndex === 1)?.behavior).toBe("gravityDrop");
+    expect(compiled.plan.directives.find((directive) => directive.lineIndex === 1)?.behavior).toBe("stretch");
     expect(compiled.plan.directives.find((directive) => directive.lineIndex === 2)?.behavior).toBe("stretch");
     expect(compiled.plan.directives.find((directive) => directive.lineIndex === 3)?.behavior).toBe("echo");
   });
@@ -81,5 +83,71 @@ describe("Director V2 manual cue compiler", () => {
     expect(first).toEqual(second);
     expect(local).toEqual(before);
     expect(first.plan.planIdentity).not.toBe(local.planIdentity);
+  });
+
+  it("selects only the six frozen context branches", () => {
+    const actual = new Map<string, string>();
+    directorV2ManualFixtures.forEach((fixture) => {
+      const lyrics = lyricsByRecordingID.get(fixture.recordingID)!;
+      const compiled = compileManualDirectorV2V1(lyrics, compileLocalDirectorPlanV1(lyrics), fixture)!;
+      compiled.recipeEvents.forEach((event) => actual.set(`${fixture.id}:${event.cueID}`, `${event.recipe}:${event.branch}`));
+      fixture.expectations.signatureEvents.forEach((expected) => {
+        expect(actual.get(`${fixture.id}:${expected.cueID}`)).toBe(`${expected.recipe}:${expected.branch}`);
+      });
+    });
+    expect(new Set([...actual.values()])).toEqual(new Set([
+      "rupture:separation",
+      "rupture:vacuum",
+      "release:expansion",
+      "release:reveal",
+      "recall:traceReturn",
+      "recall:absenceResolve",
+    ]));
+  });
+
+  it("turns every promise into a producer fact, persistent consequence, and matching consumer", () => {
+    directorV2ManualFixtures.forEach((fixture) => {
+      const lyrics = lyricsByRecordingID.get(fixture.recordingID)!;
+      const compiled = compileManualDirectorV2V1(lyrics, compileLocalDirectorPlanV1(lyrics), fixture)!;
+      expect(compiled.promises.map((promise) => promise.promiseID), fixture.id)
+        .toEqual(fixture.expectations.promises.map((promise) => promise.promiseID));
+      compiled.promises.forEach((promise) => {
+        const source = compiled.plan.effects.find((effect) => effect.id === promise.sourceEffectID)!;
+        const consumer = compiled.plan.effects.find((effect) => effect.id === promise.consumerEffectID)!;
+        const primitives = (effect: typeof source) => [effect.primary.primitive, ...effect.support.map((use) => use.primitive)];
+        expect(promise.status, promise.promiseID).toBe("consumed");
+        expect(primitives(source), promise.promiseID).toContain(promise.visualPrimitive);
+        expect(primitives(consumer), promise.promiseID).toContain(promise.visualPrimitive);
+        if (promise.consequenceEffectID) {
+          expect(compiled.plan.effects.find((effect) => effect.id === promise.consequenceEffectID)?.primary.primitive)
+            .toBe(promise.visualPrimitive);
+        }
+      });
+      compiled.recipeEvents.filter((event) => event.promiseConsumes.length > 0).forEach((event) => {
+        expect(event.promiseCreates, event.cueID).toHaveLength(0);
+      });
+    });
+  });
+
+  it("keeps the slow-song absence observable through its lyricless gap", () => {
+    const fixture = directorV2ManualFixtures.find((candidate) => candidate.category === "slow-instrumental-gap")!;
+    const lyrics = lyricsByRecordingID.get(fixture.recordingID)!;
+    const compiled = compileManualDirectorV2V1(lyrics, compileLocalDirectorPlanV1(lyrics), fixture)!;
+    const promise = compiled.promises[0]!;
+    const consequence = compiled.plan.effects.find((effect) => effect.id === promise.consequenceEffectID)!;
+    const gap = fixture.expectations.instrumentalGap!;
+    expect(promise.fact).toBe("absence");
+    expect(consequence.fromMs).toBeLessThanOrEqual(gap.fromMs);
+    expect(consequence.toMs).toBeGreaterThanOrEqual(gap.toMs);
+  });
+
+  it("falls back to a restrained local hold when recall has no compatible promise", () => {
+    const fixture = structuredClone(directorV2ManualFixtures[0]!) as DirectorV2ManualFixtureV1;
+    fixture.windows[0]!.cues = fixture.windows[0]!.cues.filter((cue) => cue.role === "recall");
+    const lyrics = lyricsByRecordingID.get(fixture.recordingID)!;
+    const compiled = compileManualDirectorV2V1(lyrics, compileLocalDirectorPlanV1(lyrics), fixture)!;
+    expect(compiled.recipeEvents).toHaveLength(0);
+    expect(compiled.promises).toHaveLength(0);
+    expect(compiled.plan.directives.find((directive) => directive.lineIndex === 3)?.behavior).toBe("settle");
   });
 });

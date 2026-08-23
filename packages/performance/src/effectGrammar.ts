@@ -306,15 +306,19 @@ export const validateEffectRecipeV1 = (
   recipe: EffectRecipeV1,
   section: EffectSectionV1,
   validLineIndices: ReadonlySet<number>,
+  timelineBounds: { fromMs: number; toMs: number } = section,
 ): boolean => {
   const card = recipe.cardID === "custom" ? undefined : cardByID.get(recipe.cardID);
+  const rangeValid = recipe.cardID === "custom"
+    ? recipe.fromMs >= section.fromMs && recipe.fromMs >= timelineBounds.fromMs && recipe.toMs <= timelineBounds.toMs
+    : recipe.presentation === "hero"
+      ? recipe.fromMs >= section.fromMs && recipe.toMs <= section.toMs
+      : recipe.fromMs === section.fromMs && recipe.toMs === section.toMs;
   if (
     recipe.version !== "effect-recipe-v1"
     || recipe.sectionID !== section.id
     || recipe.fromMs >= recipe.toMs
-    || (recipe.presentation === "hero"
-      ? recipe.fromMs < section.fromMs || recipe.toMs > section.toMs
-      : recipe.fromMs !== section.fromMs || recipe.toMs !== section.toMs)
+    || !rangeValid
     || recipe.support.length > 2
     || recipe.evidence.songMotif.trim().length === 0
     || recipe.evidence.rationale.trim().length === 0
