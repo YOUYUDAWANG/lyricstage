@@ -528,7 +528,7 @@ export default function App({ embedded = embeddedStageFromLocation, onEmbeddedRe
         const next = reduceRollingCoverageResultV1(lyrics, requesting, response, targetMs, current.generation);
         if (seekTargetMs !== undefined && rollingSeekTargetRef.current === seekTargetMs) {
           rollingSeekTargetRef.current = undefined;
-          setRollingForceLocal(rollingCoverageAtV1(next.cards, seekTargetMs).aheadMs <= 0);
+          setRollingForceLocal(!rollingHasRemainingDirectionV1(next.cards, seekTargetMs));
         }
         rollingDirectorStateRef.current = next;
         setRollingDirectorState(next);

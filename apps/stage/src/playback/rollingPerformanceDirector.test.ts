@@ -135,17 +135,35 @@ describe("rolling Performance Director", () => {
   });
 
   it("rebuilds the rolling plan when a backward seek returns from an uncovered local gap", () => {
-    const accepted = reduceRollingCoverageResultV1(fixture, withBible(), {
-      status: "ready", source: "network", cards: cards.slice(0, 1),
-    }, cards[0]!.fromMs, 7);
-    const outside = Math.min(fixture.durationMs, cards[0]!.toMs + 100);
-    const localGap = handleRollingSeekV1(accepted, local, outside, fixture);
-    expect(localGap.state.compiledPlan).toBe(local);
+    const delayMs = 1_000;
+    const delayedFixture = {
+      ...fixture,
+      recordingID: `${fixture.recordingID}:delayed`,
+      durationMs: fixture.durationMs + delayMs,
+      lines: fixture.lines.map((line) => ({ ...line, fromMs: line.fromMs + delayMs, toMs: line.toMs + delayMs })),
+    };
+    const delayedLocal = compileLocalDirectorPlanV1(delayedFixture);
+    const delayedBible = compileLocalDirectorBibleV1(delayedFixture);
+    const futureCard = compileLocalSceneCardsV1(delayedFixture, delayedBible)[0]!;
+    const accepted = reduceRollingCoverageResultV1(delayedFixture, {
+      ...createRollingDirectorRuntimeStateV1(delayedLocal, 7),
+      status: "ready",
+      bible: delayedBible,
+      bibleSource: "cache",
+    }, {
+      status: "ready", source: "network", cards: [futureCard],
+    }, futureCard.fromMs, 7);
+    const localGapTarget = futureCard.fromMs - 100;
+    expect(rollingCoverageAtV1(accepted.cards, localGapTarget).aheadMs).toBe(0);
+    expect(rollingHasRemainingDirectionV1(accepted.cards, localGapTarget)).toBe(true);
+    const outside = Math.min(delayedFixture.durationMs, futureCard.toMs + 100);
+    const localGap = handleRollingSeekV1(accepted, delayedLocal, outside, delayedFixture);
+    expect(localGap.state.compiledPlan).toBe(delayedLocal);
 
-    const restored = handleRollingSeekV1(localGap.state, local, cards[0]!.fromMs, fixture);
+    const restored = handleRollingSeekV1(localGap.state, delayedLocal, localGapTarget, delayedFixture);
     expect(restored.useLocalImmediately).toBe(false);
     expect(restored.state.compiledPlan.source).not.toBe("local");
-    expect(restored.state.compiledPlan.sections.some((section) => section.id === `rolling:${cards[0]!.sceneID}`)).toBe(true);
+    expect(restored.state.compiledPlan.sections.some((section) => section.id === `rolling:${futureCard.sceneID}`)).toBe(true);
   });
 
   it("releases an obsolete pending window when a seek needs a new request", () => {

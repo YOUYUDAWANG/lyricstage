@@ -256,11 +256,11 @@ export const handleRollingSeekV1 = (
   targetMs: number,
   lyrics: LyricDocumentV0,
 ): { state: RollingDirectorRuntimeStateV1; useLocalImmediately: boolean } => {
-  const covered = rollingCoverageAtV1(state.cards, targetMs).aheadMs > 0;
+  const hasRemainingDirection = rollingHasRemainingDirectionV1(state.cards, targetMs);
   const current = state.status === "coverage-requesting"
     ? { ...state, status: "ready" as const, pendingWindow: undefined }
     : state;
-  if (!covered) return {
+  if (!hasRemainingDirection) return {
     state: { ...current, compiledPlan: localPlan, coverageFromMs: targetMs, coverageToMs: targetMs },
     useLocalImmediately: true,
   };
