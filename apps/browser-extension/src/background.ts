@@ -81,6 +81,11 @@ import {
   type StoredLocalLyrics,
   type StoredLyricsCache,
 } from "./backgroundStorage";
+import {
+  negativeSceneCacheIdentityV1,
+  RollingSceneNegativeCacheV1,
+  scenePackSchemaVersion,
+} from "./backgroundNegativeSceneCache";
 import type {
   AudioAnalysisReplayState,
   AudioCaptureOperation,
@@ -116,9 +121,7 @@ let directorCacheWrite = Promise.resolve();
 let rollingDirectorCacheWrite = Promise.resolve();
 let rollingDirectorGeneration = 0;
 let activeRollingFingerprint: string | undefined;
-const rollingSceneNegativeCache = new Map<string, { expiresAtUnixMs: number; reason: string }>();
-const rollingSceneNegativeTtlMs = 60_000;
-const scenePackSchemaVersion = "scene-pack-v1" as const;
+const rollingSceneNegativeCache = new RollingSceneNegativeCacheV1();
 let sourceLeaseTimer: ReturnType<typeof setInterval> | undefined;
 let offscreenCreation: Promise<void> | undefined;
 
@@ -731,32 +734,6 @@ const sceneCacheIdentity = (
   entryStateHash,
 });
 
-const negativeSceneCacheIdentity = (
-  fingerprint: string,
-  bibleIdentity: string,
-  fromLineIndex: number,
-  entryStateHash: string,
-): string => stableHash32({
-  version: "rolling-scene-negative-v1",
-  schemaVersion: scenePackSchemaVersion,
-  fingerprint,
-  bibleIdentity,
-  fromLineIndex,
-  entryStateHash,
-});
-
-const rememberNegativeSceneResult = (key: string, reason: string): void => {
-  const now = Date.now();
-  for (const [candidateKey, entry] of rollingSceneNegativeCache) {
-    if (entry.expiresAtUnixMs <= now) rollingSceneNegativeCache.delete(candidateKey);
-  }
-  rollingSceneNegativeCache.set(key, { expiresAtUnixMs: now + rollingSceneNegativeTtlMs, reason });
-  if (rollingSceneNegativeCache.size > 100) {
-    const oldest = rollingSceneNegativeCache.keys().next().value as string | undefined;
-    if (oldest) rollingSceneNegativeCache.delete(oldest);
-  }
-};
-
 const cachedDirectorScenes = async (
   track: LyricsLookupTrackV0,
   lyrics: LyricDocumentV0,
@@ -1331,12 +1308,10 @@ const resolveDirectorCoverageV1 = async (
     }
   }
   const ledger = rollingLedger(fingerprint, generation);
-  const negativeKey = negativeSceneCacheIdentity(
+  const negativeKey = negativeSceneCacheIdentityV1(
     fingerprint, sanitizedBible.bibleIdentity, window.fromLineIndex, state.stateHash,
   );
-  const negativeEntry = rollingSceneNegativeCache.get(negativeKey);
-  if (negativeEntry && negativeEntry.expiresAtUnixMs <= Date.now()) rollingSceneNegativeCache.delete(negativeKey);
-  const activeNegativeEntry = rollingSceneNegativeCache.get(negativeKey);
+  const activeNegativeReason = rollingSceneNegativeCache.reason(negativeKey);
   const commitLocalContinuity = async (reason: string, timing: RollingTimingV1): Promise<DirectorCoverageResolutionV1> => {
     const localCard = compileLocalSceneCardForWindowV1(
       lyrics, sanitizedBible, state, window.fromLineIndex, window.toLineIndex,
@@ -1357,17 +1332,17 @@ const resolveDirectorCoverageV1 = async (
       coverage: { ...coverage, activation }, reason: `scene-local-continuity-fallback:${reason}`, timing,
     };
   };
-  if (activeNegativeEntry) {
-    return commitLocalContinuity(`scene-negative-cache:${activeNegativeEntry.reason}`, rollingTiming(undefined, "hit"));
+  if (activeNegativeReason) {
+    return commitLocalContinuity(`scene-negative-cache:${activeNegativeReason}`, rollingTiming(undefined, "hit"));
   }
   if (ledger.inFlight) {
     await ledger.inFlight.catch(() => undefined);
     cards = await cachedDirectorScenes(track, lyrics, sanitizedBible, fingerprint);
     coverage = coverageForCards(cards, targetMs);
     if (coverage.aheadMs > 0) return { type: "director-coverage-resolution-v1", status: "ready", source: "cache", cards, coverage: { ...coverage, activation: "immediate" }, timing: rollingTiming(undefined, "hit") };
-    const negativeAfterFlight = rollingSceneNegativeCache.get(negativeKey);
-    if (negativeAfterFlight && negativeAfterFlight.expiresAtUnixMs > Date.now()) {
-      return commitLocalContinuity(`scene-negative-cache:${negativeAfterFlight.reason}`, rollingTiming(undefined, "hit"));
+    const negativeReasonAfterFlight = rollingSceneNegativeCache.reason(negativeKey);
+    if (negativeReasonAfterFlight) {
+      return commitLocalContinuity(`scene-negative-cache:${negativeReasonAfterFlight}`, rollingTiming(undefined, "hit"));
     }
   }
   if (!rollingRequestAllowed(ledger, "scene-pack")) {
@@ -1409,7 +1384,7 @@ const resolveDirectorCoverageV1 = async (
         && generated.every((card, index) => index === 0 || card.fromLineIndex === generated[index - 1]!.toLineIndex + 1);
       if (!coversRequestedWindow || generatedSpanMs < minimumPackSpanMs || generatedSpanMs > 75_000) {
         updateRollingLedgerFromExecution(ledger, undefined, false);
-        rememberNegativeSceneResult(negativeKey, "scene-pack-coverage-invalid");
+        rollingSceneNegativeCache.remember(negativeKey, "scene-pack-coverage-invalid");
         result = await commitLocalContinuity("scene-pack-coverage-invalid", rollingTiming(execution));
         return;
       }
@@ -1440,7 +1415,7 @@ const resolveDirectorCoverageV1 = async (
       const diagnosticsValue = directorBYOKDiagnosticsFromErrorV1(error);
       updateRollingLedgerFromExecution(ledger, diagnosticsValue, false);
       const reason = sanitizedRollingReason(error, configuration);
-      rememberNegativeSceneResult(negativeKey, reason);
+      rollingSceneNegativeCache.remember(negativeKey, reason);
       result = await commitLocalContinuity(
         reason,
         rollingTiming(diagnosticsValue ? { diagnostics: diagnosticsValue } : undefined),
