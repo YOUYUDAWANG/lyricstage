@@ -4,7 +4,7 @@ This is bounded runtime evidence for a reviewed commit. Never record provider ke
 
 ## Candidate
 
-- Artifact source commit: `fa81a1333ec2`
+- Artifact source commit: `1a22a206f3be`
 - Observed: 2026-08-23, real signed-in Chrome session
 - Stable unpacked path: `/Users/chaoyiliu/Desktop/bilibili-music/web/extension-dist`
 - Extension identity: `majlfdidelchofnfodcijoppcgpmbelc`
@@ -25,6 +25,8 @@ For each row inspect Column mount, actual line readability, Fullscreen entry, st
 The full-screen checks used a real screen-coordinate user gesture. Browser automation clicks were not counted because Chrome rejected their user activation. Escape returned each exercised track to `presentation="column"` with one connected host and no recorded mount failure.
 
 The candidate also passed a full-document navigation regression from the fast sample to the slow sample: both documents reported `direct-shadow-v2`, no `content-ui` load error, and no mount failure. This covers the module-cache failure found during the first UAT attempt.
+
+After merging `origin/main` at `3f730e0`, the reviewed integration build passed the same first-document/second-document remount check. Its Shadow DOM `More` menu exposed timing, manual search and lyric versions; embedded import and vocal enhancement were absent as intended.
 
 ## Multi-tab soak
 
