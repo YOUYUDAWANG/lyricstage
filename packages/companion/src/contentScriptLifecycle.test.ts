@@ -15,6 +15,10 @@ describe("YouTube Music companion isolated content script lifecycle (real DOM sh
     new URL("../../../apps/browser-extension/src/content-ui.tsx", import.meta.url),
     "utf8",
   );
+  const contentUILoaderSource = readFileSync(
+    new URL("../../../apps/browser-extension/public/content-ui-loader.js", import.meta.url),
+    "utf8",
+  );
   class FakeClock {
     now = 0;
     nextID = 1;
@@ -1362,5 +1366,7 @@ describe("YouTube Music companion isolated content script lifecycle (real DOM sh
     expect(contentUISource).toContain("hostObserver.disconnect()");
     expect(contentUISource).toContain("root.unmount()");
     expect(contentUISource).toContain('const stageHostSelector = "#lyricstage-enhanced-lyrics-v2"');
+    expect(contentUILoaderSource).toContain("?document=${encodeURIComponent(crypto.randomUUID())}");
+    expect(contentUILoaderSource).toContain("[LyricStage] Embedded UI module failed to load.");
   });
 });
