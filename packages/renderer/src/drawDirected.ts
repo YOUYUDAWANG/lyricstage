@@ -981,9 +981,10 @@ const drawLyricGesture = (
     context.moveTo(fromX, y);
     context.bezierCurveTo(fromX + (toX - fromX) * 0.3, y - height * 0.045, fromX + (toX - fromX) * 0.72, y + height * 0.035, fromX + (toX - fromX) * phase.attack, y);
     context.stroke();
-  } else if (gesture.primitive === "phrase.contour" || gesture.primitive === "phrase.breathe") {
-    const expansion = gesture.primitive === "phrase.breathe" && !reduceMotion ? (1 - phase.attack) * height * 0.012 : 0;
-    context.strokeRect(bounds.x - expansion, bounds.y - expansion, bounds.width + expansion * 2, bounds.height + expansion * 2);
+  } else if (gesture.primitive === "phrase.breathe") {
+    drawGestureTextCopy(context, line, prepared, transform, color, 0.08 + strength * 0.18, 0, motion * line.fontSize * 0.055);
+  } else if (gesture.primitive === "phrase.contour") {
+    context.strokeRect(bounds.x, bounds.y, bounds.width, bounds.height);
   }
   context.restore();
 };

@@ -168,6 +168,8 @@ describe("rolling Director V2 compiler", () => {
     const localCards = compileLocalContinuitySceneCardsV2(longLyrics, longBible, initial, [], 0, 14);
     expect(localCards.length).toBeGreaterThanOrEqual(4);
     expect(localCards.every((card) => card.gestures.length > 0 && card.effects.length > 0)).toBe(true);
+    expect(new Set(localCards.flatMap((card) => card.gestures.map((gesture) => gesture.primitive))).size).toBeGreaterThanOrEqual(3);
+    expect(localCards.flatMap((card) => card.gestures).some((gesture) => gesture.primitive === "phrase.contour")).toBe(false);
   });
 
   it("keeps one visible support gesture per Scene across a full dense song", () => {

@@ -105,15 +105,17 @@ const localSupportGestureV2 = (
   if (!line) return undefined;
   const graphemes = lyricGraphemesV1(line.text);
   if (graphemes.length === 0) return undefined;
+  const primitives = ["phrase.arc", "phrase.handoff", "phrase.breakReform", "phrase.breathe"] as const;
+  const primitive = primitives[sceneIndex % primitives.length]!;
   return {
     version: "lyric-gesture-v1",
     id: `rolling-v2-support:${sceneIndex}:${lineIndex}`,
     lineIndex,
     scope: "phrase",
     target: { fromGrapheme: 0, toGrapheme: graphemes.length, expectedText: line.text },
-    primitive: sceneIndex % 2 === 0 ? "phrase.breathe" : "phrase.contour",
+    primitive,
     driver: "lineEnter",
-    space: "lyricLocal",
+    space: primitive === "phrase.handoff" ? "lyricToArtwork" : "lyricLocal",
     envelope: { attackMs: 280, holdMs: 420, releaseMs: 640 },
     intensity: 0.58 + sceneIndex % 3 * 0.06,
     direction: sceneIndex % 2 === 0 ? 1 : -1,
