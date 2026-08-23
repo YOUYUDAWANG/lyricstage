@@ -170,6 +170,32 @@ describe("rolling Director V2 compiler", () => {
     expect(localCards.every((card) => card.gestures.length > 0 && card.effects.length > 0)).toBe(true);
   });
 
+  it("keeps one visible support gesture per Scene across a full dense song", () => {
+    const songLyrics = {
+      ...lyricFixtures.longSongStructure,
+      recordingID: "fixture:director-v2-full-song-gestures",
+      durationMs: 240_000,
+      lines: Array.from({ length: 60 }, (_, lineIndex) => ({
+        lineIndex, fromMs: lineIndex * 4_000, toMs: lineIndex * 4_000 + 3_600,
+        text: `full song narrative phrase ${lineIndex}`, voiceRole: "lead" as const,
+      })),
+    };
+    const songBible = compileLocalDirectorBibleV1(songLyrics);
+    let songState = initialRollingPerformanceStateV1(songBible);
+    const cards: ReturnType<typeof compileLocalContinuitySceneCardsV2> = [];
+    for (let fromLineIndex = 0; fromLineIndex < songLyrics.lines.length; fromLineIndex += 15) {
+      const windowCards = compileLocalContinuitySceneCardsV2(
+        songLyrics, songBible, songState, cards, fromLineIndex, Math.min(fromLineIndex + 14, songLyrics.lines.length - 1),
+      );
+      cards.push(...windowCards);
+      windowCards.forEach((card) => { songState = advanceRollingPerformanceStateV1(songState, card); });
+    }
+    expect(cards.length).toBeGreaterThan(8);
+    expect(cards.every((card) => card.gestures.length > 0)).toBe(true);
+    const plan = compileDirectorPlanFromRollingV1(songLyrics, songBible, cards);
+    expect(plan.gestures.length).toBeGreaterThanOrEqual(cards.length);
+  });
+
   it("keeps the prior visual world when local continuity follows an AI window", () => {
     const longLyrics = lyricFixtures.longSongStructure;
     const longBible = compileLocalDirectorBibleV1(longLyrics);

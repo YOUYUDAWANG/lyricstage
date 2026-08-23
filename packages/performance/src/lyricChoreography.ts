@@ -285,7 +285,7 @@ export const sanitizeLyricGesturesV1 = (lyrics: LyricDocumentV0, value: unknown)
     if (!semanticRoles.has(semanticRole) || !rationale || confidence < (space === "fullStage" ? 0.82 : 0.62)) return null;
     counts[scope] += 1;
     if (space === "fullStage") counts.fullStage += 1;
-    if (counts.glyph > 24 || counts.token > 16 || counts.phrase > 8 || counts.fullStage > 6) return null;
+    if (counts.glyph > 24 || counts.token > 16 || counts.phrase > 32 || counts.fullStage > 6) return null;
     const paletteRole = clean(wire.paletteRole, 20) as PerformancePaletteRoleV1;
     output.push({
       version: "lyric-gesture-v1",
