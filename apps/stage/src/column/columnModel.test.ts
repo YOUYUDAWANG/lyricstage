@@ -5,10 +5,18 @@ import {
   linePhase,
   mapVoiceClass,
   resolveColumnSurfaceState,
+  toggledColumnTool,
   wordProgress,
 } from "./columnModel";
 
 describe("columnModel", () => {
+  it("keeps exactly one visible lyric tool and closes it on a second click", () => {
+    expect(toggledColumnTool(null, "timing")).toBe("timing");
+    expect(toggledColumnTool("timing", "search")).toBe("search");
+    expect(toggledColumnTool("search", "versions")).toBe("versions");
+    expect(toggledColumnTool("versions", "versions")).toBeNull();
+  });
+
   it("maps lifecycle states without collapsing to a blank surface", () => {
     expect(
       resolveColumnSurfaceState({

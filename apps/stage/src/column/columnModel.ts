@@ -16,6 +16,7 @@ export type ColumnSurfaceState =
 
 export type ColumnLinePhase = "past" | "active" | "future";
 export type ColumnVoiceClass = "lead" | "backing" | "duet";
+export type ColumnTool = "timing" | "search" | "versions";
 
 export type AutomaticLyricsStatus =
   | "idle"
@@ -37,6 +38,11 @@ export interface ColumnStateInput {
   timeMs: number;
   lyrics: LyricDocumentV0 | null;
 }
+
+export const toggledColumnTool = (
+  current: ColumnTool | null,
+  selected: ColumnTool,
+): ColumnTool | null => current === selected ? null : selected;
 
 export const mapVoiceClass = (role: VoiceRole | undefined): ColumnVoiceClass => {
   switch (role) {
