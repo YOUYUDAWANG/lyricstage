@@ -40,7 +40,11 @@ Build artifact: `extension-dist`
 
 ## Manual Chrome gates
 
-- [ ] Reload the reviewed 0.3.2 artifact under the original Chrome ID `majlfdidelchofnfodcijoppcgpmbelc`; verify atomic queue changes, relative seek, manual recovery, model discovery, lightweight fullscreen and no warning/error loop.
+- [x] Reloaded the reviewed 0.3.2 artifact from the stable non-worktree directory under the original Chrome ID `majlfdidelchofnfodcijoppcgpmbelc`; Chrome reported 0.3.2 and `Reloaded`.
+- [x] On a fixed `Xk1FVQHDM7w&list=LM` route, queue changes kept the native player title, Stage title, artwork and duration on the same recording; `夏祭り → なにが悪い → 夏祭り → なにが悪い` did not restore stale controls or artwork.
+- [x] After the repeated queue transition, keyboard progress seek moved the current `なにが悪い` clock to 0:33 without returning to the prior song. The lyrics tools menu focused its first action, manual search submitted, and the successful result replaced the form with the candidate panel.
+- [x] Popup showed the live song, public lyrics fallback and configured Director without the removed vocal-enhancement or local-upload actions. The YTM log contained no LyricStage warning/error loop; the only warnings came from another extension.
+- [ ] Complete a later hands-on gate for new-origin model discovery/page-close permission revocation and 5K/Retina lightweight plus forced WebGL context restore. Browser automation intentionally did not bypass Chrome's internal-extension-page URL policy.
 
 - [x] The 0.3.1 baseline was installed under the original Chrome ID and covered one v2 host, zero legacy hosts, navigation remount, multi-tab seek isolation, pause/resume and artwork fallback. This is historical evidence, not 0.3.2 acceptance.
 
