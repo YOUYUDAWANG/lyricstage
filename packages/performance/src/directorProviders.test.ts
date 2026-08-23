@@ -12,6 +12,7 @@ import {
   type DirectorBYOKConfigurationV1,
   type DirectorProviderProtocolV1,
 } from "./directorProviders";
+import { windowIntentRequestProfileV2 } from "./directorV2Provider";
 import { compactDirectorPromptInputV1, directorIntentSchemaV1, directorIntentSystemPromptV1 } from "./directorIntent";
 import { lyricFixtures } from "@lyricstage/contracts";
 import {
@@ -21,7 +22,14 @@ import {
   initialRollingPerformanceStateV1,
 } from "./rollingDirector";
 import { lyricGraphemesV1 } from "./lyricChoreography";
-import { directorBibleSchemaV1, directorBibleSystemPromptV1, scenePackSchemaV1, scenePackSystemPromptV1 } from "./rollingDirectorPrompt";
+import {
+  directorBibleSchemaV1,
+  directorBibleSystemPromptV1,
+  scenePackSchemaV1,
+  scenePackSystemPromptV1,
+  windowIntentSchemaV2,
+  windowIntentSystemPromptV2,
+} from "./rollingDirectorPrompt";
 
 const requestFixture = () => ({
   version: "lyricstage-fullscreen-director-request-v1",
@@ -225,6 +233,84 @@ describe("Director BYOK provider adapters", () => {
     expect(sceneResult.response.map((card) => card.sceneID)).toEqual([firstCard.sceneID]);
     expect((scenePayloads[0]?.text as any)?.format?.schema).toEqual(scenePackSchemaV1);
     expect(scenePayloads[0]?.instructions).toBe(scenePackSystemPromptV1);
+  });
+
+  it("authors only WindowIntentV2 and compiles visual execution locally", async () => {
+    const lyrics = lyricFixtures.wordTimedMixed;
+    const bible = compileLocalDirectorBibleV1(lyrics);
+    const state = initialRollingPerformanceStateV1(bible);
+    const fromLineIndex = lyrics.lines[0]!.lineIndex;
+    const toLineIndex = lyrics.lines.at(-1)!.lineIndex;
+    const wire = {
+      version: "window-intent-v2",
+      bibleIdentity: bible.bibleIdentity,
+      entryStateHash: state.stateHash,
+      fromLineIndex,
+      toLineIndex,
+      spatialIntent: "open",
+      coverRole: "portal",
+      arcIntent: "break",
+      cues: [{ role: "rupture", fromLineIndex: 1, toLineIndex: 1, evidenceLineIndices: [1], confidence: 0.92 }],
+    };
+    const payloads: Record<string, any>[] = [];
+    const fetchMock = vi.fn(async (_input: string | URL | Request, init?: RequestInit) => {
+      payloads.push(JSON.parse(String(init?.body)));
+      return new Response(JSON.stringify({ output_text: JSON.stringify(wire) }), { status: 200 });
+    });
+    const result = await executeDirectorBYOKProfileV1(
+      configuration("openai-responses", "https://profile.test/v1"),
+      { lyrics, bible, state, promptInput: { bible, state, fromLineIndex, toLineIndex, lines: lyrics.lines } },
+      windowIntentRequestProfileV2,
+      fetchMock as typeof fetch,
+    );
+    expect((payloads[0]?.text as any)?.format?.schema).toEqual(windowIntentSchemaV2);
+    expect(payloads[0]?.instructions).toBe(windowIntentSystemPromptV2);
+    expect(result.response).toHaveLength(1);
+    expect(result.response[0]?.directives).toHaveLength(lyrics.lines.length);
+    expect(result.response[0]?.effects.some((effect) => effect.id.startsWith("director-v2-effect:"))).toBe(true);
+  });
+
+  it("rejects provider-authored visual fields instead of silently accepting them", () => {
+    const lyrics = lyricFixtures.wordTimedMixed;
+    const bible = compileLocalDirectorBibleV1(lyrics);
+    const state = initialRollingPerformanceStateV1(bible);
+    const fromLineIndex = lyrics.lines[0]!.lineIndex;
+    const toLineIndex = lyrics.lines.at(-1)!.lineIndex;
+    const input = { lyrics, bible, state, promptInput: { bible, state, fromLineIndex, toLineIndex, lines: lyrics.lines } };
+    const result = windowIntentRequestProfileV2.adapt(input, {
+      version: "window-intent-v2",
+      bibleIdentity: bible.bibleIdentity,
+      entryStateHash: state.stateHash,
+      fromLineIndex,
+      toLineIndex,
+      spatialIntent: "hold",
+      coverRole: "anchor",
+      arcIntent: "hold",
+      cues: [],
+      effects: [{ primitive: "geometry.cut" }],
+    });
+    expect(result).toEqual({ reason: "window-intent-concrete-visual-field" });
+  });
+
+  it("repairs only a harmless WindowIntentV2 wrapper", () => {
+    const lyrics = lyricFixtures.wordTimedMixed;
+    const bible = compileLocalDirectorBibleV1(lyrics);
+    const state = initialRollingPerformanceStateV1(bible);
+    const fromLineIndex = lyrics.lines[0]!.lineIndex;
+    const toLineIndex = lyrics.lines.at(-1)!.lineIndex;
+    const input = { lyrics, bible, state, promptInput: { bible, state, fromLineIndex, toLineIndex, lines: lyrics.lines } };
+    const result = windowIntentRequestProfileV2.repair!(input, { windowIntent: {
+      version: "window-intent-v2",
+      bibleIdentity: bible.bibleIdentity,
+      entryStateHash: state.stateHash,
+      fromLineIndex,
+      toLineIndex,
+      spatialIntent: "hold",
+      coverRole: "anchor",
+      arcIntent: "hold",
+      cues: [],
+    } }, "wrapped");
+    expect(result.response?.[0]?.directives).toHaveLength(lyrics.lines.length);
   });
 
   it("keeps safe AI art direction when malformed Bible structure needs local repair", async () => {

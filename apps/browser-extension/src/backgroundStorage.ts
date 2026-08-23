@@ -21,7 +21,7 @@ export const backgroundStorageKeys = {
 } as const;
 
 export const directorCacheEpoch = "fullscreen-director-v4-client-contract-v8.7-byok-intent-v1";
-export const rollingDirectorEpoch = "rolling-director-generation-v1.1";
+export const rollingDirectorEpoch = "rolling-director-generation-v1.2-window-intent-v2";
 export const lyricsCacheLimit = 100;
 export const directorCacheLimit = 100;
 export const sponsorBlockCategories = [
@@ -64,7 +64,7 @@ export interface StoredDirectorBibleCacheEntry {
 export interface StoredDirectorSceneCacheEntry {
   fingerprint: string;
   epoch: string;
-  schemaVersion: "scene-pack-v1";
+  schemaVersion: "window-intent-v2";
   provenance: "ai-positive";
   createdAtUnixMs: number;
   expiresAtUnixMs: number;

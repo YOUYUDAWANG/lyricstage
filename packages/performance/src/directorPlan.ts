@@ -504,6 +504,11 @@ const sanitizeWireDirective = (
   };
 };
 
+export const sanitizeDirectorLineDirectiveV1 = (
+  value: unknown,
+  validLineIndices: Iterable<number>,
+): DirectorLineDirectiveV1 | null => sanitizeWireDirective(value, new Set(validLineIndices));
+
 const sanitizePrimitiveUse = (value: unknown): EffectPrimitiveUseV1 | null => {
   if (!value || typeof value !== "object" || Array.isArray(value)) return null;
   const wire = value as Record<string, unknown>;

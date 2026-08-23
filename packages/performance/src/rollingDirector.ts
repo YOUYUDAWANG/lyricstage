@@ -2,6 +2,7 @@ import { stableHash32, type LyricDocumentV0, type LyricLineV0 } from "@lyricstag
 import {
   compileLocalDirectorPlanV1,
   isDirectorPlanV1ForLyrics,
+  sanitizeDirectorLineDirectiveV1,
   type DirectorLineDirectiveV1,
   type DirectorPlanV1,
   type DirectorSectionV1,
@@ -113,6 +114,9 @@ export interface SceneCardV1 {
   artDirection: PerformanceArtDirectionV1;
   typography: PerformanceTypographyV1;
   presentation: StagePresentationV1;
+  /** Locally compiled V2 output. Providers never author these values. */
+  directives?: DirectorLineDirectiveV1[];
+  semanticCueCount?: number;
   gestures: LyricGestureV1[];
   effects: EffectRecipeV1[];
   signatureMoment?: SignatureMomentV1;
@@ -651,6 +655,22 @@ export const sanitizeSceneCardV1 = (
   } else if (gestures.length > 2 || complete.effects.length > 1) return null;
   if (!consequenceKinds.has(complete.consequence.kind) || !clean(complete.consequence.rationale, 320)) return null;
   const validLineIndices = new Set(range.map((line) => line.lineIndex));
+  let directives: DirectorLineDirectiveV1[] | undefined;
+  if (complete.directives !== undefined) {
+    if (!Array.isArray(complete.directives) || complete.directives.length !== range.length) return null;
+    const seenDirectiveLines = new Set<number>();
+    directives = [];
+    for (const candidate of complete.directives) {
+      const directive = sanitizeDirectorLineDirectiveV1(candidate, validLineIndices);
+      if (!directive || seenDirectiveLines.has(directive.lineIndex)) return null;
+      seenDirectiveLines.add(directive.lineIndex);
+      directives.push(directive);
+    }
+    if (seenDirectiveLines.size !== validLineIndices.size) return null;
+    directives.sort((left, right) => left.lineIndex - right.lineIndex);
+  }
+  if (complete.semanticCueCount !== undefined
+    && (!Number.isInteger(complete.semanticCueCount) || complete.semanticCueCount < 0 || complete.semanticCueCount > 3)) return null;
   const evidence = sanitizeEvidence(complete.evidence, validLineIndices, 0.65);
   if (!evidence) return null;
   if (complete.effects.some((effect) => effect.sectionID !== complete.sceneID
@@ -669,7 +689,7 @@ export const sanitizeSceneCardV1 = (
     || creates.some((id) => consumes.includes(id))) return null;
   const finalSignature = bible.signatureAnchors.at(-1);
   if (signature?.id === finalSignature?.id && consumes.length === 0) return null;
-  return { ...complete, gestures, evidence };
+  return { ...complete, ...(directives ? { directives } : {}), gestures, evidence };
 };
 
 export const advanceRollingPerformanceStateV1 = (
@@ -1100,19 +1120,20 @@ export const compileDirectorPlanFromRollingV1 = (
       ?? localSignatureMomentForAnchor(anchor, anchorIndex, bible.signatureAnchors.length)),
     quietWindows: bible.quietWindows,
   });
+  const directedByLine = new Map(accepted.flatMap((card) => card.directives ?? []).map((directive) => [directive.lineIndex, directive]));
   const withoutIdentity: Omit<DirectorPlanV1, "planIdentity"> = {
     version: "director-plan-v1",
     recordingID: lyrics.recordingID,
     lyricsIdentity: bible.lyricsIdentity,
     source: source === "local" ? "local" : source,
-    directorVersion: "lyricstage-rolling-director-v1",
+    directorVersion: directedByLine.size > 0 ? "lyricstage-rolling-director-v2" : "lyricstage-rolling-director-v1",
     concept: bible.premise,
     motif: bible.motifActor.relationship,
     intensityArc: bible.emotionalArc,
     world: bible.world,
     blocking,
     sections: blockedSections,
-    directives: local.directives as DirectorLineDirectiveV1[],
+    directives: local.directives.map((directive) => directedByLine.get(directive.lineIndex) ?? directive),
     effects,
     gestures,
     dramaticScore: mixedDramaticScore ?? local.dramaticScore,

@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { negativeSceneCacheIdentityV1, RollingSceneNegativeCacheV1 } from "./backgroundNegativeSceneCache";
+import {
+  negativeSceneCacheIdentityV1,
+  RollingSceneNegativeCacheV1,
+  semanticCueBudgetExceededV2,
+} from "./backgroundNegativeSceneCache";
 
 describe("rolling negative scene cache", () => {
   it("binds failures to fingerprint, Bible, range, state, and schema", () => {
@@ -24,5 +28,16 @@ describe("rolling negative scene cache", () => {
     expect(bounded.reason("b", 3_000)).toBe("second");
     bounded.delete("b");
     expect(bounded.reason("b", 3_000)).toBeUndefined();
+  });
+
+  it("enforces the whole-song semantic cue ceiling", () => {
+    expect(semanticCueBudgetExceededV2(
+      [{ semanticCueCount: 3 }, { semanticCueCount: 3 }],
+      [{ semanticCueCount: 3 }, { semanticCueCount: 3 }],
+    )).toBe(false);
+    expect(semanticCueBudgetExceededV2(
+      [{ semanticCueCount: 3 }, { semanticCueCount: 3 }],
+      [{ semanticCueCount: 3 }, { semanticCueCount: 3 }, { semanticCueCount: 1 }],
+    )).toBe(true);
   });
 });

@@ -506,6 +506,7 @@ export const SettingsApp = () => {
                       </summary>
                       <dl>
                         <div><dt>World</dt><dd>{summary.baseLayout} / {summary.world.spatialMode} / {summary.world.artworkRole} / {summary.world.motionLaw}</dd></div>
+                        <div><dt>Compiler</dt><dd>{summary.compilerVersion} · {summary.semanticDirectiveCount} semantic directives</dd></div>
                         <div><dt>Cache</dt><dd>{summary.cacheVersion} / {summary.cacheEpoch} / {summary.source}</dd></div>
                         <div><dt>Bible</dt><dd>{summary.bibleIdentityPrefix} · {summary.actCount} acts · quiet {summary.quietSharePercent}%</dd></div>
                         <div><dt>Gestures</dt><dd>glyph {summary.gestureCounts.glyph} / token {summary.gestureCounts.token} / phrase {summary.gestureCounts.phrase}</dd></div>
@@ -528,7 +529,7 @@ export const SettingsApp = () => {
               <div className="grouped-list">
                 <label className="settings-switch"><span><strong>轻量模式</strong><small>减少模糊和动态效果，适合低性能设备或安静阅读。</small></span><input type="checkbox" checked={preferences.lightweight} disabled={busy === "performance"} onChange={(event) => void onTogglePreference({ lightweight: event.target.checked })} /></label>
                 <label className="settings-switch"><span><strong>个人 VJ 模式</strong><small>增强全屏环境运动；系统“减少动态效果”仍拥有最终优先级。</small></span><input type="checkbox" checked={preferences.vjMode} disabled={busy === "performance"} onChange={(event) => void onTogglePreference({ vjMode: event.target.checked })} /></label>
-                <label className="settings-switch"><span><strong>Rolling Director V1</strong><small>Off 使用旧导演；Shadow 只生成与缓存；On 才渲染滚动 Scene Cards。</small></span><select data-rolling-director-v1="" value={preferences.rollingDirectorV1} disabled={busy === "performance"} onChange={(event) => void onTogglePreference({ rollingDirectorV1: event.target.value as ExtensionPreferencesV0["rollingDirectorV1"] })}><option value="off">Off · legacy</option><option value="shadow">Shadow · audit only</option><option value="on">On · opt-in</option></select></label>
+                <label className="settings-switch"><span><strong>Rolling Director V2</strong><small>AI 只给稀疏语义 Cue，本地编译演出；Off 使用旧导演，Shadow 只缓存，On 才渲染。</small></span><select data-rolling-director-v1="" value={preferences.rollingDirectorV1} disabled={busy === "performance"} onChange={(event) => void onTogglePreference({ rollingDirectorV1: event.target.value as ExtensionPreferencesV0["rollingDirectorV1"] })}><option value="off">Off · legacy</option><option value="shadow">Shadow · audit only</option><option value="on">On · sparse cues</option></select></label>
               </div>
               <small className="inline-status" aria-live="polite">{preferenceStatus}</small>
             </section>

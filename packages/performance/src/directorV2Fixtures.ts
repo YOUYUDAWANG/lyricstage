@@ -56,6 +56,16 @@ export interface ManualWindowIntentFixtureV2 {
   cues: ManualSemanticCueV2[];
 }
 
+/**
+ * Provider-authored semantic input. It carries no renderer primitive, timing
+ * parameter, color, coordinate, keyframe, gesture, or effect selection.
+ */
+export interface WindowIntentV2 extends ManualWindowIntentFixtureV2 {
+  version: "window-intent-v2";
+  bibleIdentity: string;
+  entryStateHash: string;
+}
+
 export interface ManualSignatureExpectationV1 {
   cueID: string;
   recipe: SignatureRecipeIDV1;

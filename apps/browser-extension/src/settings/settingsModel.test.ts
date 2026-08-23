@@ -33,7 +33,8 @@ describe("extension settings model", () => {
     expect(directorReviewStateFromResponseV1({
       type: "director-cache-summaries-v1", summaries: [{
         version: "director-cache-summary-v1", trackTitle: "Song", trackArtist: "Artist", trackIDDisplay: "abcdef01",
-        durationMs: 180_000, lineCount: 30, cacheVersion: "rolling-v1", cacheEpoch: "rolling-director-generation-v1.1", source: "cache",
+        durationMs: 180_000, lineCount: 30, cacheVersion: "rolling-v1", compilerVersion: "window-intent-v2", semanticDirectiveCount: 30,
+        cacheEpoch: "rolling-director-generation-v1.2-window-intent-v2", source: "cache",
         createdAtUnixMs: 1, expiresAtUnixMs: 2, bibleIdentityPrefix: "abcdef01", biblePresent: true,
         sceneCardCount: 0, coveragePercent: 0, missingRanges: [{ fromMs: 0, toMs: 180_000 }],
         baseLayout: "monument", layoutTransitionCount: 0, continuityJustificationAccepted: false,

@@ -19,6 +19,8 @@ export interface DirectorCacheSummaryV1 {
   durationMs: number;
   lineCount: number;
   cacheVersion: "rolling-v1";
+  compilerVersion: "scene-pack-v1" | "window-intent-v2";
+  semanticDirectiveCount: number;
   cacheEpoch: string;
   source: "cache" | "network" | "local";
   createdAtUnixMs: number;
@@ -72,6 +74,10 @@ const summaryMotionLaws = new Set(["drift", "flow", "pulse", "fall", "orbit", "c
 const summaryArtDirections = new Set(["editorialKinetic", "neonRail", "paperCut", "liquidMemory", "monoImpact", "celestialGrid"]);
 const summaryEffectCategories = new Set(["field", "geometry", "memory", "density", "motif", "cover", "transition"]);
 const summaryOutcomes = new Set(["ready", "http-error", "parse-error", "contract-degraded", "timeout", "network-error"]);
+const summaryCacheEpochs = new Set([
+  "rolling-director-generation-v1.1",
+  "rolling-director-generation-v1.2-window-intent-v2",
+]);
 const warningOrder: readonly DirectorDiversityWarningV1[] = [
   "minimum-budget", "single-scale", "static-without-evidence", "repeated-tuple", "coverage-gap", "local-repair-heavy",
 ];
@@ -134,6 +140,7 @@ export const summarizeDirectorCacheEntryV1 = (input: DirectorCacheSummaryInputV1
   const coverage = mergedCoverage(input.lyrics.durationMs, cards);
   const gestures = cards.flatMap((card) => card.gestures);
   const effects = cards.flatMap((card) => card.effects);
+  const semanticDirectiveCount = cards.reduce((total, card) => total + (card.directives?.length ?? 0), 0);
   const gestureCounts = {
     glyph: gestures.filter((gesture) => gesture.scope === "glyph").length,
     token: gestures.filter((gesture) => gesture.scope === "token").length,
@@ -160,6 +167,8 @@ export const summarizeDirectorCacheEntryV1 = (input: DirectorCacheSummaryInputV1
     durationMs: input.lyrics.durationMs,
     lineCount: input.lyrics.lines.length,
     cacheVersion: "rolling-v1",
+    compilerVersion: semanticDirectiveCount > 0 ? "window-intent-v2" : "scene-pack-v1",
+    semanticDirectiveCount,
     cacheEpoch: clean(input.cacheEpoch, 80),
     source: input.source,
     createdAtUnixMs: Math.round(input.createdAtUnixMs),
@@ -212,7 +221,7 @@ export const sanitizeDirectorCacheSummaryV1 = (value: unknown): DirectorCacheSum
   if (!value || typeof value !== "object" || Array.isArray(value)) return null;
   const item = value as Partial<DirectorCacheSummaryV1>;
   const allowed = new Set([
-    "version", "trackTitle", "trackArtist", "trackIDDisplay", "durationMs", "lineCount", "cacheVersion", "cacheEpoch",
+    "version", "trackTitle", "trackArtist", "trackIDDisplay", "durationMs", "lineCount", "cacheVersion", "compilerVersion", "semanticDirectiveCount", "cacheEpoch",
     "source", "createdAtUnixMs", "expiresAtUnixMs", "bibleIdentityPrefix", "biblePresent", "sceneCardCount",
     "coveragePercent", "missingRanges", "baseLayout", "layoutTransitionCount", "continuityJustificationAccepted",
     "motifFamily", "actCount", "signatureMomentCount", "gestureCounts", "effectCount", "effectPrimitiveCounts",
@@ -221,11 +230,12 @@ export const sanitizeDirectorCacheSummaryV1 = (value: unknown): DirectorCacheSum
   if (Object.keys(item).some((key) => !allowed.has(key))) return null;
   if (item.version !== "director-cache-summary-v1" || !clean(item.trackTitle, 120) || !clean(item.trackArtist, 160)
     || !/^[a-f0-9]{8,12}$/u.test(item.trackIDDisplay ?? "") || item.cacheVersion !== "rolling-v1"
-    || item.cacheEpoch !== "rolling-director-generation-v1.1" || !/^[a-f0-9]{8,12}$/u.test(item.bibleIdentityPrefix ?? "")
+    || !["scene-pack-v1", "window-intent-v2"].includes(item.compilerVersion ?? "")
+    || !summaryCacheEpochs.has(item.cacheEpoch ?? "") || !/^[a-f0-9]{8,12}$/u.test(item.bibleIdentityPrefix ?? "")
     || !Array.isArray(item.warnings) || item.warnings.some((warning) => !warningOrder.includes(warning))
     || !item.gestureCounts || !item.world || !Array.isArray(item.missingRanges) || !Array.isArray(item.artDirections)
     || !Array.isArray(item.localRepairFlags) || !item.effectPrimitiveCounts) return null;
-  const numbers = [item.durationMs, item.lineCount, item.createdAtUnixMs, item.expiresAtUnixMs, item.sceneCardCount,
+  const numbers = [item.durationMs, item.lineCount, item.semanticDirectiveCount, item.createdAtUnixMs, item.expiresAtUnixMs, item.sceneCardCount,
     item.coveragePercent, item.layoutTransitionCount, item.actCount, item.signatureMomentCount, item.effectCount, item.quietSharePercent,
     item.gestureCounts.glyph, item.gestureCounts.token, item.gestureCounts.phrase, item.gestureCounts.total];
   if (numbers.some((number) => typeof number !== "number" || !Number.isFinite(number) || number < 0)

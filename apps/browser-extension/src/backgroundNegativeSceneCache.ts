@@ -1,6 +1,7 @@
 import { stableHash32 } from "@lyricstage/contracts";
+import type { SceneCardV1 } from "@lyricstage/performance";
 
-export const scenePackSchemaVersion = "scene-pack-v1" as const;
+export const scenePackSchemaVersion = "window-intent-v2" as const;
 
 export const negativeSceneCacheIdentityV1 = (
   fingerprint: string,
@@ -15,6 +16,13 @@ export const negativeSceneCacheIdentityV1 = (
   fromLineIndex,
   entryStateHash,
 });
+
+export const semanticCueBudgetExceededV2 = (
+  accepted: readonly Pick<SceneCardV1, "semanticCueCount">[],
+  generated: readonly Pick<SceneCardV1, "semanticCueCount">[],
+  maximum = 12,
+): boolean => [...accepted, ...generated]
+  .reduce((total, card) => total + (card.semanticCueCount ?? 0), 0) > maximum;
 
 export class RollingSceneNegativeCacheV1 {
   private readonly entries = new Map<string, { expiresAtUnixMs: number; reason: string }>();

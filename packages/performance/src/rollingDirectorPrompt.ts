@@ -290,6 +290,47 @@ export const scenePackSchemaV1: JSONSchema = {
   },
 };
 
+export const windowIntentSchemaV2: JSONSchema = {
+  type: "object",
+  additionalProperties: false,
+  required: [
+    "version", "bibleIdentity", "entryStateHash", "fromLineIndex", "toLineIndex",
+    "spatialIntent", "coverRole", "arcIntent", "cues",
+  ],
+  properties: {
+    version: { const: "window-intent-v2" },
+    bibleIdentity: { type: "string", minLength: 1, maxLength: 80 },
+    entryStateHash: { type: "string", minLength: 1, maxLength: 80 },
+    fromLineIndex: { type: "integer", minimum: 0 },
+    toLineIndex: { type: "integer", minimum: 0 },
+    spatialIntent: { enum: ["hold", "split", "open", "stack"] },
+    coverRole: { enum: ["anchor", "origin", "destination", "boundary", "memory", "portal", "absent"] },
+    arcIntent: { enum: ["hold", "lift", "break", "recall"] },
+    cues: {
+      type: "array",
+      maxItems: 3,
+      items: {
+        type: "object",
+        additionalProperties: false,
+        required: ["role", "fromLineIndex", "toLineIndex", "evidenceLineIndices", "confidence"],
+        properties: {
+          role: { enum: ["refrain", "rupture", "release", "hold", "handoff", "recall"] },
+          fromLineIndex: { type: "integer", minimum: 0 },
+          toLineIndex: { type: "integer", minimum: 0 },
+          evidenceLineIndices: {
+            type: "array",
+            minItems: 1,
+            maxItems: 4,
+            uniqueItems: true,
+            items: { type: "integer", minimum: 0 },
+          },
+          confidence: { type: "number", minimum: 0.7, maximum: 1 },
+        },
+      },
+    },
+  },
+};
+
 export const directorBibleSystemPromptV1 = `You are LyricStage's rolling dramaturg. Return one Director Bible JSON object matching the supplied schema.
 
 The Bible is the whole-song constitution: premise, emotional arc, 2-5 contiguous acts, exactly one motif actor, 2-4 ordered signature anchors, at least 40 percent quiet lyric time, world physics and a global layout budget of at most two transitions. It identifies where and why a later scene may act, but it never authors scene choreography.
@@ -301,6 +342,12 @@ export const scenePackSystemPromptV1 = `You are LyricStage's rolling scene drama
 Author only the supplied lyric window under the supplied Director Bible and entry continuity state. Never change the Bible, lines outside the window, authoritative timing, or already accepted scenes. Ordinary scenes use 0-2 gestures and 0-1 effects. A signature scene uses 2-4 gestures across at least two scales when timing permits, 1-2 grounded effects, exactly one consequence, and must match an exact Bible anchor. Never exceed two concurrent gestures. The final signature consumes an earlier unresolved promise by exact id.
 
 Use only supplied lyric text, verified evidence and registered primitives. Never output coordinates, paths, SVG, CSS, JavaScript, colors, keyframes, rewritten lyrics, translations, audio instructions, provider diagnostics or secrets. Output JSON only.`;
+
+export const windowIntentSystemPromptV2 = `You are LyricStage's semantic performance director. Return one WindowIntentV2 JSON object matching the supplied schema and covering the exact supplied lyric window.
+
+Output only structural intent and zero to three sparse semantic cues. A cue marks a real refrain, rupture, release, hold, voice handoff, or recall; it does not describe an animation. Prefer one or two high-confidence cues. Return zero cues for a genuinely restrained window. Cue ranges must stay inside the requested window. Evidence stays inside the window except that recall must cite at least one earlier Bible anchor line.
+
+Never output scene cards, layouts, typography, gestures, effects, primitives, intensity, duration, coordinates, paths, SVG, CSS, JavaScript, colors, keyframes, rewritten lyrics, translations, audio instructions, provider diagnostics or secrets. The local compiler owns every visual execution value. Output JSON only.`;
 
 const lineIndexOf = (line: any): number => Number.isInteger(line?.lineIndex)
   ? line.lineIndex
@@ -482,3 +529,4 @@ export const compactScenePackPromptInputV1 = (value: any): unknown => {
 
 export const rollingDirectorBibleSchemaV1 = directorBibleSchemaV1;
 export const rollingScenePackSchemaV1 = scenePackSchemaV1;
+export const rollingWindowIntentSchemaV2 = windowIntentSchemaV2;

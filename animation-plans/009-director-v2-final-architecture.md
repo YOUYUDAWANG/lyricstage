@@ -4,7 +4,7 @@
 - **Decision date**: 2026-08-24
 - **Baseline**: `origin/main@82a5e21`
 - **Supersedes**: plans 001–008 and the implementation route in `EXPERT_REVIEW_BRIEF.zh-CN.md`
-- **Implementation boundary**: commits 1–10 described below; provider `WindowIntentV2`, AI shadow, MotionClip, WAAPI, Reactive Bus, Visual Identity Packs, and editing tools remain blocked until the expression-sufficiency gate passes
+- **Implementation boundary**: commits 1–10 described below; MotionClip, WAAPI, Reactive Bus, Visual Identity Packs, and editing tools remain blocked. On 2026-08-24 the product owner explicitly waived the manual expression-sufficiency gate and authorized the bounded `WindowIntentV2` provider path; this is a gate bypass, not an artistic pass.
 
 ## Decision
 
@@ -21,7 +21,7 @@ TrackIdentity + LyricDocument + optional MusicMap
        acts / sections / signatures / quiet / layoutBudget
                          |
                          v
-       manual intent fixtures; WindowIntentV2 only later
+          manual or provider WindowIntentV2
                          |
                          v
                sparse SemanticCueV2
@@ -70,9 +70,9 @@ The local plan is always complete. AI never owns playback time, renderer paramet
 
 Transport windows are not scenes. Scene and layout changes remain local compiler decisions constrained by existing act, section, signature, quiet, and `layoutBudget` evidence.
 
-## Intent contract — blocked until the manual gate passes
+## Intent contract — enabled by explicit owner override
 
-`scene-pack-v1` and `scene-card-v1` remain frozen. Their item shape must not be silently changed. If the manual gate passes, the provider path may introduce one explicit wire-version change:
+`scene-pack-v1` provider output remains frozen for compatibility. The live provider now uses one explicit wire-version change, while its locally compiled result continues through the existing SceneCard runtime:
 
 ```ts
 interface WindowIntentV2 {
@@ -340,7 +340,7 @@ If B does not beat A, improve use of existing primitives or event visibility. If
 9. Add the three bounded recipe families and observable promise behavior.
 10. Add the A/B/C/D expression-sufficiency experiment to the existing Lab/test surfaces.
 
-Only after step 10 passes may work begin on `WindowIntentV2` provider output or AI shadow. The blocked non-goals remain blocked until a later explicit architecture decision.
+The product owner explicitly waived step 10's human review requirement on 2026-08-24 and authorized `WindowIntentV2` production integration. This does not retroactively mark the Art Gate as passed. All blocked non-goals remain blocked until a later explicit architecture decision.
 
 ## Disposition of the superseded plans
 

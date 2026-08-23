@@ -44,7 +44,7 @@ import {
   sanitizeDirectorBibleV1,
   sanitizeDirectorCacheSummaryV1,
   sanitizeSceneCardV1,
-  scenePackRequestProfileV1,
+  windowIntentRequestProfileV2,
   summarizeDirectorCacheEntryV1,
   isDirectorPlanV1ForLyrics,
   listDirectorProviderModelsV1,
@@ -82,9 +82,9 @@ import {
   type StoredLyricsCache,
 } from "./backgroundStorage";
 import {
-  negativeSceneCacheIdentityV1,
-  RollingSceneNegativeCacheV1,
+  negativeSceneCacheIdentityV1, RollingSceneNegativeCacheV1,
   scenePackSchemaVersion,
+  semanticCueBudgetExceededV2,
 } from "./backgroundNegativeSceneCache";
 import type {
   AudioAnalysisReplayState,
@@ -827,7 +827,7 @@ const directorCacheSummariesV1 = async (): Promise<DirectorCacheSummaryV1[]> => 
     ...Object.values(await readDirectorBibleCache()).map((entry) => entry.summary),
     ...Object.values(await readDirectorSceneCache()).map((entry) => entry.summary),
   ].map(sanitizeDirectorCacheSummaryV1).filter((summary): summary is DirectorCacheSummaryV1 => Boolean(summary))
-    .sort((left, right) => right.createdAtUnixMs - left.createdAtUnixMs);
+    .sort((left, right) => right.createdAtUnixMs - left.createdAtUnixMs || right.semanticDirectiveCount - left.semanticDirectiveCount || right.sceneCardCount - left.sceneCardCount);
   const newestByTrack = new Map<string, DirectorCacheSummaryV1>();
   candidates.forEach((summary) => {
     if (!newestByTrack.has(summary.trackIDDisplay)) newestByTrack.set(summary.trackIDDisplay, summary);
@@ -1369,13 +1369,19 @@ const resolveDirectorCoverageV1 = async (
             },
           },
         },
-        scenePackRequestProfileV1,
+        windowIntentRequestProfileV2,
         fetch,
         Math.min(45_000, 90_000 - ledger.providerMs),
         6 - ledger.providerAttempts,
       );
       updateRollingLedgerFromExecution(ledger, execution.diagnostics, true);
       const generated = execution.response;
+      if (semanticCueBudgetExceededV2(cards, generated)) {
+        updateRollingLedgerFromExecution(ledger, undefined, false);
+        rollingSceneNegativeCache.remember(negativeKey, "window-intent-cue-budget-exhausted");
+        result = await commitLocalContinuity("window-intent-cue-budget-exhausted", rollingTiming(execution));
+        return;
+      }
       const generatedSpanMs = generated.length > 0 ? generated.at(-1)!.toMs - generated[0]!.fromMs : 0;
       const availableLyricSpanMs = Math.max(0, lyrics.lines.at(-1)!.toMs - window.fromMs);
       const minimumPackSpanMs = Math.min(45_000, availableLyricSpanMs);

@@ -19,3 +19,5 @@ export * from "./directorV2Fixtures";
 export * from "./directorV2Compiler";
 export * from "./directorV2Experiment";
 export * from "./directorV2ReviewProtocol";
+export * from "./directorV2Rolling";
+export * from "./directorV2Provider";

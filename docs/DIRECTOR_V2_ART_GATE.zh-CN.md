@@ -8,10 +8,10 @@ Performance candidate: 990e364
 Review tooling: post-candidate, non-performance code only
 Engineering gate: Provisionally passed
 Artistic gate: Awaiting review
-WindowIntentV2 AI shadow: Blocked
+WindowIntentV2 provider: Enabled by owner override; artistic quality unreviewed
 ```
 
-在艺术门结束前，不修改 `directorV2Compiler`、Recipe、Cue、fixture 或渲染原语。评审工具可以修复记录、盲测和报告错误，但不得改变四个条件的演出输出。
+2026-08-24，产品所有者明确表示没有时间执行盲测，并授权继续升级。该决定允许接入有界 `WindowIntentV2` provider，但不把艺术门伪记为通过；Recipe、渲染原语和四个实验条件仍保持冻结。
 
 ## 工具已经自动完成的部分
 

@@ -91,6 +91,7 @@ const rangeValid = (lineIndices: ReadonlySet<number>, fromLineIndex: number, toL
 const sanitizeManualFixture = (
   lyrics: LyricDocumentV0,
   fixture: DirectorV2ManualFixtureV1,
+  allowEmptyCues = false,
 ): boolean => {
   if (fixture.recordingID !== lyrics.recordingID || fixture.windows.length === 0) return false;
   const lineIndices = new Set(lyrics.lines.map((line) => line.lineIndex));
@@ -142,7 +143,7 @@ const sanitizeManualFixture = (
       ) return false;
     }
   }
-  return cueCount > 0 && cueCount <= 12 && focusCount <= 6;
+  return (allowEmptyCues || cueCount > 0) && cueCount <= 12 && focusCount <= 6;
 };
 
 const sameStructuralUnit = (
@@ -346,9 +347,10 @@ const resolveSignatureRecipes = (
   fixture: DirectorV2ManualFixtureV1,
   contexts: SignatureCueContextV1[],
   branchPolicy: "contextual" | "context-free",
+  seedPromises: readonly ObservableVisualPromiseV1[] = [],
 ): { events: ResolvedSignatureRecipeEventV1[]; promises: ObservableVisualPromiseV1[] } => {
   const events: ResolvedSignatureRecipeEventV1[] = [];
-  const promises: ObservableVisualPromiseV1[] = [];
+  const promises: ObservableVisualPromiseV1[] = seedPromises.map((promise) => ({ ...promise }));
   const finalLineIndex = lyrics.lines.at(-1)?.lineIndex ?? 0;
   const ordered = contexts
     .filter((context) => recipeForRole(context.cue.role))
@@ -576,12 +578,16 @@ export const compileManualDirectorV2V1 = (
   lyrics: LyricDocumentV0,
   localPlan: DirectorPlanV1,
   fixture: DirectorV2ManualFixtureV1,
-  options: { recipeBranchPolicy?: "contextual" | "context-free" } = {},
+  options: {
+    recipeBranchPolicy?: "contextual" | "context-free";
+    allowEmptyCues?: boolean;
+    seedPromises?: readonly ObservableVisualPromiseV1[];
+  } = {},
 ): CompiledManualDirectorV2V1 | null => {
   if (
     localPlan.recordingID !== lyrics.recordingID
     || localPlan.lyricsIdentity !== stableHash32(lyrics)
-    || !sanitizeManualFixture(lyrics, fixture)
+    || !sanitizeManualFixture(lyrics, fixture, options.allowEmptyCues)
   ) return null;
   const cueByID = new Map<string, ManualSemanticCueV2>();
   const contextByCueID = new Map<string, SignatureCueContextV1>();
@@ -603,6 +609,7 @@ export const compileManualDirectorV2V1 = (
     fixture,
     [...contextByCueID.values()],
     options.recipeBranchPolicy ?? "contextual",
+    options.seedPromises,
   );
   const eventByCueID = new Map(signature.events.map((event) => [event.cueID, event]));
   const lineByIndex = new Map(lyrics.lines.map((line) => [line.lineIndex, line]));

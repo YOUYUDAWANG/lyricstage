@@ -86,10 +86,10 @@ describe("rolling director core", () => {
     const serialized = JSON.stringify(summary);
     expect(serialized).not.toMatch(/fixture line|secret\.invalid|raw|rationale|apiKey|prompt|cookie/ui);
     expect(Object.keys(summary).sort()).toEqual([
-      "actCount", "artDirections", "baseLayout", "bibleIdentityPrefix", "biblePresent", "cacheEpoch", "cacheVersion",
+      "actCount", "artDirections", "baseLayout", "bibleIdentityPrefix", "biblePresent", "cacheEpoch", "cacheVersion", "compilerVersion",
       "continuityJustificationAccepted", "coveragePercent", "createdAtUnixMs", "durationMs", "effectCount",
       "effectPrimitiveCounts", "expiresAtUnixMs", "gestureCounts", "layoutTransitionCount", "lineCount",
-      "localRepairFlags", "missingRanges", "motifFamily", "quietSharePercent", "reachedFinalWindow", "sceneCardCount",
+      "localRepairFlags", "missingRanges", "motifFamily", "quietSharePercent", "reachedFinalWindow", "sceneCardCount", "semanticDirectiveCount",
       "signatureMomentCount", "source", "timing", "trackArtist", "trackIDDisplay", "trackTitle", "version", "warnings", "world",
     ]);
     const malformed = [
