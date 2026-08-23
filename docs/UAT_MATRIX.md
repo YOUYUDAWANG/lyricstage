@@ -4,7 +4,8 @@ This is bounded runtime evidence for a reviewed commit. Never record provider ke
 
 ## Candidate
 
-- Source commit: fill from `git rev-parse --short=12 HEAD`
+- Artifact source commit: `fa81a1333ec2`
+- Observed: 2026-08-23, real signed-in Chrome session
 - Stable unpacked path: `/Users/chaoyiliu/Desktop/bilibili-music/web/extension-dist`
 - Extension identity: `majlfdidelchofnfodcijoppcgpmbelc`
 - Required page marker: `data-lyricstage-content-script="isolated-v3"`
@@ -15,19 +16,24 @@ For each row inspect Column mount, actual line readability, Fullscreen entry, st
 
 | Class | Track | Video ID | Column | Fullscreen | Start/mid/end | Visible direction | Exit/remount | Result |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| fast | 純情サクリファイス Parallel ver. | `LxcvrBS__UY` | pending | pending | pending | pending | pending | pending |
-| slow | 水星記 Mercury Records | `v39OOPJlYC0` | pending | pending | pending | pending | pending | pending |
-| repeated hook | You & 合図 | `ZmCRFGcON-I` | pending | pending | pending | pending | pending | pending |
-| duet | Holiday∞Holiday | `6q3bT34uW10` | pending | pending | pending | pending | pending | pending |
-| long line | てにをは（feat. 重音テト） | `QaNyWEWAh4s` | pending | pending | pending | pending | pending | pending |
+| fast | 純情サクリファイス Parallel ver. | `LxcvrBS__UY` | pass, 62 lines | pass, `stage`, 2 canvases | pass, 0:10 / 1:32 / 3:13 | pass, directed and local fallback states visible | pass, one host | pass |
+| slow | 水星記 Mercury Records | `v39OOPJlYC0` | pass, explicit no-match fallback | N/A, disabled without matched lyrics | N/A, no synchronized lyrics | pass, local fallback and import action visible | N/A | pass, degraded honestly |
+| repeated hook | You & 合図 | `ZmCRFGcON-I` | pass, 40 lines | pass, `stage`, 2 canvases | pass, start / 1:14 / 2:26 | pass | pass, one host | pass |
+| duet | Holiday∞Holiday | `6q3bT34uW10` | pass, 50 lines | pass, `stage`, 2 canvases | pass, start / 2:13 / 3:55 | pass | pass, one host | pass |
+| long line | てにをは（feat. 重音テト） | `QaNyWEWAh4s` | pass, 38 lines | pass, `stage`, 2 canvases | pass, 0:00 / 1:49 / 3:48 | pass | pass, one host | pass |
+
+The full-screen checks used a real screen-coordinate user gesture. Browser automation clicks were not counted because Chrome rejected their user activation. Escape returned each exercised track to `presentation="column"` with one connected host and no recorded mount failure.
+
+The candidate also passed a full-document navigation regression from the fast sample to the slow sample: both documents reported `direct-shadow-v2`, no `content-ui` load error, and no mount failure. This covers the module-cache failure found during the first UAT attempt.
 
 ## Multi-tab soak
 
-- Open two YouTube Music tabs with different recordings.
-- Confirm the playing tab owns standalone Stage while each embedded Column remains bound to its own tab.
-- Pause, seek and resume both directions; stale controls must fail closed after a recording change.
-- Start local audio analysis only from an explicit user gesture; confirm capture ownership follows its immutable scope.
-- Reload the extension, refresh both existing tabs, and confirm one host per Lyrics panel with no reconnect/error loop.
+- [x] Opened two YouTube Music tabs with different recordings.
+- [x] Both embedded Columns stayed bound to their own track identity: `愛の残滓` (39 lines) and `Holiday∞Holiday` (50 lines).
+- [x] After 10 seconds both tabs still had one host, advancing clocks, no content-UI error, and no mount failure.
+- [x] An autoplay recording transition replaced the first tab's title and lyrics without leaving a stale host.
+- [x] Reloaded the extension and confirmed first-document and second-document mounts with no reconnect/error loop.
+- [ ] Standalone Stage authority, cross-tab pause/resume, and pinned capture ownership were not exercised in this bounded pass.
 
 ## Acceptance boundary
 
