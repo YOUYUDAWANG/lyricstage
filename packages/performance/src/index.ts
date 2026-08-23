@@ -22,3 +22,7 @@ export * from "./directorV2Experiment";
 export * from "./directorV2ReviewProtocol";
 export * from "./directorV2Rolling";
 export * from "./directorV2Provider";
+export * from "./directorScenePackV2";
+export * from "./directorLinePerformanceV2";
+export * from "./reactiveBus";
+export * from "./signatureChoreographyV2";

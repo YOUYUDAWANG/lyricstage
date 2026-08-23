@@ -43,7 +43,7 @@ import {
   sanitizeDirectorBibleV1,
   sanitizeDirectorCacheSummaryV1,
   sanitizeSceneCardV1,
-  windowIntentRequestProfileV2,
+  scenePackRequestProfileV2,
   summarizeDirectorCacheEntryV1,
   isDirectorPlanV1ForLyrics,
   listDirectorProviderModelsV1,
@@ -52,6 +52,7 @@ import {
   sanitizeDirectorBYOKConfigurationV1,
   sanitizeProviderEndpointV1,
   sanitizeMusicMapV1,
+  sanitizeReactiveBusV1,
   sanitizeVocalTimingMapV1,
   type DirectorBYOKConfigurationV1,
   type DirectorBibleV1,
@@ -1335,7 +1336,7 @@ const resolveDirectorCoverageV1 = async (
             },
           },
         },
-        windowIntentRequestProfileV2,
+        scenePackRequestProfileV2,
         fetch,
         rollingSceneProviderBudgetMsV2(rollingGenerationLimitsV2.maximumProviderMs - ledger.providerMs),
         rollingGenerationLimitsV2.maximumProviderAttempts - ledger.providerAttempts,
@@ -1523,6 +1524,10 @@ const audioAnalysisMessages = (capture: AudioAnalysisReplayState): unknown[] => 
     captureID: capture.captureID,
     vocalTimingMap: capture.latestVocalMap,
   }] : []),
+  ...(capture.latestReactiveBus ? [{
+    type: "youtube-music-reactive-bus-update", trackID: capture.trackID,
+    captureID: capture.captureID, reactiveBus: capture.latestReactiveBus,
+  }] : []),
   audioAnalysisStatusMessage(capture),
 ];
 
@@ -1683,6 +1688,7 @@ const sanitizeOffscreenAudioCaptureStatus = (value: unknown): OffscreenAudioCapt
   ) return undefined;
   const latestMusicMap = sanitizeMusicMapV1(status.latestMusicMap);
   const latestVocalMap = sanitizeVocalTimingMapV1(status.latestVocalMap);
+  const latestReactiveBus = sanitizeReactiveBusV1(status.latestReactiveBus);
   return {
     captureID: status.captureID,
     trackID: status.trackID,
@@ -1693,6 +1699,7 @@ const sanitizeOffscreenAudioCaptureStatus = (value: unknown): OffscreenAudioCapt
     ownerScope: status.ownerScope,
     ...(latestMusicMap ? { latestMusicMap } : {}),
     ...(latestVocalMap ? { latestVocalMap } : {}),
+    ...(latestReactiveBus ? { latestReactiveBus } : {}),
   };
 };
 
@@ -1782,6 +1789,7 @@ const captureFromOffscreenStatus = (status: OffscreenAudioCaptureStatus): AudioC
     ownerScope: status.ownerScope,
     latestMusicMap: status.latestMusicMap,
     latestVocalMap: status.latestVocalMap,
+    latestReactiveBus: status.latestReactiveBus,
     mapForwarded,
   };
 };
@@ -2224,6 +2232,7 @@ chromeAPI.runtime.onMessage.addListener((message, sender, sendResponse) => {
     query?: unknown;
     musicMap?: unknown;
     vocalTimingMap?: unknown;
+    reactiveBus?: unknown;
     trackID?: unknown;
     captureID?: unknown;
     tabID?: unknown;
@@ -2240,6 +2249,12 @@ chromeAPI.runtime.onMessage.addListener((message, sender, sendResponse) => {
     seekTargetMs?: unknown;
   };
   const fromOffscreen = sender.url === chromeAPI.runtime.getURL("offscreen.html");
+  const captureForUpdate = (): AudioCaptureState | undefined => fromOffscreen
+    && typeof request.captureID === "string" && typeof request.trackID === "string"
+    && typeof request.tabID === "number" && typeof request.generation === "number"
+    && request.captureID === audioCapture?.captureID && request.trackID === audioCapture.trackID
+    && request.tabID === audioCapture.tabID && request.generation === audioCapture.generation
+    && request.ownerScope === audioCapture.ownerScope ? audioCapture : undefined;
   if (request.type === "youtube-music-source-snapshot") {
     const tabID = sender.tab?.id;
     const previousTrackID = tabID === undefined
@@ -2391,22 +2406,12 @@ chromeAPI.runtime.onMessage.addListener((message, sender, sendResponse) => {
   }
 
   if (request.type === "lyricstage-audio-capture-ready") {
-    if (
-      !fromOffscreen
-      || typeof request.captureID !== "string"
-      || typeof request.trackID !== "string"
-      || typeof request.tabID !== "number"
-      || typeof request.generation !== "number"
-      || request.captureID !== audioCapture?.captureID
-      || request.trackID !== audioCapture.trackID
-      || request.tabID !== audioCapture.tabID
-      || request.generation !== audioCapture.generation
-      || request.ownerScope !== audioCapture.ownerScope
-    ) return;
-    if (audioCapture.status !== "ready") audioCapture.status = "analyzing";
-    audioCapture.reason = undefined;
-    rememberAudioAnalysis(audioCapture);
-    broadcastForSource(audioCapture.tabID, audioAnalysisStatusMessage(audioAnalysisReplayByTab.get(audioCapture.tabID)!));
+    const capture = captureForUpdate();
+    if (!capture) return;
+    if (capture.status !== "ready") capture.status = "analyzing";
+    capture.reason = undefined;
+    rememberAudioAnalysis(capture);
+    broadcastForSource(capture.tabID, audioAnalysisStatusMessage(audioAnalysisReplayByTab.get(capture.tabID)!));
     sendResponse({ ok: true });
     return;
   }
@@ -2448,61 +2453,50 @@ chromeAPI.runtime.onMessage.addListener((message, sender, sendResponse) => {
 
   if (request.type === "lyricstage-audio-map-update") {
     const musicMap = sanitizeMusicMapV1(request.musicMap);
-    if (
-      !fromOffscreen
-      || !musicMap
-      || typeof request.captureID !== "string"
-      || typeof request.trackID !== "string"
-      || typeof request.tabID !== "number"
-      || typeof request.generation !== "number"
-      || request.captureID !== audioCapture?.captureID
-      || request.trackID !== audioCapture.trackID
-      || request.tabID !== audioCapture.tabID
-      || request.generation !== audioCapture.generation
-      || request.ownerScope !== audioCapture.ownerScope
-    ) return;
-    audioCapture.latestMusicMap = musicMap;
+    const capture = captureForUpdate();
+    if (!musicMap || !capture) return;
+    capture.latestMusicMap = musicMap;
     const coverageReady = musicMap.analyzedMs >= Math.min(28_000, Math.max(8_000, musicMap.durationMs * 0.08));
-    if (coverageReady && !audioCapture.mapForwarded) {
-      audioCapture.mapForwarded = true;
-      audioCapture.status = "ready";
-      audioCapture.reason = undefined;
-      broadcastForSource(audioCapture.tabID, {
+    if (coverageReady && !capture.mapForwarded) {
+      capture.mapForwarded = true;
+      capture.status = "ready";
+      capture.reason = undefined;
+      broadcastForSource(capture.tabID, {
         type: "youtube-music-music-map-update",
-        trackID: audioCapture.trackID,
-        captureID: audioCapture.captureID,
+        trackID: capture.trackID,
+        captureID: capture.captureID,
         musicMap,
       });
-      broadcastForSource(audioCapture.tabID, audioAnalysisStatusMessage({ ...audioCapture, status: "ready" }));
+      broadcastForSource(capture.tabID, audioAnalysisStatusMessage({ ...capture, status: "ready" }));
     }
-    rememberAudioAnalysis(audioCapture);
+    rememberAudioAnalysis(capture);
     sendResponse({ ok: true });
     return;
   }
 
   if (request.type === "lyricstage-vocal-timing-update") {
     const vocalTimingMap = sanitizeVocalTimingMapV1(request.vocalTimingMap);
-    if (
-      !fromOffscreen
-      || !vocalTimingMap
-      || typeof request.captureID !== "string"
-      || typeof request.trackID !== "string"
-      || typeof request.tabID !== "number"
-      || typeof request.generation !== "number"
-      || request.captureID !== audioCapture?.captureID
-      || request.trackID !== audioCapture?.trackID
-      || request.tabID !== audioCapture.tabID
-      || request.generation !== audioCapture.generation
-      || request.ownerScope !== audioCapture.ownerScope
-    ) return;
-    audioCapture.latestVocalMap = vocalTimingMap;
-    rememberAudioAnalysis(audioCapture);
-    broadcastForSource(audioCapture.tabID, {
+    const capture = captureForUpdate();
+    if (!vocalTimingMap || !capture) return;
+    capture.latestVocalMap = vocalTimingMap;
+    rememberAudioAnalysis(capture);
+    broadcastForSource(capture.tabID, {
       type: "youtube-music-vocal-timing-update",
-      trackID: audioCapture.trackID,
-      captureID: audioCapture.captureID,
+      trackID: capture.trackID,
+      captureID: capture.captureID,
       vocalTimingMap,
     });
+    sendResponse({ ok: true });
+    return;
+  }
+
+  if (request.type === "lyricstage-reactive-bus-update") {
+    const reactiveBus = sanitizeReactiveBusV1(request.reactiveBus);
+    const capture = captureForUpdate();
+    if (!reactiveBus || !capture) return;
+    capture.latestReactiveBus = reactiveBus;
+    rememberAudioAnalysis(capture);
+    broadcastForSource(capture.tabID, { type: "youtube-music-reactive-bus-update", trackID: capture.trackID, captureID: capture.captureID, reactiveBus });
     sendResponse({ ok: true });
     return;
   }

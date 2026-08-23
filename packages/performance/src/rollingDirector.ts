@@ -648,7 +648,9 @@ export const sanitizeSceneCardV1 = (
     ? undefined
     : signatureCandidate;
   const semanticCueCount = Number.isInteger(complete.semanticCueCount) ? complete.semanticCueCount! : undefined;
-  const compiledV2Budgets = complete.directives !== undefined && semanticCueCount !== undefined;
+  const signatureClipCompiled = complete.gestures.some((gesture) => gesture.id.startsWith("signature-clip-v2:"))
+    && complete.effects.some((effect) => effect.id.startsWith("signature-clip-v2:"));
+  const compiledV2Budgets = complete.directives !== undefined && semanticCueCount !== undefined || signatureClipCompiled;
   if (Boolean(complete.signatureMoment) !== Boolean(signature)
     || (signature && (!complete.signatureMoment || !signatureMomentMatchesAnchor(complete.signatureMoment, signature)))) return null;
   if (signature) {
@@ -656,8 +658,8 @@ export const sanitizeSceneCardV1 = (
     if (gestures.length < 2 || gestures.length > 6 || scales.size < 2 || complete.effects.length < 1 || complete.effects.length > 4
       || complete.consequence.kind !== complete.signatureMoment!.consequence) return null;
   } else {
-    const maximumGestures = compiledV2Budgets ? Math.min(6, Math.max(3, semanticCueCount * 2)) : 2;
-    const maximumEffects = compiledV2Budgets ? Math.min(4, Math.max(2, semanticCueCount)) : 1;
+    const maximumGestures = compiledV2Budgets ? 6 : 2;
+    const maximumEffects = compiledV2Budgets ? 4 : 1;
     if (gestures.length > maximumGestures || complete.effects.length > maximumEffects) return null;
   }
   if (!consequenceKinds.has(complete.consequence.kind) || !clean(complete.consequence.rationale, 320)) return null;

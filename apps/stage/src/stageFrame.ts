@@ -2,11 +2,13 @@ import {
   createEnvironmentFrameV1,
   directorSectionAtV1,
   effectRecipeAtV1,
+  reactiveBusAtTimeV1,
   sampleEnvironmentSceneIntoV1,
   type DirectorPlanV1,
   type EnvironmentFrameV1,
   type EnvironmentSceneV1,
   type PerformanceMotionLawV1,
+  type ReactiveBusV1,
 } from "@lyricstage/performance";
 import type { DirectedStagePaletteV1 } from "@lyricstage/renderer";
 
@@ -40,6 +42,7 @@ export interface StageFrameV1 {
   lightweight: boolean;
   vjMode: boolean;
   showGuides: boolean;
+  reactiveBus?: ReactiveBusV1;
   ambient: StageAmbientFrameV1;
   environment: EnvironmentFrameV1;
 }
@@ -55,6 +58,7 @@ export interface StageFrameInputV1 {
   lightweight: boolean;
   vjMode: boolean;
   showGuides: boolean;
+  reactiveBus?: ReactiveBusV1;
 }
 
 export interface StageFrameBuffersV1 {
@@ -190,9 +194,13 @@ const sampleStageEnvironmentIntoV1 = (
     0.22,
     section.intensity * recipeEnergy * presentationEnergy * (0.72 + world.atmosphere * 0.44),
   ));
+  const reactive = reactiveBusAtTimeV1(input.reactiveBus, input.playbackTimeMs);
+  const reactiveEnergy = reactive
+    ? (0.64 + reactive.energy * 0.48 + reactive.onset * 0.12) * (1 - reactive.silence * 0.72)
+    : 1;
   const energy = vjMode && !reduceMotion
     ? Math.min(1, 0.24 + sectionEnergy * 0.82)
-    : sectionEnergy;
+    : Math.min(1, sectionEnergy * reactiveEnergy);
   const artBloomBase = section.artDirection === "monoImpact"
     ? 0.28
     : section.artDirection === "neonRail" || section.artDirection === "celestialGrid"
@@ -207,13 +215,16 @@ const sampleStageEnvironmentIntoV1 = (
   const artDrift = Math.min(1, artDriftBase * (0.5 + world.fluidity * 1.15));
   sampleEnvironmentSceneIntoV1(environmentScene, timeMs, {
     intensity: energy,
-    bloom: vjMode && !reduceMotion ? Math.min(1, artBloom + 0.14) : artBloom,
-    drift: reduceMotion ? 0 : vjMode ? Math.min(0.96, artDrift + 0.2) : artDrift,
+    bloom: Math.min(1, (vjMode && !reduceMotion ? artBloom + 0.14 : artBloom)
+      * (reactive ? 0.72 + reactive.brightness * 0.38 + reactive.onset * 0.1 : 1)),
+    drift: reduceMotion ? 0 : (vjMode ? Math.min(0.96, artDrift + 0.2) : artDrift)
+      * (reactive ? (0.7 + reactive.stereoWidth * 0.42) * (1 - reactive.silence * 0.9) : 1),
     railOpacity: section.artDirection === "neonRail"
       || section.layout.startsWith("rail")
       || world.motionLaw === "flow"
       || world.motionLaw === "converge"
-      ? vjMode && !reduceMotion ? 0.96 : 0.82
+      ? Math.min(1, (vjMode && !reduceMotion ? 0.96 : 0.82)
+        * (reactive ? 0.76 + reactive.onset * 0.24 + reactive.bass * 0.16 : 1))
       : 0,
   }, energy, target);
   const signal = numericColor(palette.signal, target.orbs[0]?.color ?? target.paper);
@@ -239,6 +250,7 @@ export const sampleStageAmbientIntoV1 = (
   sectionIntensity: number,
   reduceMotion: boolean,
   target: StageAmbientFrameV1,
+  reactiveBus?: ReactiveBusV1,
 ): StageAmbientFrameV1 => {
   const world = plan.world;
   const baseOpacity = plan.source === "local"
@@ -272,6 +284,22 @@ export const sampleStageAmbientIntoV1 = (
     target.artworkScale = lerp(1, 1.018, pulse);
     target.artworkSaturation = lerp(1.02, 1.1, pulse);
     target.artworkBrightness = lerp(0.99, 1.025, pulse);
+  }
+
+  if (reactiveBus && !reduceMotion) {
+    const audible = 1 - reactiveBus.silence;
+    const beatPulse = reactiveBus.beatPhase === null
+      ? 0
+      : (1 - Math.cos(reactiveBus.beatPhase * TAU)) / 2;
+    const weight = reactiveBus.bass * audible;
+    const impact = reactiveBus.onset * audible;
+    target.motifTranslateXPct += (reactiveBus.stereoWidth - 0.5) * 1.6 * audible;
+    target.motifTranslateYPct *= 0.38 + audible * 0.62;
+    target.motifScale += weight * 0.025 + impact * 0.018 + beatPulse * 0.008;
+    target.motifOpacity *= 0.58 + audible * (0.38 + reactiveBus.energy * 0.18);
+    target.artworkScale += weight * 0.012 + impact * 0.008;
+    target.artworkSaturation *= 0.96 + reactiveBus.brightness * 0.1;
+    target.artworkBrightness *= 0.96 + reactiveBus.energy * 0.055 + impact * 0.025;
   }
 
   if (reduceMotion) {
@@ -324,12 +352,14 @@ const createFrame = (input: StageFrameInputV1): StageFrameV1 => ({
   lightweight: input.lightweight,
   vjMode: input.vjMode,
   showGuides: input.showGuides,
+  reactiveBus: reactiveBusAtTimeV1(input.reactiveBus, input.playbackTimeMs),
   ambient: sampleStageAmbientIntoV1(
     input.plan,
     input.timeMs,
     input.sectionIntensity,
     input.reduceMotion,
     createAmbientFrame(),
+    reactiveBusAtTimeV1(input.reactiveBus, input.playbackTimeMs),
   ),
   environment: sampleStageEnvironmentIntoV1(
     input,
@@ -359,7 +389,10 @@ export const writeStageFrameV1 = (
   frame.lightweight = input.lightweight;
   frame.vjMode = input.vjMode;
   frame.showGuides = input.showGuides;
-  sampleStageAmbientIntoV1(input.plan, input.timeMs, input.sectionIntensity, input.reduceMotion, frame.ambient);
+  frame.reactiveBus = reactiveBusAtTimeV1(input.reactiveBus, input.playbackTimeMs);
+  sampleStageAmbientIntoV1(
+    input.plan, input.timeMs, input.sectionIntensity, input.reduceMotion, frame.ambient, frame.reactiveBus,
+  );
   sampleStageEnvironmentIntoV1(input, frame.environment);
   buffers.writeIndex = buffers.writeIndex === 0 ? 1 : 0;
   return frame;
@@ -400,6 +433,10 @@ export const applyStageFrameDOMV1 = (
   host.dataset.worldTexture = plan.world.texture;
   host.dataset.reduceMotion = frame.reduceMotion ? "true" : "false";
   host.dataset.lightweight = frame.lightweight ? "true" : "false";
+  host.dataset.reactiveActive = frame.reactiveBus ? "true" : "false";
+  host.dataset.reactiveEnergy = frame.reactiveBus?.energy.toFixed(4) ?? "0";
+  host.dataset.reactiveBass = frame.reactiveBus?.bass.toFixed(4) ?? "0";
+  host.dataset.reactiveOnset = frame.reactiveBus?.onset.toFixed(4) ?? "0";
   if (motif) {
     motif.style.transform = transformFor(
       ambient.motifTranslateXPct,

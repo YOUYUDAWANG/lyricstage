@@ -374,6 +374,51 @@ describe("YouTube Music bridge snapshot heartbeat", () => {
     expect(current).toBe(beforeStaleMessages);
   });
 
+  it("accepts only the active capture's reactive bus and clears it with capture ownership", () => {
+    let current: YouTubeMusicBridgeModel = {
+      available: true,
+      connected: true,
+      snapshot: snapshot("same-track", 1),
+      musicMapStatus: "analyzing",
+      musicCaptureID: "capture-a",
+    };
+    const bus = {
+      version: "reactive-bus-v1",
+      source: "tab-capture",
+      atMs: 12_000,
+      beatPhase: null,
+      energy: 0.8,
+      bass: 0.9,
+      brightness: 0.7,
+      onset: 0.6,
+      stereoWidth: 0.5,
+      silence: 0,
+    };
+    current = youtubeMusicBridgeModelForAudioMessage(current, {
+      type: "youtube-music-reactive-bus-update",
+      trackID: "same-track",
+      captureID: "capture-a",
+      reactiveBus: bus,
+    });
+    expect(current.reactiveBus?.energy).toBe(0.8);
+
+    const accepted = current;
+    current = youtubeMusicBridgeModelForAudioMessage(current, {
+      type: "youtube-music-reactive-bus-update",
+      trackID: "same-track",
+      captureID: "capture-stale",
+      reactiveBus: { ...bus, energy: 1 },
+    });
+    expect(current).toBe(accepted);
+
+    current = youtubeMusicBridgeModelForAudioMessage(current, {
+      type: "youtube-music-audio-analysis-status",
+      status: "idle",
+      trackID: "same-track",
+    });
+    expect(current.reactiveBus).toBeUndefined();
+  });
+
   it("clears the clock epoch before accepting an older same-track snapshot from a promoted tab", () => {
     const clock = new YouTubeMusicPlaybackClockV0();
     const snapshotA: YouTubeMusicSnapshotV0 = {

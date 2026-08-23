@@ -10,9 +10,11 @@ import {
   type YouTubeMusicTransportActionV0,
 } from "@lyricstage/companion";
 import {
+  sanitizeReactiveBusV1,
   sanitizeMusicMapV1,
   sanitizeVocalTimingMapV1,
   type MusicMapV1,
+  type ReactiveBusV1,
   type VocalTimingMapV1,
 } from "@lyricstage/performance";
 
@@ -251,6 +253,7 @@ export interface YouTubeMusicBridgeModel {
   snapshot?: YouTubeMusicSnapshotV0;
   musicMap?: MusicMapV1;
   vocalTimingMap?: VocalTimingMapV1;
+  reactiveBus?: ReactiveBusV1;
   musicMapStatus: "idle" | "analyzing" | "ready" | "error";
   musicMapError?: string;
   musicCaptureID?: string;
@@ -268,6 +271,7 @@ export const youtubeMusicBridgeModelForSnapshot = (
     snapshot,
     musicMap: sameTrack ? current.musicMap : undefined,
     vocalTimingMap: sameTrack ? current.vocalTimingMap : undefined,
+    reactiveBus: sameTrack ? current.reactiveBus : undefined,
     musicMapStatus: sameTrack ? current.musicMapStatus : "idle",
     musicMapError: sameTrack ? current.musicMapError : undefined,
     musicCaptureID: sameTrack ? current.musicCaptureID : undefined,
@@ -286,7 +290,25 @@ export const youtubeMusicBridgeModelForAudioMessage = (
     captureID?: unknown;
     musicMap?: unknown;
     vocalTimingMap?: unknown;
+    reactiveBus?: unknown;
   };
+  if (audio.type === "youtube-music-reactive-bus-update" && typeof audio.trackID === "string") {
+    const reactiveBus = sanitizeReactiveBusV1(audio.reactiveBus);
+    if (
+      !reactiveBus
+      || current.snapshot?.track.trackID !== audio.trackID
+      || (
+        current.musicCaptureID
+        && typeof audio.captureID === "string"
+        && current.musicCaptureID !== audio.captureID
+      )
+    ) return current;
+    return {
+      ...current,
+      reactiveBus,
+      ...(typeof audio.captureID === "string" ? { musicCaptureID: audio.captureID } : {}),
+    };
+  }
   if (audio.type === "youtube-music-music-map-update" && typeof audio.trackID === "string") {
     const musicMap = sanitizeMusicMapV1(audio.musicMap);
     if (
@@ -350,7 +372,7 @@ export const youtubeMusicBridgeModelForAudioMessage = (
       : undefined,
     ...(captureID ? { musicCaptureID: captureID } : {}),
     ...(replacingCapture || audio.status === "idle" || audio.status === "error"
-      ? { musicMap: undefined, vocalTimingMap: undefined }
+      ? { musicMap: undefined, vocalTimingMap: undefined, reactiveBus: undefined }
       : {}),
     ...(audio.status === "idle" ? { musicCaptureID: undefined } : {}),
   };
@@ -391,6 +413,7 @@ export const useYouTubeMusicBridge = () => {
       if (
         audio.type === "youtube-music-music-map-update"
         || audio.type === "youtube-music-vocal-timing-update"
+        || audio.type === "youtube-music-reactive-bus-update"
         || audio.type === "youtube-music-audio-analysis-status"
       ) {
         setModel((current) => youtubeMusicBridgeModelForAudioMessage(current, message));

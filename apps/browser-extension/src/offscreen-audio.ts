@@ -1,8 +1,10 @@
 import {
   compileMusicMapV1,
+  compileReactiveBusV1,
   compileVocalTimingSampleV1,
   compileVocalTimingMapV1,
   type MusicFeatureFrameV1,
+  type ReactiveBusV1,
   type VocalTimingSampleV1,
 } from "@lyricstage/performance";
 
@@ -31,6 +33,8 @@ interface CaptureSession {
   vocalSamplesByBucket: Map<number, VocalTimingSampleV1>;
   previousSpectrum: Float32Array;
   previousCenterSpectrum: Float32Array;
+  latestReactiveBus?: ReactiveBusV1;
+  lastReactivePublishAtMs: number;
   clock: CaptureClock;
   interval: ReturnType<typeof setInterval>;
   publishInterval: ReturnType<typeof setInterval>;
@@ -227,6 +231,15 @@ const sample = () => {
   const stereoWidth = unit(0.18 + Math.abs(treble - mid) * 0.55);
   const frame: MusicFeatureFrameV1 = { atMs, energy, bass, mid, treble, brightness, flux, onset, stereoWidth };
   current.framesByBucket.set(Math.round(atMs / 33), frame);
+  const reactiveBus = compileReactiveBusV1(frame);
+  if (reactiveBus && (atMs < current.lastReactivePublishAtMs || atMs - current.lastReactivePublishAtMs >= 30)) {
+    current.latestReactiveBus = reactiveBus;
+    current.lastReactivePublishAtMs = atMs;
+    void runtime.sendMessage({
+      type: "lyricstage-reactive-bus-update", captureID: current.captureID, trackID: current.trackID,
+      tabID: current.tabID, generation: current.generation, ownerScope: current.ownerScope, reactiveBus,
+    }).catch(() => undefined);
+  }
 
   const centerMid = bandEnergy(centerSpectrum, bin(180), bin(3_600));
   const centerBass = bandEnergy(centerSpectrum, bin(45), bin(180));
@@ -356,6 +369,7 @@ const start = async (
       vocalSamplesByBucket: new Map(),
       previousSpectrum: new Float32Array(analyser.frequencyBinCount),
       previousCenterSpectrum: new Float32Array(centerAnalyser.frequencyBinCount),
+      lastReactivePublishAtMs: Number.NEGATIVE_INFINITY,
       clock,
       interval: setInterval(sample, 1000 / 30),
       publishInterval: setInterval(publish, 4_000),
@@ -410,6 +424,7 @@ const captureStatus = () => {
       status: coverageReady ? "ready" : "analyzing",
       ...(latestMusicMap ? { latestMusicMap } : {}),
       ...(latestVocalMap ? { latestVocalMap } : {}),
+      ...(current.latestReactiveBus ? { latestReactiveBus: current.latestReactiveBus } : {}),
     };
   }
   const pending = pendingCapture;

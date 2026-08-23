@@ -74,6 +74,9 @@ const reviewWarningLabel = (warning: string): string => ({
   "repeated-tuple": "连续三首元组重复",
   "coverage-gap": "末段覆盖不足",
   "local-repair-heavy": "本地修复较多",
+  "scene-density-low": "场景密度偏低",
+  "line-direction-low": "逐句导演覆盖偏低",
+  "signature-choreography-low": "招牌编舞不足",
 }[warning] ?? warning);
 
 const readConnection = (value: unknown): ConnectionStatus => {
@@ -625,7 +628,7 @@ export const SettingsApp = () => {
                       <details className="director-review-row" key={`${summary.trackIDDisplay}:${summary.createdAtUnixMs}`}>
                         <summary>
                           <span><strong>{summary.trackTitle}</strong><small>{summary.trackArtist} · {summary.trackIDDisplay}</small></span>
-                          <span className="review-metrics">{summary.coveragePercent}% · M{summary.signatureMomentCount} G{summary.gestureCounts.total} E{summary.effectCount} L{summary.layoutTransitionCount}</span>
+                          <span className="review-metrics">{summary.coveragePercent}% · S{summary.sceneCardCount} A{summary.semanticDirectiveCount} C{summary.signatureChoreographyCount ?? 0}</span>
                           <span className="review-motif">{summary.motifFamily}</span>
                           <span className="review-warnings">{summary.warnings.length ? summary.warnings.map(reviewWarningLabel).join(" · ") : "无提醒"}</span>
                         </summary>
@@ -637,6 +640,20 @@ export const SettingsApp = () => {
                           <div><dt>Gestures</dt><dd>glyph {summary.gestureCounts.glyph} / token {summary.gestureCounts.token} / phrase {summary.gestureCounts.phrase}</dd></div>
                           <div><dt>Effects</dt><dd>{Object.entries(summary.effectPrimitiveCounts).map(([name, count]) => `${name} ${count}`).join(" / ") || "0"}</dd></div>
                           <div><dt>Coverage</dt><dd>{summary.sceneCardCount} cards · {summary.missingRanges.length} missing ranges</dd></div>
+                          <div className="director-scene-review"><dt>Scene timeline</dt><dd>
+                            <span className="director-scene-timeline" aria-label={`${summary.sceneTimeline?.length ?? 0} 个演出片段`}>
+                              {(summary.sceneTimeline ?? []).map((scene, index) => (
+                                <span
+                                  key={`${scene.fromMs}:${index}`}
+                                  data-purpose={scene.purpose}
+                                  data-signature={scene.signatureClip ? "true" : undefined}
+                                  style={{ flexGrow: Math.max(1, scene.toMs - scene.fromMs) }}
+                                  title={`${Math.round(scene.fromMs / 100) / 10}s–${Math.round(scene.toMs / 100) / 10}s · ${scene.purpose} · ${scene.lineActionCount} 行动作${scene.signatureClip ? ` · ${scene.signatureClip}` : ""}`}
+                                />
+                              ))}
+                            </span>
+                            <span className="director-scene-legend">{(summary.sceneTimeline ?? []).map((scene, index) => `${index + 1}.${scene.purpose}${scene.signatureClip ? `/${scene.signatureClip}` : ""}`).join(" · ") || "无片段"}</span>
+                          </dd></div>
                           <div><dt>Timing</dt><dd>{summary.timing ? `${summary.timing.cache} · ${summary.timing.totalMs}ms · provider ${summary.timing.providerMs}ms · ${summary.timing.attempts} attempts` : "无记录"}</dd></div>
                           <div><dt>Repairs</dt><dd>{summary.localRepairFlags.join(" / ") || "none"}</dd></div>
                         </dl>
@@ -660,7 +677,7 @@ export const SettingsApp = () => {
               <details className="developer-disclosure embedded-disclosure">
                 <summary className="developer-summary"><span><strong>开发者与诊断</strong><small>实验性导演运行模式</small></span></summary>
                 <div className="developer-body">
-                  <label className="settings-switch"><span><strong>Rolling Director V2</strong><small>AI 只给稀疏语义 Cue，本地编译演出；Off 使用旧导演，Shadow 只缓存，On 才渲染。</small></span><select data-rolling-director-v1="" value={preferences.rollingDirectorV1} disabled={busy === "performance"} onChange={(event) => void onTogglePreference({ rollingDirectorV1: event.target.value as ExtensionPreferencesV0["rollingDirectorV1"] })}><option value="off">Off · legacy</option><option value="shadow">Shadow · audit only</option><option value="on">On · sparse cues</option></select></label>
+                  <label className="settings-switch"><span><strong>Rolling Director V2</strong><small>AI 编写多场景、逐句语义与招牌编舞选择，本地编译为安全演出；Off 使用旧导演，Shadow 只缓存，On 才渲染。</small></span><select data-rolling-director-v1="" value={preferences.rollingDirectorV1} disabled={busy === "performance"} onChange={(event) => void onTogglePreference({ rollingDirectorV1: event.target.value as ExtensionPreferencesV0["rollingDirectorV1"] })}><option value="off">Off · legacy</option><option value="shadow">Shadow · audit only</option><option value="on">On · layered director</option></select></label>
                 </div>
               </details>
             </section>

@@ -1,4 +1,4 @@
-import type { MusicMapV1, VocalTimingMapV1 } from "@lyricstage/performance";
+import type { MusicMapV1, ReactiveBusV1, VocalTimingMapV1 } from "@lyricstage/performance";
 
 export interface ExtensionPort {
   name: string;
@@ -66,6 +66,7 @@ export interface AudioCaptureState {
   reason?: string;
   latestMusicMap?: MusicMapV1;
   latestVocalMap?: VocalTimingMapV1;
+  latestReactiveBus?: ReactiveBusV1;
   mapForwarded: boolean;
   expiresAtUnixMs?: number;
   startTask?: Promise<void>;
@@ -86,6 +87,7 @@ export interface OffscreenAudioCaptureStatus {
   ownerScope: AudioCaptureOwnerScope;
   latestMusicMap?: MusicMapV1;
   latestVocalMap?: VocalTimingMapV1;
+  latestReactiveBus?: ReactiveBusV1;
 }
 
 export type AudioAnalysisReplayState = Omit<AudioCaptureState, "status" | "startTask"> & {

@@ -276,6 +276,14 @@ button:disabled, input:disabled, select:disabled { opacity: 0.48; cursor: not-al
 .director-review-row dl div { min-width: 0; }
 .director-review-row dt { color: #8a837a; font-size: 11px; }
 .director-review-row dd { margin: 3px 0 0; overflow-wrap: anywhere; font-size: 12px; }
+.director-scene-review { grid-column: 1 / -1; }
+.director-scene-timeline { display: flex; gap: 2px; height: 16px; margin: 5px 0 7px; overflow: hidden; border-radius: 4px; background: #eeeae2; }
+.director-scene-timeline > span { min-width: 3px; background: #b9b1a5; }
+.director-scene-timeline > span[data-purpose="turn"] { background: #d56c4e; }
+.director-scene-timeline > span[data-purpose="resolve"] { background: #586f67; }
+.director-scene-timeline > span[data-purpose="aftermath"] { background: #8c83a0; }
+.director-scene-timeline > span[data-signature="true"] { box-shadow: inset 0 0 0 2px #2d2822; }
+.director-scene-legend { display: block; color: #756f67; font-size: 11px; line-height: 1.5; }
 
 @media (max-width: 820px) {
   .director-review-row > summary { grid-template-columns: 1fr; gap: 5px; }

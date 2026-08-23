@@ -16,7 +16,7 @@ LyricStage owns the Web Performance Runtime, Manifest V3 browser extension, YouT
 
 The Bilibili browser provider is explicitly deferred. Do not start it or generalize the YouTube Music protocol unless the user reopens that scope.
 
-The current product line is `0.3.7`:
+The current product line is `0.4.0`:
 
 - YouTube Music retains playback, account state, transport, and the authoritative clock.
 - The extension owns only its Shadow DOM and bounded performance state.

@@ -11,6 +11,7 @@ import {
   stagePresentationAtV1,
   type DirectorPlanHandoffV1,
   type DirectorPlanV1,
+  type ReactiveBusV1,
   type SceneCardV1,
 } from "@lyricstage/performance";
 import {
@@ -58,6 +59,7 @@ interface StageCanvasProps {
   directorMode?: "legacy" | "rolling";
   bibleSource?: "cache" | "network" | "local";
   rollingCards?: readonly SceneCardV1[];
+  reactiveBus?: ReactiveBusV1;
   clock: PlaybackClockV0;
   continuous: boolean;
   displayTimeMs: number;
@@ -116,6 +118,7 @@ export function StageCanvas({
   directorMode = "legacy",
   bibleSource,
   rollingCards = [],
+  reactiveBus,
   clock,
   continuous,
   displayTimeMs,
@@ -154,11 +157,13 @@ export function StageCanvas({
   const displayTimeRef = useRef(displayTimeMs);
   const frameTimeRef = useRef(lyricsTimeForPlaybackMs(displayTimeMs, lyricsOffsetMs, durationMs));
   const frameBuffersRef = useRef<StageFrameBuffersV1 | null>(null);
+  const reactiveBusRef = useRef(reactiveBus);
   const handoffRef = useRef<DirectorPlanHandoffV1>({ active: entryDirectorPlan });
   const [artworkPalette, setArtworkPalette] = useState<DirectedStagePaletteV1 | undefined>();
   const [artworkCandidateIndex, setArtworkCandidateIndex] = useState(0);
   const [artworkAspect, setArtworkAspect] = useState(1);
   displayTimeRef.current = displayTimeMs;
+  reactiveBusRef.current = reactiveBus;
   const normalizedArtworkCandidates = useMemo(() => artworkCandidates(artworkURL), [artworkURL]);
   const normalizedArtworkURL = normalizedArtworkCandidates[artworkCandidateIndex];
   const coverInitial = Array.from(title?.trim() || "L")[0]?.toUpperCase() ?? "L";
@@ -423,6 +428,7 @@ export function StageCanvas({
         lightweight,
         vjMode,
         showGuides,
+        reactiveBus: reactiveBusRef.current,
       };
       if (!frameBuffersRef.current) frameBuffersRef.current = createStageFrameBuffersV1(stageFrameInput);
       const stageFrame = writeStageFrameV1(frameBuffersRef.current, stageFrameInput);

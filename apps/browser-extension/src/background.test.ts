@@ -628,7 +628,7 @@ describe("YouTube Music background routing", () => {
     const positiveSceneCache = storage.get("lyricstage-director-scene-cache-v1") as Record<string, any>;
     expect(Object.values(positiveSceneCache)).not.toHaveLength(0);
     expect(Object.values(positiveSceneCache).every((entry) =>
-      entry.provenance === "ai-positive" && entry.schemaVersion === "window-intent-v2")).toBe(true);
+      entry.provenance === "ai-positive" && entry.schemaVersion === "scene-pack-v2")).toBe(true);
     const stored = JSON.stringify({
       bible: storage.get("lyricstage-director-bible-cache-v1"),
       scenes: storage.get("lyricstage-director-scene-cache-v1"),
@@ -655,7 +655,7 @@ describe("YouTube Music background routing", () => {
       summaries: [{ version: "director-cache-summary-v1", trackTitle: track.title, trackArtist: track.artist }],
     });
     expect(review.summaries).toHaveLength(1);
-    expect(review.summaries[0]).toMatchObject({ compilerVersion: "window-intent-v2" });
+    expect(review.summaries[0]).toMatchObject({ compilerVersion: "scene-pack-v2" });
     expect(review.summaries[0].semanticDirectiveCount).toBeGreaterThan(0);
     expect(JSON.stringify(review)).not.toMatch(/rolling-secret|api\.openai\.com|fixture line|rationale|prompt|response|cookie/ui);
     expect(review.summaries[0]).not.toHaveProperty("bible");

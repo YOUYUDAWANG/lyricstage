@@ -1,6 +1,10 @@
 import { describe, expect, it } from "vitest";
 import { lyricFixtures } from "@lyricstage/contracts";
-import { compileEnvironmentSceneV1, compileLocalDirectorPlanV1 } from "@lyricstage/performance";
+import {
+  compileEnvironmentSceneV1,
+  compileLocalDirectorPlanV1,
+  type ReactiveBusV1,
+} from "@lyricstage/performance";
 import { directedPaletteForIndexV1 } from "@lyricstage/renderer";
 import {
   createStageFrameBuffersV1,
@@ -11,6 +15,18 @@ import {
 const plan = compileLocalDirectorPlanV1(lyricFixtures.longSongStructure);
 const palette = directedPaletteForIndexV1(0);
 const environmentScene = compileEnvironmentSceneV1(plan.recordingID, plan.planIdentity);
+const reactiveBus = (atMs: number): ReactiveBusV1 => ({
+  version: "reactive-bus-v1",
+  source: "tab-capture",
+  atMs,
+  beatPhase: null,
+  energy: 0.82,
+  bass: 0.9,
+  brightness: 0.74,
+  onset: 0.68,
+  stereoWidth: 0.7,
+  silence: 0,
+});
 const input = (timeMs: number, changes: Partial<StageFrameInputV1> = {}): StageFrameInputV1 => ({
   playbackTimeMs: timeMs,
   timeMs,
@@ -82,5 +98,37 @@ describe("StageFrameV1", () => {
         .map((value) => value.toFixed(5)).join(":");
     });
     expect(new Set(silhouettes).size).toBe(silhouettes.length);
+  });
+
+  it("uses a fresh audio snapshot without making frame history authoritative", () => {
+    const targetTimeMs = 42_000;
+    const reactiveInput = input(targetTimeMs, { reactiveBus: reactiveBus(targetTimeMs) });
+    const direct = writeStageFrameV1(createStageFrameBuffersV1(input(0)), reactiveInput);
+    const replayBuffers = createStageFrameBuffersV1(input(0));
+    writeStageFrameV1(replayBuffers, input(12_000, { reactiveBus: reactiveBus(12_000) }));
+    const replay = writeStageFrameV1(replayBuffers, reactiveInput);
+    const baseline = writeStageFrameV1(createStageFrameBuffersV1(input(0)), input(targetTimeMs));
+    expect(replay.ambient).toEqual(direct.ambient);
+    expect(replay.environment).toEqual(direct.environment);
+    expect(direct.ambient.artworkScale).toBeGreaterThan(baseline.ambient.artworkScale);
+    expect(direct.reactiveBus?.atMs).toBe(targetTimeMs);
+  });
+
+  it("ignores stale audio snapshots after seek and keeps reduced motion static", () => {
+    const targetTimeMs = 42_000;
+    const stale = writeStageFrameV1(
+      createStageFrameBuffersV1(input(0)),
+      input(targetTimeMs, { reactiveBus: reactiveBus(38_000) }),
+    );
+    const baseline = writeStageFrameV1(createStageFrameBuffersV1(input(0)), input(targetTimeMs));
+    expect(stale.reactiveBus).toBeUndefined();
+    expect(stale.ambient).toEqual(baseline.ambient);
+
+    const reduced = writeStageFrameV1(
+      createStageFrameBuffersV1(input(0, { reduceMotion: true })),
+      input(targetTimeMs, { reduceMotion: true, reactiveBus: reactiveBus(targetTimeMs) }),
+    );
+    expect(reduced.ambient.motifTranslateXPct).toBe(0);
+    expect(reduced.ambient.motifRotationDeg).toBe(0);
   });
 });

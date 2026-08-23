@@ -89,8 +89,8 @@ describe("rolling director core", () => {
       "actCount", "artDirections", "baseLayout", "bibleIdentityPrefix", "biblePresent", "cacheEpoch", "cacheVersion", "compilerVersion",
       "continuityJustificationAccepted", "coveragePercent", "createdAtUnixMs", "durationMs", "effectCount",
       "effectPrimitiveCounts", "expiresAtUnixMs", "gestureCounts", "layoutTransitionCount", "lineCount",
-      "localRepairFlags", "missingRanges", "motifFamily", "quietSharePercent", "reachedFinalWindow", "sceneCardCount", "semanticDirectiveCount",
-      "signatureMomentCount", "source", "timing", "trackArtist", "trackIDDisplay", "trackTitle", "version", "warnings", "world",
+      "localRepairFlags", "missingRanges", "motifFamily", "quietSharePercent", "reachedFinalWindow", "sceneCardCount", "sceneTimeline", "semanticDirectiveCount",
+      "signatureChoreographyCount", "signatureMomentCount", "source", "timing", "trackArtist", "trackIDDisplay", "trackTitle", "version", "warnings", "world",
     ]);
     const malformed = [
       { ...summary, world: { ...summary.world, spatialMode: { endpoint: "https://secret.invalid" } } },
@@ -127,7 +127,8 @@ describe("rolling director core", () => {
     const entries = [0, 1, 2].map((offset) => ({ ...sparse, createdAtUnixMs: 3_000 - offset, trackIDDisplay: `abcdef0${offset}` }));
     const analyzed = analyzeDirectorCacheSummariesV1(entries);
     expect(analyzed[0]!.warnings).toEqual([
-      "minimum-budget", "single-scale", "static-without-evidence", "repeated-tuple", "coverage-gap", "local-repair-heavy",
+      "minimum-budget", "scene-density-low", "line-direction-low", "signature-choreography-low", "single-scale",
+      "static-without-evidence", "repeated-tuple", "coverage-gap", "local-repair-heavy",
     ]);
     expect(analyzeDirectorCacheSummariesV1(entries)).toEqual(analyzed);
     expect(sanitizeDirectorCacheSummaryV1({ version: "director-cache-summary-v1", apiKey: "secret" })).toBeNull();
