@@ -9,7 +9,9 @@ import {
   linePhase,
   mapVoiceClass,
   resolveColumnSurfaceState,
+  toggledColumnTool,
   type AutomaticLyricsStatus,
+  type ColumnTool,
   type ColumnSurfaceState,
 } from "./columnModel";
 import { activeScrollKey, shouldScrollForActiveChange } from "./embeddedFullscreen";
@@ -41,7 +43,6 @@ export interface ColumnStageViewProps {
   playbackState?: "playing" | "paused" | "buffering" | "ended";
   onEnterFullscreen: () => void;
   onChooseCandidate: (candidate: LyricsCandidateV0) => void;
-  onImportLyrics: (file?: File) => void;
   onShowVersions: () => void;
   showVersionPicker: boolean;
   manualSearchPending: boolean;
@@ -49,10 +50,7 @@ export interface ColumnStageViewProps {
   canEnterFullscreen: boolean;
   lightweight: boolean;
   vocalTimingMap?: VocalTimingMapV1;
-  vocalTimingStatus: "idle" | "analyzing" | "ready" | "error";
-  vocalTimingError?: string;
   lyricsOffsetMs: number;
-  onToggleVocalTiming: () => void;
   onSetLyricsOffset: (offsetMs: number) => void;
   onAlignCurrentLine: (lineIndex: number) => void;
   onSeekLine: (timeMs: number) => void;
@@ -67,9 +65,9 @@ const stateCopy = (state: ColumnSurfaceState, message: string): { title: string;
     case "candidates":
       return { title: "选择歌词版本", body: message || "找到多个候选版本，请选择一个采用。" };
     case "miss":
-      return { title: "未找到同步歌词", body: message || "可导入本地 LRC 或 Lyric JSON 歌词文件。" };
+      return { title: "未找到同步歌词", body: message || "可使用手动搜索修改歌名或歌手后重试。" };
     case "error":
-      return { title: "搜索失败", body: message || "歌词搜索遇到问题，仍可手动导入本地歌词。" };
+      return { title: "搜索失败", body: message || "歌词搜索遇到问题，可使用手动搜索重试。" };
     case "prelude":
       return { title: "前奏中", body: "……" };
     case "interlude":
@@ -84,20 +82,6 @@ const stateCopy = (state: ColumnSurfaceState, message: string): { title: string;
       return { title: "", body: "" };
   }
 };
-
-const ImportControl = ({ onImportLyrics }: { onImportLyrics: (file?: File) => void }) => (
-  <label className="column-import-button" title="导入本地 LRC 或 JSON 歌词文件">
-    <span>导入 LRC / JSON</span>
-    <input
-      type="file"
-      accept=".lrc,.json,text/plain,application/json"
-      onChange={(event) => {
-        onImportLyrics(event.target.files?.[0]);
-        event.currentTarget.value = "";
-      }}
-    />
-  </label>
-);
 
 export function ColumnStageView({
   bridgeAvailable,
@@ -118,7 +102,6 @@ export function ColumnStageView({
   playbackState,
   onEnterFullscreen,
   onChooseCandidate,
-  onImportLyrics,
   onShowVersions,
   showVersionPicker,
   manualSearchPending,
@@ -126,10 +109,7 @@ export function ColumnStageView({
   canEnterFullscreen,
   lightweight,
   vocalTimingMap,
-  vocalTimingStatus,
-  vocalTimingError,
   lyricsOffsetMs,
-  onToggleVocalTiming,
   onSetLyricsOffset,
   onAlignCurrentLine,
   onSeekLine,
@@ -140,8 +120,7 @@ export function ColumnStageView({
   const lastActiveKeyRef = useRef<string>("");
   const enterFullscreenRef = useRef(onEnterFullscreen);
   enterFullscreenRef.current = onEnterFullscreen;
-  const [showManualSearch, setShowManualSearch] = useState(false);
-  const [showTimingAdjust, setShowTimingAdjust] = useState(false);
+  const [activeTool, setActiveTool] = useState<ColumnTool | null>(null);
   const [showToolsMenu, setShowToolsMenu] = useState(false);
   const [manualTitle, setManualTitle] = useState(title);
   const [manualArtist, setManualArtist] = useState(artist);
@@ -152,15 +131,18 @@ export function ColumnStageView({
   useEffect(() => {
     setManualTitle(title);
     setManualArtist(artist);
-    setShowManualSearch(false);
-    setShowTimingAdjust(false);
     setShowToolsMenu(false);
   }, [title, artist]);
 
   useEffect(() => {
+    if (activeTool === "versions" && !showVersionPicker) setActiveTool(null);
+  }, [activeTool, showVersionPicker]);
+
+  useEffect(() => {
     if (!showToolsMenu) return;
     const closeOnOutsidePointer = (event: PointerEvent) => {
-      if (event.target instanceof Node && !toolbarRef.current?.contains(event.target)) {
+      const toolbar = toolbarRef.current;
+      if (toolbar && !event.composedPath().includes(toolbar)) {
         setShowToolsMenu(false);
       }
     };
@@ -220,19 +202,9 @@ export function ColumnStageView({
     ),
     [lineSegments],
   );
-  const vocalTimingActive = vocalTimingStatus === "analyzing" || vocalTimingStatus === "ready";
-  const hasTrustedVocalTiming = Boolean(
-    vocalTimingMap?.samples.some((sample) => sample.confidence >= 0.28),
-  );
   const estimatedTimingLabel = !hasMatchingLyrics || !usesEstimatedTiming
     ? ""
-    : vocalTimingStatus === "error"
-      ? ` · 人声失败${vocalTimingError ? `：${vocalTimingError}` : ""}`
-      : hasTrustedVocalTiming
-      ? " · 人声增强"
-      : vocalTimingActive
-        ? " · 人声采集中"
-        : " · 轻量逐字";
+    : " · 轻量逐字";
 
   const activeIndices = useMemo(() => {
     if (!timeline) return new Set<number>();
@@ -289,9 +261,20 @@ export function ColumnStageView({
       surface === "interlude" ||
       surface === "paused" ||
       surface === "disconnected");
-  const showStateCard = surface !== "singing" || showVersionPicker || showManualSearch;
+  const showStateCard = surface !== "singing";
   const limitedCandidates = candidates.slice(0, 5);
-  const showImport = surface === "miss" || surface === "error";
+
+  const selectTool = (selected: ColumnTool) => {
+    const next = toggledColumnTool(activeTool, selected);
+    if ((next === "versions") !== showVersionPicker) onShowVersions();
+    setActiveTool(next);
+    setShowToolsMenu(false);
+  };
+
+  const closeTool = () => {
+    if (activeTool === "versions" && showVersionPicker) onShowVersions();
+    setActiveTool(null);
+  };
 
   return (
     <div
@@ -326,7 +309,7 @@ export function ColumnStageView({
             className="column-tool-button column-fullscreen-tool"
             disabled={!canEnterFullscreen}
             aria-label="进入全屏舞台"
-            title={canEnterFullscreen ? "进入全屏舞台 (F)" : "请先匹配或导入歌词"}
+            title={canEnterFullscreen ? "进入全屏舞台 (F)" : "请先匹配同步歌词"}
             onClick={onEnterFullscreen}
           >
             <svg viewBox="0 0 24 24" width="14" height="14" fill="currentColor" aria-hidden="true">
@@ -337,72 +320,134 @@ export function ColumnStageView({
             <div className="column-tools-menu" role="group" aria-label="更多歌词工具">
               <button
                 type="button"
-                className={vocalTimingActive ? "is-active" : ""}
-                disabled={!bridgeAvailable || !hasSnapshot || !usesEstimatedTiming}
-                onClick={() => { onToggleVocalTiming(); setShowToolsMenu(false); }}
-              >
-                <span>≈</span><div><strong>人声增强</strong><small>{vocalTimingStatus === "error" ? vocalTimingError || "启动失败" : vocalTimingActive ? "正在本机分析" : "修正估算逐字"}</small></div>
-              </button>
-              <button
-                type="button"
-                className={showTimingAdjust || lyricsOffsetMs !== 0 ? "is-active" : ""}
+                className={activeTool === "timing" || lyricsOffsetMs !== 0 ? "is-active" : ""}
                 disabled={!hasMatchingLyrics}
-                onClick={() => { setShowTimingAdjust((value) => !value); setShowToolsMenu(false); }}
+                onClick={() => selectTool("timing")}
               >
                 <span>◷</span><div><strong>歌词时间轴</strong><small>{formatLyricsOffset(lyricsOffsetMs)}</small></div>
               </button>
-              <button type="button" className={showManualSearch ? "is-active" : ""} onClick={() => { setShowManualSearch((value) => !value); setShowToolsMenu(false); }}>
+              <button type="button" className={activeTool === "search" ? "is-active" : ""} onClick={() => selectTool("search")}>
                 <span>⌕</span><div><strong>手动搜索</strong><small>按歌名和歌手重搜</small></div>
               </button>
-              <button type="button" className={showVersionPicker ? "is-active" : ""} onClick={() => { onShowVersions(); setShowToolsMenu(false); }}>
+              <button type="button" className={activeTool === "versions" ? "is-active" : ""} onClick={() => selectTool("versions")}>
                 <span>▱</span><div><strong>歌词版本</strong><small>查看其他匹配结果</small></div>
               </button>
-              <label className="column-menu-import">
-                <span>⇧</span><div><strong>导入歌词</strong><small>LRC / LyricStage JSON</small></div>
-                <input type="file" accept=".lrc,.json,text/plain,application/json" onChange={(event) => {
-                  onImportLyrics(event.target.files?.[0]);
-                  event.currentTarget.value = "";
-                  setShowToolsMenu(false);
-                }} />
-              </label>
             </div>
           )}
         </div>
       </header>
 
-      {showTimingAdjust && hasMatchingLyrics && (
-        <div className="column-timing-adjust" role="group" aria-label="歌词时间轴调整">
-          <button
-            type="button"
-            className="column-timing-auto"
-            disabled={primaryActiveIndex < 0 || disconnected || playbackState === "ended"}
-            title="听到当前高亮句真正开唱时点击；也可以先暂停再对齐"
-            onClick={() => onAlignCurrentLine(primaryActiveIndex)}
-          >
-            当前句对齐
-          </button>
-          <button
-            type="button"
-            onClick={() => onSetLyricsOffset(clampLyricsOffsetMs(lyricsOffsetMs - LYRICS_OFFSET_STEP_MS))}
-          >
-            提前 0.1s
-          </button>
-          <strong aria-live="polite">{formatLyricsOffset(lyricsOffsetMs)}</strong>
-          <button
-            type="button"
-            onClick={() => onSetLyricsOffset(clampLyricsOffsetMs(lyricsOffsetMs + LYRICS_OFFSET_STEP_MS))}
-          >
-            延后 0.1s
-          </button>
-          <button
-            type="button"
-            className="column-timing-reset"
-            disabled={lyricsOffsetMs === 0}
-            onClick={() => onSetLyricsOffset(0)}
-          >
-            归零
-          </button>
-        </div>
+      {activeTool && (
+        <section className="column-tool-panel" role="dialog" aria-label={{
+          timing: "歌词时间轴",
+          search: "手动搜索歌词",
+          versions: "选择歌词版本",
+        }[activeTool]}>
+          <header className="column-tool-panel-header">
+            <strong>{{
+              timing: "歌词时间轴",
+              search: "手动搜索歌词",
+              versions: "选择歌词版本",
+            }[activeTool]}</strong>
+            <button type="button" aria-label="关闭歌词工具" onClick={closeTool}>×</button>
+          </header>
+
+          {activeTool === "timing" && hasMatchingLyrics && (
+            <div className="column-timing-adjust" role="group" aria-label="歌词时间轴调整">
+              <button
+                type="button"
+                className="column-timing-auto"
+                disabled={primaryActiveIndex < 0 || disconnected || playbackState === "ended"}
+                title="听到当前高亮句真正开唱时点击；也可以先暂停再对齐"
+                onClick={() => onAlignCurrentLine(primaryActiveIndex)}
+              >
+                当前句对齐
+              </button>
+              <button
+                type="button"
+                onClick={() => onSetLyricsOffset(clampLyricsOffsetMs(lyricsOffsetMs - LYRICS_OFFSET_STEP_MS))}
+              >
+                提前 0.1s
+              </button>
+              <strong aria-live="polite">{formatLyricsOffset(lyricsOffsetMs)}</strong>
+              <button
+                type="button"
+                onClick={() => onSetLyricsOffset(clampLyricsOffsetMs(lyricsOffsetMs + LYRICS_OFFSET_STEP_MS))}
+              >
+                延后 0.1s
+              </button>
+              <button
+                type="button"
+                className="column-timing-reset"
+                disabled={lyricsOffsetMs === 0}
+                onClick={() => onSetLyricsOffset(0)}
+              >
+                归零
+              </button>
+            </div>
+          )}
+
+          {activeTool === "search" && (
+            <form
+              className="column-manual-search"
+              data-testid="column-manual-search"
+              onSubmit={(event) => {
+                event.preventDefault();
+                onManualSearch(manualTitle, manualArtist);
+              }}
+            >
+              <label>
+                <span>歌名</span>
+                <input
+                  type="search"
+                  value={manualTitle}
+                  maxLength={500}
+                  required
+                  placeholder="例如：死別"
+                  onChange={(event) => setManualTitle(event.target.value)}
+                />
+              </label>
+              <label>
+                <span>歌手</span>
+                <input
+                  type="search"
+                  value={manualArtist}
+                  maxLength={500}
+                  placeholder="可留空，例如：シャノン"
+                  onChange={(event) => setManualArtist(event.target.value)}
+                />
+              </label>
+              <div className="column-manual-search-actions">
+                <button type="submit" disabled={manualSearchPending || !manualTitle.trim()}>
+                  {manualSearchPending ? "搜索中…" : "搜索"}
+                </button>
+              </div>
+            </form>
+          )}
+
+          {activeTool === "versions" && (
+            <div className="column-version-panel" data-testid="column-version-panel">
+              {limitedCandidates.length > 0 ? (
+                <div className="column-candidate-list">
+                  {limitedCandidates.map((candidate) => (
+                    <button
+                      type="button"
+                      key={`version:${candidate.provider}:${candidate.id}`}
+                      onClick={() => onChooseCandidate(candidate)}
+                    >
+                      <span>{candidate.title}</span>
+                      <small>
+                        {lyricsProviderLabel(candidate.provider)} · {candidate.artist || "未知歌手"} · {formatClock(candidate.durationMs)}
+                      </small>
+                    </button>
+                  ))}
+                </div>
+              ) : (
+                <p>暂无其他候选版本。</p>
+              )}
+            </div>
+          )}
+        </section>
       )}
 
       {(surface === "paused" || surface === "disconnected") && (
@@ -514,17 +559,13 @@ export function ColumnStageView({
         {showStateCard && (
           <div className="column-state-card" data-status={surface} aria-live="polite">
             {surface === "searching" && <div className="column-skeleton" aria-hidden="true" />}
-            {(surface === "prelude" || surface === "interlude") && !showVersionPicker && (
+            {(surface === "prelude" || surface === "interlude") && (
               <div className="column-ellipsis" aria-hidden="true">
                 ···
               </div>
             )}
-            {surface !== "singing" && (
-              <>
-                <strong>{copy.title}</strong>
-                <p>{copy.body}</p>
-              </>
-            )}
+            <strong>{copy.title}</strong>
+            <p>{copy.body}</p>
             {surface === "candidates" && (
               <div className="column-candidate-list">
                 {limitedCandidates.map((candidate) => (
@@ -539,71 +580,6 @@ export function ColumnStageView({
                     </small>
                   </button>
                 ))}
-              </div>
-            )}
-            {showImport && <ImportControl onImportLyrics={onImportLyrics} />}
-            {showManualSearch && (
-              <form
-                className="column-manual-search"
-                data-testid="column-manual-search"
-                onSubmit={(event) => {
-                  event.preventDefault();
-                  onManualSearch(manualTitle, manualArtist);
-                }}
-              >
-                <strong>手动搜索歌词</strong>
-                <label>
-                  <span>歌名</span>
-                  <input
-                    type="search"
-                    value={manualTitle}
-                    maxLength={500}
-                    required
-                    placeholder="例如：死別"
-                    onChange={(event) => setManualTitle(event.target.value)}
-                  />
-                </label>
-                <label>
-                  <span>歌手</span>
-                  <input
-                    type="search"
-                    value={manualArtist}
-                    maxLength={500}
-                    placeholder="可留空，例如：シャノン"
-                    onChange={(event) => setManualArtist(event.target.value)}
-                  />
-                </label>
-                <div className="column-manual-search-actions">
-                  <button type="submit" disabled={manualSearchPending || !manualTitle.trim()}>
-                    {manualSearchPending ? "搜索中…" : "搜索"}
-                  </button>
-                  <button type="button" disabled={manualSearchPending} onClick={() => setShowManualSearch(false)}>
-                    关闭
-                  </button>
-                </div>
-              </form>
-            )}
-            {showVersionPicker && (
-              <div className="column-version-panel" data-testid="column-version-panel">
-                <strong>选择歌词版本</strong>
-                {limitedCandidates.length > 0 ? (
-                  <div className="column-candidate-list">
-                    {limitedCandidates.map((candidate) => (
-                      <button
-                        type="button"
-                        key={`version:${candidate.provider}:${candidate.id}`}
-                        onClick={() => onChooseCandidate(candidate)}
-                      >
-                        <span>{candidate.title}</span>
-                        <small>
-                          {lyricsProviderLabel(candidate.provider)} · {candidate.artist || "未知歌手"} · {formatClock(candidate.durationMs)}
-                        </small>
-                      </button>
-                    ))}
-                  </div>
-                ) : (
-                  <p>暂无其他候选版本。</p>
-                )}
               </div>
             )}
           </div>

@@ -60,19 +60,21 @@ Do not load an Orca worktree's `extension-dist` directly and do not replace the 
 - a denied Fullscreen API request remains in Column and leaves no viewport canvas;
 - there is no LyricStage warning/error loop.
 
+Treat the stable directory as a single-writer delivery surface. Do not mirror another worktree while a Chrome UAT is active. Immediately before reload, compare the reviewed build and stable directory again; after reload, confirm the registered content-script marker and menu/runtime state before recording acceptance.
+
 Never inspect, print, or migrate the user's provider key. If a fresh extension install reports AI unconfigured, the user re-enters it in the extension settings page.
 
 ## Current verified baseline
 
-- Web: `0.3.1` passes 340/340 tests.
+- Web: `0.3.1` passes 341/341 tests.
 - Director gateway: 27/27 tests.
 - The low-latency Director authors a compact whole-song intent under a 45-second/three-request boundary and expands routine per-line mechanics locally.
 - The settings UI uses the light Control Room system in `docs/uiux-light-control-room.md`: one stable split view, warm neutral canvas, grouped rows, progressive provider setup, explicit unsaved/saving/error states, and destructive credential wording. It keeps the sanitized last-run timing row without exposing endpoint, Key, lyrics, or response bodies.
 - AI provider setup discovers the account's available models through the provider's Models API; model selection is no longer free text. OpenAI, OpenAI-compatible/local, Gemini, and Anthropic discovery paths have bounded unit and background-integration coverage.
-- The popup is a compact remote for current track, Stage launch, quick performance preferences, and settings navigation. Preference persistence failure restores the prior switch state and uses an independent notice instead of replacing song metadata. The embedded lyrics column keeps only `More` and fullscreen as persistent toolbar actions; search, timing, versions, import, and vocal timing live under `More`.
+- The popup is a compact remote for current track, Stage launch, quick performance preferences, and settings navigation. Preference persistence failure restores the prior switch state and uses an independent notice instead of replacing song metadata. The embedded lyrics column keeps only `More` and fullscreen as persistent toolbar actions; `More` contains timing, manual search, and version selection. Embedded local lyric import and the user-facing vocal-enhancement toggle were removed.
 - Queue advances use the current internal YouTube player identity instead of a stale radio-seed URL. Track-relative Stage seeks are translated onto YouTube Music's reused media timeline, and stale controls fail closed as soon as the internal player changes recordings. Real Chrome UAT switched from `斜陽` to `青春の温度` while the page URL stayed stale, updated Stage title/artwork to the new track, and dragged playback back to 0:32 without returning to the previous recording.
 - TypeScript, the full Vite 8.2.2 production build, deterministic extension artifact comparison, Manifest V3 CSP, `npm audit`, and the Director gateway suite pass.
-- The last verified `0.3.1` extension build was mirrored byte-for-byte to `/Users/chaoyiliu/Desktop/bilibili-music/web/extension-dist` and reloaded under the original extension ID. The subsequent light Control Room build passes static and production gates; at handoff, Computer Use could navigate the correct Chrome window but Chrome exposed only the window title, not a screenshot/accessibility tree, so fresh visual UAT must be rechecked without blind coordinate clicks.
+- The latest lyric-tools `0.3.1` build was mirrored byte-for-byte to `/Users/chaoyiliu/Desktop/bilibili-music/web/extension-dist` and reloaded under the original extension ID. Real Chrome UAT verified exactly one v2 host, zero legacy hosts, no mount failure, no LyricStage warning/error, and visible working panels for timing, manual search, and version candidates. During the run, another worktree repeatedly overwrote the stable directory with an older loader build; acceptance succeeded only after restoring the reviewed build and reloading it, which is why the stable directory is now explicitly single-writer during UAT.
 - Owner-only Stage deployment: `https://lyricstage.yihanchen617.chatgpt.site`.
 - Frozen extraction tag: `lyricstage-monorepo-v0.3.0`.
 

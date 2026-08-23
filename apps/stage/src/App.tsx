@@ -58,7 +58,6 @@ import {
 import {
   createFullscreenCaptureLifecycle,
   isFullscreenCapturePinnedForTrack,
-  pinnedTrackIDAfterCaptureStart,
   type FullscreenCaptureLifecycle,
   type FullscreenCaptureOwnership,
 } from "./playback/fullscreenCaptureLifecycle";
@@ -169,7 +168,6 @@ export default function App({ embedded = embeddedStageFromLocation, onEmbeddedRe
   const [manualSearchPending, setManualSearchPending] = useState(false);
   const [lightweight, setLightweight] = useState(false);
   const [vjMode, setVJMode] = useState(false);
-  const [vocalTimingLocalError, setVocalTimingLocalError] = useState<string | undefined>();
   const [lyricsOffsetMs, setLyricsOffsetMs] = useState(0);
   const [installedYouTubeLyricsIdentity, setInstalledYouTubeLyricsIdentity] = useState<string | null>(null);
   const [remoteDirectorPlan, setRemoteDirectorPlan] = useState<DirectorPlanV1 | undefined>();
@@ -647,7 +645,7 @@ export default function App({ embedded = embeddedStageFromLocation, onEmbeddedRe
           trackIdentity,
           candidates: response.candidates,
         });
-        setMessage("找到了歌词候选，但歌手或时长不足以自动确认。请选择版本或手动导入。");
+        setMessage("找到了歌词候选，但歌手或时长不足以自动确认。请选择版本或手动搜索。");
         return;
       }
       if (response.status === "miss") {
@@ -658,7 +656,7 @@ export default function App({ embedded = embeddedStageFromLocation, onEmbeddedRe
           trackIdentity,
           candidates: [],
         });
-        setMessage("多源歌词库暂时没有匹配结果，仍可手动导入 LRC。 ");
+        setMessage("多源歌词库暂时没有匹配结果，可修改歌名或歌手后手动搜索。");
         return;
       }
       setAutomaticLyrics({
@@ -668,7 +666,7 @@ export default function App({ embedded = embeddedStageFromLocation, onEmbeddedRe
         trackIdentity,
         candidates: [],
       });
-      setMessage(response.message || "自动歌词搜索失败，仍可手动导入 LRC。");
+      setMessage(response.message || "自动歌词搜索失败，可使用手动搜索重试。");
     }).catch((error) => {
       if (cancelled || generation !== lyricsLookupGenerationRef.current) return;
       setAutomaticLyrics({ status: "error", trackID: track.trackID, trackIdentity, candidates: [] });
@@ -779,7 +777,7 @@ export default function App({ embedded = embeddedStageFromLocation, onEmbeddedRe
         }).catch(() => {
           const identity = manualIdentityAtStart;
           if (currentYouTubeIdentityRef.current === identity) {
-            setMessage("歌词已临时装入，但本地歌词库写入失败；刷新后可能需要重新导入。");
+            setMessage("歌词已临时装入，但本地歌词库写入失败；刷新后可能需要重新匹配。");
           }
         });
     }
@@ -868,7 +866,7 @@ export default function App({ embedded = embeddedStageFromLocation, onEmbeddedRe
           trackIdentity,
           candidates: [],
         });
-        setMessage(response.message || "手动搜索没有找到同步歌词，可修改条件重试或导入 LRC。");
+        setMessage(response.message || "手动搜索没有找到同步歌词，可修改条件后重试。");
       } else {
         setAutomaticLyrics({
           status: "error",
@@ -964,36 +962,6 @@ export default function App({ embedded = embeddedStageFromLocation, onEmbeddedRe
     }
   }, [youtubeMusic.snapshot?.track.trackID]);
 
-  const toggleVocalTiming = useCallback(async () => {
-    const snapshot = youtubeMusic.snapshot;
-    if (!snapshot) {
-      setMessage("请先在 YouTube Music 播放一首歌曲。");
-      return;
-    }
-    const active = youtubeMusic.musicMapStatus === "analyzing" || youtubeMusic.musicMapStatus === "ready";
-    if (active) {
-      vocalTimingPinnedTrackIDRef.current = null;
-      setVocalTimingLocalError(undefined);
-      const stopped = await stopYouTubeMusicAudioAnalysis(snapshot.track.trackID);
-      setMessage(stopped ? "已停止人声感知，恢复文本估算。" : "人声分析暂时无法停止，请重试。");
-      return;
-    }
-    const startResult = await startYouTubeMusicAudioAnalysis(
-      snapshot.track.trackID,
-      snapshot.playback.durationMs,
-    );
-    vocalTimingPinnedTrackIDRef.current = pinnedTrackIDAfterCaptureStart({
-      pinnedTrackID: vocalTimingPinnedTrackIDRef.current,
-      requestedTrackID: snapshot.track.trackID,
-      currentTrackID: fullscreenCaptureOwnershipRef.current.trackID,
-      started: startResult.ok,
-    });
-    setVocalTimingLocalError(startResult.ok ? undefined : startResult.reason || "capture-failed");
-    setMessage(startResult.ok
-      ? "正在本机分析中置人声、起音和停顿；低置信片段会自动退回文本估算。"
-      : `浏览器未能启动本地音频分析：${startResult.reason || "请再次点击人声按钮"}`);
-  }, [youtubeMusic.musicMapStatus, youtubeMusic.snapshot]);
-
   const setCurrentLyricsOffset = useCallback((nextOffsetMs: number) => {
     const boundedOffset = clampLyricsOffsetMs(nextOffsetMs);
     setLyricsOffsetMs(boundedOffset);
@@ -1042,7 +1010,7 @@ export default function App({ embedded = embeddedStageFromLocation, onEmbeddedRe
   const enterFullscreen = async () => {
     if (embeddedStage) {
       if (!canEnterEmbeddedFullscreen(hasMatchingLyrics)) {
-        setMessage("请先匹配或导入歌词后再进入全屏舞台。");
+        setMessage("请先匹配当前歌曲的同步歌词后再进入全屏舞台。");
         return;
       }
       const host = stageShellRef.current;
@@ -1173,10 +1141,7 @@ export default function App({ embedded = embeddedStageFromLocation, onEmbeddedRe
             canEnterFullscreen={canEnterEmbeddedFullscreen(hasMatchingLyrics)}
             lightweight={lightweight}
             vocalTimingMap={youtubeMusic.vocalTimingMap}
-            vocalTimingStatus={youtubeMusic.musicMapStatus}
-            vocalTimingError={vocalTimingLocalError || youtubeMusic.musicMapError}
             lyricsOffsetMs={effectiveLyricsOffsetMs}
-            onToggleVocalTiming={() => void toggleVocalTiming()}
             onSetLyricsOffset={setCurrentLyricsOffset}
             onAlignCurrentLine={alignCurrentLyricsLine}
             onSeekLine={(timeMs) => {
@@ -1190,7 +1155,6 @@ export default function App({ embedded = embeddedStageFromLocation, onEmbeddedRe
             }}
             onEnterFullscreen={() => void enterFullscreen()}
             onChooseCandidate={chooseLyricsCandidate}
-            onImportLyrics={(file) => void onLyricFile(file)}
             onShowVersions={() => setShowVersionPicker((value) => !value)}
             showVersionPicker={showVersionPicker}
             manualSearchPending={manualSearchPending}
