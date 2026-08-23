@@ -350,6 +350,10 @@ describe("YouTube Music background routing", () => {
     expect(fetcher).toHaveBeenCalledTimes(3);
     expect(storage.has("lyricstage-director-bible-cache-v1")).toBe(true);
     expect(storage.has("lyricstage-director-scene-cache-v1")).toBe(true);
+    const positiveSceneCache = storage.get("lyricstage-director-scene-cache-v1") as Record<string, any>;
+    expect(Object.values(positiveSceneCache)).not.toHaveLength(0);
+    expect(Object.values(positiveSceneCache).every((entry) =>
+      entry.provenance === "ai-positive" && entry.schemaVersion === "scene-pack-v1")).toBe(true);
     const stored = JSON.stringify({
       bible: storage.get("lyricstage-director-bible-cache-v1"),
       scenes: storage.get("lyricstage-director-scene-cache-v1"),
@@ -437,7 +441,7 @@ describe("YouTube Music background routing", () => {
     expect(fetcher).toHaveBeenCalledTimes(callsBeforeRestart + 2);
   });
 
-  it("falls back once after bounded HTTP retries and serves the repaired window from cache", async () => {
+  it("falls back after bounded HTTP retries without promoting the local repair to AI-positive cache", async () => {
     await send({
       type: "youtube-music-save-director-config",
       configuration: {
@@ -468,7 +472,10 @@ describe("YouTube Music background routing", () => {
     expect(responses[0]).toMatchObject({
       status: "ready", source: "local", reason: expect.stringContaining("scene-local-continuity-fallback"),
     });
-    expect(responses.slice(1).every((response) => response.status === "ready" && response.source === "cache")).toBe(true);
+    expect(responses.slice(1).every((response) => response.status === "ready"
+      && response.source === "local" && response.reason.includes("scene-negative-cache"))).toBe(true);
+    expect(Object.values((storage.get("lyricstage-director-scene-cache-v1") as Record<string, unknown> | undefined) ?? {}))
+      .toHaveLength(0);
     expect(fetcher).toHaveBeenCalledTimes(3);
   });
 
@@ -633,7 +640,7 @@ describe("YouTube Music background routing", () => {
     expect(requestedStateHashes[0]).not.toBe(forged.stateHash);
   });
 
-  it("does not repeat slow provider failures after committing a local continuity card", async () => {
+  it("keeps local continuity out of the AI-positive cache and retries after a short negative TTL", async () => {
     await send({
       type: "youtube-music-save-director-config",
       configuration: {
@@ -646,11 +653,21 @@ describe("YouTube Music background routing", () => {
     const bible = compileLocalDirectorBibleV1(lyrics);
     vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({ output_text: JSON.stringify(bible) }), { status: 200 })));
     await sendResolved({ type: "youtube-music-resolve-director-bible-v1", track, lyrics }, sender(10));
-    const slowFailure = vi.fn(async () => {
-      vi.setSystemTime(Date.now() + 30_000);
-      return new Response("temporary", { status: 503 });
+    const invalidFetcher = vi.fn(async (_input: string | URL | Request, init?: RequestInit) => {
+      const payload = JSON.parse(String(init?.body)) as any;
+      const prompt = JSON.parse(payload.input[0].content[0].text) as any;
+      return new Response(JSON.stringify({ output_text: JSON.stringify({
+        version: "scene-pack-v1",
+        bibleIdentity: prompt.bible.bibleIdentity,
+        entryStateHash: prompt.state.stateHash,
+        scenes: [{
+          fromLineIndex: prompt.window.fromLineIndex,
+          toLineIndex: prompt.window.toLineIndex,
+          intention: "invalid negative-cache fixture",
+        }],
+      }) }), { status: 200 });
     });
-    vi.stubGlobal("fetch", slowFailure);
+    vi.stubGlobal("fetch", invalidFetcher);
     const request = {
       type: "youtube-music-resolve-director-coverage-v1", track, lyrics, bible,
       playheadMs: 60_000, desiredHorizonMs: 60_000,
@@ -658,11 +675,18 @@ describe("YouTube Music background routing", () => {
     expect(await sendResolved(request, sender(10))).toMatchObject({
       status: "ready", source: "local", reason: expect.stringContaining("scene-local-continuity-fallback"),
     });
-    const callsAfterFallback = slowFailure.mock.calls.length;
-    expect(await sendResolved(request, sender(10))).toMatchObject({ status: "ready", source: "cache" });
-    expect(await sendResolved(request, sender(10))).toMatchObject({ status: "ready", source: "cache" });
-    expect(slowFailure).toHaveBeenCalledTimes(callsAfterFallback);
-    expect(callsAfterFallback).toBeGreaterThan(0);
+    const callsAfterFallback = invalidFetcher.mock.calls.length;
+    const storedAfterFallback = storage.get("lyricstage-director-scene-cache-v1") as Record<string, any> | undefined;
+    expect(Object.values(storedAfterFallback ?? {})).toHaveLength(0);
+
+    expect(await sendResolved(request, sender(10))).toMatchObject({
+      status: "ready", source: "local", reason: expect.stringContaining("scene-negative-cache"),
+    });
+    expect(invalidFetcher).toHaveBeenCalledTimes(callsAfterFallback);
+
+    vi.setSystemTime(Date.now() + 61_000);
+    expect(await sendResolved(request, sender(10))).toMatchObject({ status: "ready", source: "local" });
+    expect(invalidFetcher.mock.calls.length).toBeGreaterThan(callsAfterFallback);
   });
 
   it("keeps rolling continuity with a valid local card when the provider Scene Pack is invalid", async () => {
@@ -697,7 +721,8 @@ describe("YouTube Music background routing", () => {
       status: "ready", source: "local", reason: expect.stringContaining("scene-local-continuity-fallback"),
     });
     expect(response.cards).toHaveLength(1);
-    expect(storage.get("lyricstage-director-scene-cache-v1")).toBeDefined();
+    expect(Object.values((storage.get("lyricstage-director-scene-cache-v1") as Record<string, unknown> | undefined) ?? {}))
+      .toHaveLength(0);
   });
 
   it("discovers models with a matching stored provider key without exposing it", async () => {

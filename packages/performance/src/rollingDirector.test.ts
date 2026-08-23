@@ -298,7 +298,7 @@ describe("rolling director core", () => {
     expect(rebased.sceneID).toBe(sceneCardIdentityV1(rebased));
   });
 
-  it("preserves Pack A while checkpoint-rebasing a disjoint forward Pack B", () => {
+  it("preserves the accepted prefix but rejects a disjoint checkpoint-rebased suffix", () => {
     const lyrics = lyricFixtures.longSongStructure;
     const bible = compileLocalDirectorBibleV1(lyrics);
     const cards = compileLocalSceneCardsV1(lyrics, bible);
@@ -319,9 +319,9 @@ describe("rolling director core", () => {
     const plan = compileDirectorPlanFromRollingV1(lyrics, bible, [early, packB], "ai");
     expect(isDirectorPlanV1ForLyrics(plan, lyrics)).toBe(true);
     expect(plan.sections.some((section) => section.id === `rolling:${early.sceneID}`)).toBe(true);
-    expect(plan.sections.some((section) => section.id === `rolling:${packB.sceneID}`)).toBe(true);
+    expect(plan.sections.some((section) => section.id === `rolling:${packB.sceneID}`)).toBe(false);
     expect(plan.sections.some((section) => section.id.startsWith("rolling-local:")
-      && section.fromLineIndex > early.toLineIndex && section.toLineIndex < packB.fromLineIndex)).toBe(true);
+      && section.fromLineIndex > early.toLineIndex)).toBe(true);
     expect(early.sceneID).toBe(sceneCardIdentityV1(early));
     expect(packB.sceneID).toBe(sceneCardIdentityV1(packB));
 
