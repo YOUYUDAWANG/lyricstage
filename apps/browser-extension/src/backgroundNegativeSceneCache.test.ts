@@ -2,6 +2,8 @@ import { describe, expect, it } from "vitest";
 import {
   negativeSceneCacheIdentityV1,
   RollingSceneNegativeCacheV1,
+  rollingGenerationLimitsV2,
+  rollingRequestAllowedV2,
   rollingSceneProviderBudgetMsV2,
   semanticCueBudgetExceededV2,
 } from "./backgroundNegativeSceneCache";
@@ -11,6 +13,18 @@ describe("rolling negative scene cache", () => {
     expect(rollingSceneProviderBudgetMsV2(90_000)).toBe(12_000);
     expect(rollingSceneProviderBudgetMsV2(7_500)).toBe(7_500);
     expect(rollingSceneProviderBudgetMsV2(-10)).toBe(1);
+  });
+
+  it("keeps later Scene windows eligible after transient failures while retaining hard safety ceilings", () => {
+    const ledger = {
+      fingerprint: "fixture", generation: 1, bibleLogicalRequests: 1, sceneLogicalRequests: 4,
+      providerAttempts: 9, providerMs: 36_000, consecutiveFailures: 4, generatedCoverage: [],
+    };
+    expect(rollingRequestAllowedV2(ledger, "scene-pack")).toBe(true);
+    expect(rollingRequestAllowedV2({ ...ledger, providerAttempts: rollingGenerationLimitsV2.maximumProviderAttempts }, "scene-pack")).toBe(false);
+    expect(rollingRequestAllowedV2({ ...ledger, providerMs: rollingGenerationLimitsV2.maximumProviderMs }, "scene-pack")).toBe(false);
+    expect(rollingRequestAllowedV2({ ...ledger, sceneLogicalRequests: rollingGenerationLimitsV2.maximumSceneRequests }, "scene-pack")).toBe(false);
+    expect(rollingRequestAllowedV2(ledger, "bible")).toBe(false);
   });
 
   it("binds failures to fingerprint, Bible, range, state, and schema", () => {

@@ -1265,7 +1265,7 @@ describe("YouTube Music background routing", () => {
       .every((entry) => entry.provenance === "local-repair")).toBe(true);
   });
 
-  it("appends a dense local Scene pack after earlier AI-positive windows when the provider later fails", async () => {
+  it("keeps dense local Scene packs through three provider failures and recovers AI on a later window", async () => {
     await send({
       type: "youtube-music-save-director-config",
       configuration: {
@@ -1294,7 +1294,7 @@ describe("YouTube Music background routing", () => {
       }
       const prompt = JSON.parse(payload.input[0].content[0].text) as any;
       sceneRequest += 1;
-      const output = sceneRequest <= 2 ? {
+      const output = sceneRequest <= 2 || sceneRequest >= 9 ? {
         version: "window-intent-v2",
         spatialIntent: "open",
         coverRole: "portal",
@@ -1356,6 +1356,27 @@ describe("YouTube Music background routing", () => {
     expect(nextAddedCards.length).toBeGreaterThanOrEqual(4);
     expect(nextAddedCards.length).toBeLessThanOrEqual(6);
     expect(nextFallback.cards.some((card: any) => card.toMs > nextTargetMs)).toBe(true);
+
+    const thirdTargetMs = Math.max(...nextFallback.cards.map((card: any) => card.toMs));
+    const thirdFallback = await sendResolved({
+      type: "youtube-music-resolve-director-coverage-v1", track, lyrics, bible,
+      playheadMs: thirdTargetMs, desiredHorizonMs: 60_000,
+    }, sender(10));
+    expect(thirdFallback).toMatchObject({ status: "ready", source: "local" });
+    const thirdAddedCards = thirdFallback.cards.filter((card: any) => !nextFallback.cards.some((prior: any) => prior.sceneID === card.sceneID));
+    expect(thirdAddedCards.length).toBeGreaterThanOrEqual(4);
+    expect(thirdAddedCards.length).toBeLessThanOrEqual(6);
+
+    const recoveryTargetMs = Math.max(...thirdFallback.cards.map((card: any) => card.toMs));
+    const recovered = await sendResolved({
+      type: "youtube-music-resolve-director-coverage-v1", track, lyrics, bible,
+      playheadMs: recoveryTargetMs, desiredHorizonMs: 60_000,
+    }, sender(10));
+    expect(recovered).toMatchObject({ status: "ready", source: "network" });
+    expect(recovered.reason ?? "").not.toContain("budget-exhausted");
+    const recoveredCards = recovered.cards.filter((card: any) => !thirdFallback.cards.some((prior: any) => prior.sceneID === card.sceneID));
+    expect(recoveredCards.length).toBeGreaterThanOrEqual(4);
+    expect(recoveredCards.length).toBeLessThanOrEqual(6);
   });
 
   it("discovers models with a matching stored provider key without exposing it", async () => {

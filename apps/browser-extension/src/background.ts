@@ -80,6 +80,8 @@ import {
 } from "./backgroundStorage";
 import {
   negativeSceneCacheIdentityV1, RollingSceneNegativeCacheV1,
+  rollingGenerationLimitsV2,
+  rollingRequestAllowedV2,
   rollingSceneProviderBudgetMsV2,
   scenePackSchemaVersion,
   semanticCueBudgetExceededV2,
@@ -601,12 +603,6 @@ const rollingDirectorFingerprint = (
   lyrics,
 });
 
-const rollingRequestAllowed = (ledger: RollingGenerationLedgerV1, kind: "bible" | "scene-pack"): boolean =>
-  ledger.consecutiveFailures < 3
-  && ledger.providerAttempts < 6
-  && ledger.providerMs < 90_000
-  && (kind === "bible" ? ledger.bibleLogicalRequests < 1 : ledger.sceneLogicalRequests < 6);
-
 const readDirectorBibleCache = async (): Promise<StoredDirectorBibleCache> => {
   const stored = (await chromeAPI.storage.local.get(directorBibleCacheStorageKey))[directorBibleCacheStorageKey];
   return stored && typeof stored === "object" && !Array.isArray(stored) ? stored as StoredDirectorBibleCache : {};
@@ -1095,14 +1091,14 @@ const resolveDirectorBibleV1 = async (
     const afterWait = await cachedDirectorBible(track, lyrics, fingerprint);
     if (afterWait) return { type: "director-bible-resolution-v1", status: "ready", source: "cache", bible: afterWait.bible, timing: rollingTiming(undefined, "hit") };
   }
-  if (!rollingRequestAllowed(ledger, "bible")) return { type: "director-bible-resolution-v1", status: "unavailable", source: "local", reason: "rolling-budget-exhausted", timing: rollingTiming() };
+  if (!rollingRequestAllowedV2(ledger, "bible")) return { type: "director-bible-resolution-v1", status: "unavailable", source: "local", reason: "rolling-budget-exhausted", timing: rollingTiming() };
   ledger.bibleLogicalRequests += 1;
   ledger.inFlightKind = "bible";
   let result: DirectorBibleResolutionV1 | undefined;
   const operation = (async () => {
     try {
-      const remainingAttempts = 6 - ledger.providerAttempts;
-      const remainingProviderMs = 90_000 - ledger.providerMs;
+      const remainingAttempts = rollingGenerationLimitsV2.maximumProviderAttempts - ledger.providerAttempts;
+      const remainingProviderMs = rollingGenerationLimitsV2.maximumProviderMs - ledger.providerMs;
       const execution = await executeDirectorBYOKProfileV1(
         configuration,
         { lyrics, promptInput: { track: { trackID: track.trackID, title: track.title, artist: track.artist, durationMs: track.durationMs }, musicMap, lines: lyrics.lines } },
@@ -1315,7 +1311,7 @@ const resolveDirectorCoverageV1 = async (
       return commitLocalContinuity(`scene-negative-cache:${negativeReasonAfterFlight}`, rollingTiming(undefined, "hit"));
     }
   }
-  if (!rollingRequestAllowed(ledger, "scene-pack")) {
+  if (!rollingRequestAllowedV2(ledger, "scene-pack")) {
     return commitLocalContinuity("rolling-budget-exhausted", rollingTiming());
   }
   ledger.sceneLogicalRequests += 1;
@@ -1341,8 +1337,8 @@ const resolveDirectorCoverageV1 = async (
         },
         windowIntentRequestProfileV2,
         fetch,
-        rollingSceneProviderBudgetMsV2(90_000 - ledger.providerMs),
-        6 - ledger.providerAttempts,
+        rollingSceneProviderBudgetMsV2(rollingGenerationLimitsV2.maximumProviderMs - ledger.providerMs),
+        rollingGenerationLimitsV2.maximumProviderAttempts - ledger.providerAttempts,
         sceneSignal,
       );
       if (!await rollingSceneStillCurrent(owner, track, lyrics, fingerprint, generation, sceneEpoch)) {
