@@ -167,7 +167,7 @@ export const blockingFromSectionsV1 = (sections: DirectorSectionV1[]): SongBlock
   let current = baseLayout;
   let previousSection = sections[0];
   sections.forEach((section, atSectionIndex) => {
-    if (atSectionIndex === 0 || section.layout === current || transitions.length >= 2) return;
+    if (atSectionIndex === 0 || section.layout === current || transitions.length >= 4) return;
     if (previousSection && section.fromLineIndex - previousSection.fromLineIndex < 6 && section.fromMs - previousSection.fromMs < 20_000) return;
     transitions.push({
       atSectionIndex,
@@ -195,7 +195,7 @@ export const sanitizeSongBlockingV1 = (
   if (!value || typeof value !== "object" || Array.isArray(value) || sections.length === 0) return null;
   const wire = value as Record<string, unknown>;
   const baseLayout = clean(wire.baseLayout, 30) as PerformanceLayoutV1;
-  if (wire.version !== "song-blocking-v1" || !layouts.has(baseLayout) || !Array.isArray(wire.transitions) || wire.transitions.length > 3) return null;
+  if (wire.version !== "song-blocking-v1" || !layouts.has(baseLayout) || !Array.isArray(wire.transitions) || wire.transitions.length > 4) return null;
   const output: LayoutTransitionV1[] = [];
   let current = baseLayout;
   let previousSectionIndex = -1;
@@ -225,12 +225,11 @@ export const sanitizeSongBlockingV1 = (
     const rationale = clean(evidenceWire.rationale, 400);
     const previous = previousSectionIndex >= 0 ? sections[previousSectionIndex]! : sections[0]!;
     const separated = section.fromLineIndex - previous.fromLineIndex >= 6 || section.fromMs - previous.fromMs >= 20_000;
-    const exceptional = output.length >= 2;
     if (
       !rationale || lineIndices.length === 0 || sectionTriggers.length === 0 || !separated
       || !transitionPurposeMatchesEvidence(purpose, sectionTriggers)
-      || (!exceptional && (strength !== "major" || confidence < 0.78 || evidenceCategories(sectionTriggers) < 2))
-      || (exceptional && (strength !== "exceptional" || confidence < 0.9 || evidenceCategories(sectionTriggers) < 3))
+      || (strength !== "major" && strength !== "exceptional")
+      || confidence < 0.78 || evidenceCategories(sectionTriggers) < 2
     ) return null;
     output.push({ atSectionIndex, toLayout, purpose, strength, evidence: { sectionTriggers, lineIndices, audioLandmarkIDs, rationale, confidence } });
     previousSectionIndex = atSectionIndex;

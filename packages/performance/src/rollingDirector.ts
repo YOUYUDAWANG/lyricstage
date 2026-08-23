@@ -79,7 +79,7 @@ export interface DirectorBibleV1 {
   quietWindows: QuietWindowV1[];
   layoutBudget: {
     baseLayout: PerformanceLayoutV1;
-    maximumTransitions: 2;
+    maximumTransitions: 2 | 3 | 4;
     proposedTransitions: SongBlockingTransitionV1[];
     continuityJustification?: EvidenceV1;
   };
@@ -310,7 +310,7 @@ const sanitizeBibleDramaturgy = (
   candidate: DirectorBibleV1,
 ): Pick<DirectorBibleV1, "acts" | "motifActor" | "signatureAnchors" | "quietWindows"> | null => {
   if (candidate.acts.length < 2 || candidate.acts.length > 5
-    || candidate.signatureAnchors.length < 2 || candidate.signatureAnchors.length > 4
+    || candidate.signatureAnchors.length < 2 || candidate.signatureAnchors.length > 8
     || candidate.quietWindows.length > 8) return null;
   const acts: DramaticActV1[] = [];
   const actIDs = new Set<string>();
@@ -384,8 +384,9 @@ export const sanitizeDirectorBibleV1 = (lyrics: LyricDocumentV0, value: unknown)
     if (!exception || evidenceCategoryCount(exception.sectionTriggers, exception.audioLandmarkIDs) < 2) return null;
   }
   const budget = candidate.layoutBudget;
-  if (budget.maximumTransitions !== 2 || !layouts.has(budget.baseLayout) || !Array.isArray(budget.proposedTransitions)
-    || budget.proposedTransitions.length > 2) return null;
+  if (!Number.isInteger(budget.maximumTransitions) || budget.maximumTransitions < 2 || budget.maximumTransitions > 4
+    || !layouts.has(budget.baseLayout) || !Array.isArray(budget.proposedTransitions)
+    || budget.proposedTransitions.length > budget.maximumTransitions) return null;
   const sectionShells: DirectorSectionV1[] = dramaturgy.acts.map((act, index) => {
     const range = exactRange(lyrics, act.fromLineIndex, act.toLineIndex)!;
     return {
@@ -412,7 +413,7 @@ export const sanitizeDirectorBibleV1 = (lyrics: LyricDocumentV0, value: unknown)
     .forEach((line) => quietLines.add(line.lineIndex)));
   const totalLyricTime = intervalUnionDuration(lyrics.lines);
   const quietLyricTime = intervalUnionDuration(lyrics.lines.filter((line) => quietLines.has(line.lineIndex)));
-  if (totalLyricTime <= 0 || quietLyricTime / totalLyricTime < 0.4) return null;
+  if (totalLyricTime <= 0 || quietLyricTime / totalLyricTime < 0.18) return null;
   return {
     ...candidate,
     acts: dramaturgy.acts,
@@ -423,7 +424,7 @@ export const sanitizeDirectorBibleV1 = (lyrics: LyricDocumentV0, value: unknown)
 };
 
 const quietWindowsFor = (lyrics: LyricDocumentV0): QuietWindowV1[] => {
-  const target = intervalUnionDuration(lyrics.lines) * 0.46;
+  const target = intervalUnionDuration(lyrics.lines) * 0.24;
   const windows: QuietWindowV1[] = [];
   const included: LyricLineV0[] = [];
   for (const line of lyrics.lines) {
@@ -570,7 +571,7 @@ export const isRollingPerformanceStateV1 = (
     && (state.lastToLineIndex === null || Number.isInteger(state.lastToLineIndex))
     && (state.lastToMs === null || (typeof state.lastToMs === "number" && Number.isFinite(state.lastToMs)))
     && motifStates.has(state.motifState ?? "" as MotifStateV1) && layouts.has(state.layout ?? "" as PerformanceLayoutV1)
-    && Number.isInteger(state.layoutTransitionsUsed) && (state.layoutTransitionsUsed ?? -1) >= 0 && (state.layoutTransitionsUsed ?? 3) <= 2
+    && Number.isInteger(state.layoutTransitionsUsed) && (state.layoutTransitionsUsed ?? -1) >= 0 && (state.layoutTransitionsUsed ?? 5) <= 4
     && Array.isArray(state.unresolvedPromiseIDs) && Array.isArray(state.consumedPromiseIDs) && Array.isArray(state.acceptedSceneIDs)
     && new Set(state.unresolvedPromiseIDs).size === state.unresolvedPromiseIDs.length
     && new Set(state.consumedPromiseIDs).size === state.consumedPromiseIDs.length
@@ -631,7 +632,7 @@ export const sanitizeSceneCardV1 = (
     || (priorState.lastToLineIndex !== null && complete.fromLineIndex <= priorState.lastToLineIndex)) return null;
   const expectedLayout = expectedLayoutForCard(bible, priorState, complete.fromLineIndex);
   const layoutChanged = complete.layout !== priorState.layout;
-  if (complete.layout !== expectedLayout || (layoutChanged && priorState.layoutTransitionsUsed >= 2)) return null;
+  if (complete.layout !== expectedLayout || (layoutChanged && priorState.layoutTransitionsUsed >= bible.layoutBudget.maximumTransitions)) return null;
   const gestures = sanitizeLyricGesturesV1(lyrics, complete.gestures);
   if (!gestures || gestures.some((gesture) => gesture.lineIndex < complete.fromLineIndex || gesture.lineIndex > complete.toLineIndex)) return null;
   const perLineGestureCount = new Map<number, number>();
@@ -652,11 +653,11 @@ export const sanitizeSceneCardV1 = (
     || (signature && (!complete.signatureMoment || !signatureMomentMatchesAnchor(complete.signatureMoment, signature)))) return null;
   if (signature) {
     const scales = new Set(gestures.map((gesture) => gesture.scope));
-    if (gestures.length < 2 || gestures.length > 4 || scales.size < 2 || complete.effects.length < 1 || complete.effects.length > 2
+    if (gestures.length < 2 || gestures.length > 6 || scales.size < 2 || complete.effects.length < 1 || complete.effects.length > 4
       || complete.consequence.kind !== complete.signatureMoment!.consequence) return null;
   } else {
-    const maximumGestures = compiledV2Budgets ? Math.min(3, Math.max(2, semanticCueCount)) : 2;
-    const maximumEffects = compiledV2Budgets ? Math.min(3, Math.max(1, semanticCueCount)) : 1;
+    const maximumGestures = compiledV2Budgets ? Math.min(6, Math.max(3, semanticCueCount * 2)) : 2;
+    const maximumEffects = compiledV2Budgets ? Math.min(4, Math.max(2, semanticCueCount)) : 1;
     if (gestures.length > maximumGestures || complete.effects.length > maximumEffects) return null;
   }
   if (!consequenceKinds.has(complete.consequence.kind) || !clean(complete.consequence.rationale, 320)) return null;
@@ -675,7 +676,7 @@ export const sanitizeSceneCardV1 = (
     if (seenDirectiveLines.size !== validLineIndices.size) return null;
     directives.sort((left, right) => left.lineIndex - right.lineIndex);
   }
-  if (semanticCueCount !== undefined && (semanticCueCount < 0 || semanticCueCount > 3)) return null;
+  if (semanticCueCount !== undefined && (semanticCueCount < 0 || semanticCueCount > 6)) return null;
   const evidence = sanitizeEvidence(complete.evidence, validLineIndices, 0.65);
   if (!evidence) return null;
   if (complete.effects.some((effect) => effect.sectionID !== complete.sceneID

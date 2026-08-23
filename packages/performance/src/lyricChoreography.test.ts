@@ -22,7 +22,7 @@ const sections = Array.from({ length: 4 }, (_, index): DirectorSectionV1 => ({
 }));
 
 describe("song blocking and lyric choreography", () => {
-  it("allows two major spatial changes and only one exceptional third change", () => {
+  it("allows three grounded major spatial changes without an exceptional-only gate", () => {
     const blocking = {
       version: "song-blocking-v1",
       baseLayout: "railLeading",
@@ -58,6 +58,12 @@ describe("song blocking and lyric choreography", () => {
     expect(sanitizeSongBlockingV1({
       ...blocking,
       transitions: blocking.transitions.map((transition, index) => index === 2 ? { ...transition, strength: "major" } : transition),
+    }, sections)?.transitions).toHaveLength(3);
+    expect(sanitizeSongBlockingV1({
+      ...blocking,
+      transitions: blocking.transitions.map((transition, index) => index === 2
+        ? { ...transition, strength: "major", evidence: { ...transition.evidence, confidence: 0.7 } }
+        : transition),
     }, sections)).toBeNull();
   });
 

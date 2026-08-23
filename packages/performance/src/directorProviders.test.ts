@@ -273,9 +273,9 @@ describe("Director BYOK provider adapters", () => {
     expect(windowIntentSchemaV2.properties).not.toHaveProperty("entryStateHash");
     expect(payloads[0]?.instructions).toBe(windowIntentSystemPromptV2);
     expect(fetchMock).toHaveBeenCalledTimes(1);
-    expect(result.response).toHaveLength(1);
-    expect(result.response[0]?.directives).toHaveLength(lyrics.lines.length);
-    expect(result.response[0]?.effects.some((effect) => effect.id.startsWith("director-v2-effect:"))).toBe(true);
+    expect(result.response.length).toBeGreaterThan(1);
+    expect(result.response.flatMap((card) => card.directives ?? [])).toHaveLength(lyrics.lines.length);
+    expect(result.response.some((card) => card.effects.some((effect) => effect.id.startsWith("director-v2-effect:")))).toBe(true);
   });
 
   it("rejects provider-authored visual fields instead of silently accepting them", () => {
@@ -318,7 +318,7 @@ describe("Director BYOK provider adapters", () => {
       arcIntent: "hold",
       cues: [],
     } }, "wrapped");
-    expect(result.response?.[0]?.directives).toHaveLength(lyrics.lines.length);
+    expect(result.response?.flatMap((card) => card.directives ?? [])).toHaveLength(lyrics.lines.length);
   });
 
   it("keeps safe AI art direction when malformed Bible structure needs local repair", async () => {

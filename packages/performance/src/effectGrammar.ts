@@ -287,8 +287,21 @@ export const compileLocalEffectRecipesV1 = (
   });
 };
 
+const presentationPriority: Record<StagePresentationV1, number> = {
+  reading: 0,
+  aperture: 1,
+  section: 2,
+  duet: 3,
+  hero: 4,
+};
+
 export const effectRecipeAtV1 = (recipes: readonly EffectRecipeV1[], timeMs: number): EffectRecipeV1 | undefined =>
-  recipes.find((recipe) => timeMs >= recipe.fromMs && timeMs < recipe.toMs);
+  recipes
+    .filter((recipe) => timeMs >= recipe.fromMs && timeMs < recipe.toMs)
+    .sort((left, right) => presentationPriority[right.presentation] - presentationPriority[left.presentation]
+      || right.primary.intensity - left.primary.intensity
+      || right.fromMs - left.fromMs
+      || left.id.localeCompare(right.id))[0];
 
 export const stagePresentationAtV1 = (
   recipes: readonly EffectRecipeV1[],

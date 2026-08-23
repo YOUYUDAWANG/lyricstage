@@ -31,7 +31,7 @@ import {
   advanceRollingPerformanceStateV1,
   buildDirectorRequestPayloadV1,
   compileLocalDirectorBibleV1,
-  compileLocalContinuitySceneCardV2,
+  compileLocalContinuitySceneCardsV2,
   directorBYOKCacheIdentityV1,
   directorBYOKDiagnosticsFromErrorV1,
   directorBibleRequestProfileV1,
@@ -1279,20 +1279,20 @@ const resolveDirectorCoverageV1 = async (
     if (coverage.aheadMs > 0) return { type: "director-coverage-resolution-v1", status: "ready", source: "cache", cards, coverage: { ...coverage, activation: "immediate" }, timing: rollingTiming(undefined, "hit") };
   }
   const commitLocalContinuity = async (reason: string, timing: RollingTimingV1): Promise<DirectorCoverageResolutionV1> => {
-    const localCard = compileLocalContinuitySceneCardV2(
+    const localCards = compileLocalContinuitySceneCardsV2(
       lyrics, sanitizedBible, state, cards, window.fromLineIndex, window.toLineIndex,
     );
-    if (!localCard || !await rollingSceneStillCurrent(owner, track, lyrics, fingerprint, generation, sceneEpoch)) {
+    if (localCards.length === 0 || !await rollingSceneStillCurrent(owner, track, lyrics, fingerprint, generation, sceneEpoch)) {
       return staleScene(timing);
     }
     ledger.generatedCoverage = [...ledger.generatedCoverage, {
-      fromLineIndex: localCard.fromLineIndex,
-      toLineIndex: localCard.toLineIndex,
-      sceneIDs: [localCard.sceneID],
+      fromLineIndex: localCards[0]!.fromLineIndex,
+      toLineIndex: localCards.at(-1)!.toLineIndex,
+      sceneIDs: localCards.map((card) => card.sceneID),
     }].slice(-12);
-    cards = mergeValidatedSceneCards(cards, [localCard]);
+    cards = mergeValidatedSceneCards(cards, localCards);
     coverage = coverageForCards(cards, targetMs);
-    const activation = localCard.fromMs - playheadMs < 8_000 ? "next-boundary" as const : "immediate" as const;
+    const activation = localCards[0]!.fromMs - playheadMs < 8_000 ? "next-boundary" as const : "immediate" as const;
     return {
       type: "director-coverage-resolution-v1", status: "ready", source: "local", cards,
       coverage: { ...coverage, activation }, reason: `scene-local-continuity-fallback:${reason}`, timing,

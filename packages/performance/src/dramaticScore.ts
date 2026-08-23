@@ -186,7 +186,7 @@ export const sanitizeDramaticScoreV1 = (
   if (wire.version !== "dramatic-score-v1" || !Array.isArray(wire.acts) || !Array.isArray(wire.signatureMoments) || !Array.isArray(wire.quietWindows)) return null;
   const premise = clean(wire.premise, 240);
   const emotionalArc = clean(wire.emotionalArc, 320);
-  if (!premise || !emotionalArc || wire.acts.length < 2 || wire.acts.length > 5 || wire.signatureMoments.length < 2 || wire.signatureMoments.length > 4) return null;
+  if (!premise || !emotionalArc || wire.acts.length < 2 || wire.acts.length > 5 || wire.signatureMoments.length < 2 || wire.signatureMoments.length > 8) return null;
 
   const acts: DramaticActV1[] = [];
   for (const candidate of wire.acts) {

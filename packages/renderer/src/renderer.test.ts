@@ -10,6 +10,7 @@ import {
   dissolveEnvelopeAtV1,
   fitAnchoredLineV1,
   readingCompositionForV1,
+  readingContextLinesV1,
   readingStackStateAtV1,
   reducedMotionPrimitiveUseV1,
 } from "./drawDirected";
@@ -105,6 +106,28 @@ describe("PreparedStageV0", () => {
 });
 
 describe("PreparedDirectedStageV1", () => {
+  it("expands a directed lyric phrase into a seven-line narrative field", () => {
+    const lyrics = lyricFixtures.longSongStructure;
+    const local = compileLocalDirectorPlanV1(lyrics);
+    const plan: DirectorPlanV1 = {
+      ...local,
+      source: "ai",
+      planIdentity: `${local.planIdentity}:dense-reading`,
+      sections: local.sections.map((section) => ({ ...section, intensity: 0.86 })),
+    };
+    const stage = prepareDirectedStageV1(
+      lyrics,
+      plan,
+      { width: 1920, height: 1080, rendererVersion: "test-dense-reading" },
+      measure,
+    );
+    const current = stage.lines[Math.floor(stage.lines.length / 2)]!;
+    const context = readingContextLinesV1(stage, current);
+
+    expect(context.map((line) => line.lineIndex)).toHaveLength(7);
+    expect(context.map((line) => line.lineIndex)).toContain(current.lineIndex);
+  });
+
   it("gives final dissolution a bounded clock envelope instead of persistent hard strips", () => {
     expect(dissolveEnvelopeAtV1(10_000, 20_000, 9_999, false)).toBe(0);
     expect(dissolveEnvelopeAtV1(10_000, 20_000, 10_000, false)).toBe(0);

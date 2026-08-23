@@ -153,7 +153,7 @@ describe("rolling director core", () => {
       && !("coverRole" in anchor) && !("consequence" in anchor))).toBe(true);
   });
 
-  it("requires the long-song anchor count exception and rejects a third layout transition", () => {
+  it("requires the long-song anchor count exception and allows up to four layout transitions", () => {
     const lyrics = normalLongLyrics();
     const bible = compileLocalDirectorBibleV1(lyrics);
     expect(bible.signatureAnchors.length).toBeGreaterThanOrEqual(3);
@@ -184,10 +184,25 @@ describe("rolling director core", () => {
       ...bible,
       layoutBudget: {
         ...bible.layoutBudget,
+        maximumTransitions: 3,
         proposedTransitions: [transition(1, "editorialSplit"), transition(2, "railLeading"), transition(3, "railTrailing")],
       },
     });
-    expect(sanitizeDirectorBibleV1(lyrics, thirdTransition)).toBeNull();
+    expect(sanitizeDirectorBibleV1(lyrics, thirdTransition)).toEqual(thirdTransition);
+
+    const fifthTransition = reidentifyBible({
+      ...thirdTransition,
+      layoutBudget: {
+        ...thirdTransition.layoutBudget,
+        maximumTransitions: 4,
+        proposedTransitions: [
+          ...thirdTransition.layoutBudget.proposedTransitions,
+          thirdTransition.layoutBudget.proposedTransitions[0]!,
+          thirdTransition.layoutBudget.proposedTransitions[1]!,
+        ],
+      },
+    });
+    expect(sanitizeDirectorBibleV1(lyrics, fifthTransition)).toBeNull();
   });
 
   it("rejects a signature card that uses only one gesture scale", () => {

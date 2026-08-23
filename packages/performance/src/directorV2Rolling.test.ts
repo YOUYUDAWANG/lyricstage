@@ -11,7 +11,12 @@ import {
   sanitizeSceneCardV1,
   sceneCardIdentityV1,
 } from "./rollingDirector";
-import { compileLocalContinuitySceneCardV2, compileWindowIntentV2ToSceneCardV1 } from "./directorV2Rolling";
+import {
+  compileLocalContinuitySceneCardV2,
+  compileLocalContinuitySceneCardsV2,
+  compileWindowIntentV2ToSceneCardV1,
+  compileWindowIntentV2ToSceneCardsV1,
+} from "./directorV2Rolling";
 import type { WindowIntentV2 } from "./directorV2Fixtures";
 
 const lyrics = lyricFixtures.wordTimedMixed;
@@ -102,8 +107,8 @@ describe("rolling Director V2 compiler", () => {
     });
     expect(directed).not.toBeNull();
     expect(directed?.semanticCueCount).toBe(3);
-    expect(directed?.gestures).toHaveLength(3);
-    expect(directed?.effects).toHaveLength(3);
+    expect(directed?.gestures.length).toBeGreaterThanOrEqual(3);
+    expect(directed?.effects.length).toBeGreaterThanOrEqual(3);
 
     const plan = compileDirectorPlanFromRollingV1(longLyrics, longBible, [directed!]);
     directed!.effects.forEach((effect) => {
@@ -112,6 +117,57 @@ describe("rolling Director V2 compiler", () => {
         toMs: effect.toMs,
       });
     });
+  });
+
+  it("turns one dense semantic window into a contiguous multi-scene performance", () => {
+    const longLyrics = {
+      ...lyricFixtures.longSongStructure,
+      recordingID: "fixture:director-v2-multi-scene",
+      durationMs: 60_000,
+      lines: Array.from({ length: 15 }, (_, lineIndex) => ({
+        lineIndex,
+        fromMs: lineIndex * 4_000,
+        toMs: lineIndex * 4_000 + 3_600,
+        text: `narrative phrase ${lineIndex}`,
+        voiceRole: "lead" as const,
+      })),
+    };
+    const longBible = compileLocalDirectorBibleV1(longLyrics);
+    const initial = initialRollingPerformanceStateV1(longBible);
+    const cueLines = [1, 4, 7, 10, 13];
+    const cards = compileWindowIntentV2ToSceneCardsV1(longLyrics, longBible, initial, {
+      version: "window-intent-v2",
+      bibleIdentity: longBible.bibleIdentity,
+      entryStateHash: initial.stateHash,
+      id: "dense:0-14",
+      fromLineIndex: 0,
+      toLineIndex: 14,
+      spatialIntent: "open",
+      coverRole: "portal",
+      arcIntent: "lift",
+      cues: cueLines.map((lineIndex, index) => ({
+        id: `dense:${index}`,
+        version: "semantic-cue-v2" as const,
+        role: (["release", "rupture", "refrain", "handoff", "release"] as const)[index]!,
+        fromLineIndex: lineIndex,
+        evidenceLineIndices: [lineIndex],
+        confidence: 0.9,
+      })),
+    });
+
+    expect(cards.length).toBeGreaterThanOrEqual(4);
+    expect(cards[0]?.fromLineIndex).toBe(0);
+    expect(cards.at(-1)?.toLineIndex).toBe(14);
+    expect(cards.reduce((total, card) => total + (card.semanticCueCount ?? 0), 0)).toBe(5);
+    cards.forEach((card, index) => {
+      if (index > 0) expect(card.fromLineIndex).toBe(cards[index - 1]!.toLineIndex + 1);
+      expect(card.gestures.length).toBeGreaterThan(0);
+      expect(card.effects.length).toBeGreaterThan(0);
+    });
+
+    const localCards = compileLocalContinuitySceneCardsV2(longLyrics, longBible, initial, [], 0, 14);
+    expect(localCards.length).toBeGreaterThanOrEqual(4);
+    expect(localCards.every((card) => card.gestures.length > 0 && card.effects.length > 0)).toBe(true);
   });
 
   it("keeps the prior visual world when local continuity follows an AI window", () => {

@@ -20,7 +20,7 @@ export const negativeSceneCacheIdentityV1 = (
 export const semanticCueBudgetExceededV2 = (
   accepted: readonly Pick<SceneCardV1, "semanticCueCount">[],
   generated: readonly Pick<SceneCardV1, "semanticCueCount">[],
-  maximum = 12,
+  maximum = 32,
 ): boolean => [...accepted, ...generated]
   .reduce((total, card) => total + (card.semanticCueCount ?? 0), 0) > maximum;
 

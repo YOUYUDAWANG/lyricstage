@@ -105,7 +105,7 @@ export const directorBibleSchemaV1: JSONSchema = {
     signatureAnchors: {
       type: "array",
       minItems: 2,
-      maxItems: 4,
+      maxItems: 8,
       items: {
         type: "object",
         additionalProperties: false,
@@ -144,10 +144,10 @@ export const directorBibleSchemaV1: JSONSchema = {
       required: ["baseLayout", "maximumTransitions", "proposedTransitions", "continuityJustification"],
       properties: {
         baseLayout: { enum: ["monument", "editorialSplit", "railLeading", "railTrailing", "duetDivide"] },
-        maximumTransitions: { const: 2 },
+        maximumTransitions: { enum: [2, 3, 4] },
         proposedTransitions: {
           type: "array",
-          maxItems: 2,
+          maxItems: 4,
           items: {
             type: "object",
             additionalProperties: false,
@@ -303,7 +303,7 @@ export const windowIntentSchemaV2: JSONSchema = {
     arcIntent: { enum: ["hold", "lift", "break", "recall"] },
     cues: {
       type: "array",
-      maxItems: 3,
+      maxItems: 6,
       items: {
         type: "object",
         additionalProperties: false,
@@ -328,9 +328,9 @@ export const windowIntentSchemaV2: JSONSchema = {
 
 export const directorBibleSystemPromptV1 = `You are LyricStage's rolling dramaturg. Return one Director Bible JSON object matching the supplied schema.
 
-The Bible is the whole-song constitution: premise, emotional arc, 2-5 contiguous acts, exactly one motif actor, 2-4 ordered signature anchors, at least 40 percent quiet lyric time, world physics and a global layout budget of at most two transitions. It identifies where and why a later scene may act, but it never authors scene choreography.
+The Bible is the whole-song constitution: premise, emotional arc, 2-5 contiguous acts, exactly one motif actor, 2-8 ordered signature anchors, at least 18 percent quiet lyric time, world physics and a global layout budget of two to four transitions. It identifies where and why a later scene may act, but it never authors scene choreography.
 
-Do not output gestures, effects, stage actions, cover blocking consequences, coordinates, paths, SVG, CSS, JavaScript, colors, keyframes, rewritten lyrics or invented timing. A normal song of at least 150 seconds and 24 lyric lines uses 3-4 signature anchors. Two requires evidence-backed uninterrupted continuity with confidence at least 0.85. Zero layout transitions requires two independent evidence categories and confidence at least 0.82. Output JSON only.`;
+Do not output gestures, effects, stage actions, cover blocking consequences, coordinates, paths, SVG, CSS, JavaScript, colors, keyframes, rewritten lyrics or invented timing. A normal song of at least 150 seconds and 24 lyric lines should use 5-7 signature anchors so its setup, developments, reversal, climax and resolution are all legible. Two to four anchors are reserved for short songs or unusually continuous forms. Use three or four justified layout transitions when the acts genuinely change perspective; zero transitions requires two independent evidence categories and confidence at least 0.82. Output JSON only.`;
 
 export const scenePackSystemPromptV1 = `You are LyricStage's rolling scene dramaturg. Return one Scene Pack JSON object matching the supplied schema. The scenes array must contain exactly one Scene Card whose fromLineIndex and toLineIndex cover the entire supplied window. Do not split the window into multiple scenes.
 
@@ -340,7 +340,7 @@ Use only supplied lyric text, verified evidence and registered primitives. Never
 
 export const windowIntentSystemPromptV2 = `You are LyricStage's semantic performance director. Return one WindowIntentV2 JSON object matching the supplied schema and covering the exact supplied lyric window.
 
-Output only structural intent and zero to three sparse semantic cues. A cue marks a real refrain, rupture, release, hold, voice handoff, or recall; it does not describe an animation. When an active window contains at least two distinct semantic turns, use two cues so the local compiler can stage a beginning and a consequence. Use one cue for a single exceptional turn, and three only when a separate recall or voice handoff is also strongly evidenced. Return zero cues for a genuinely restrained window. Do not add cues merely to reach a count. Cue ranges must stay inside the requested window. Evidence stays inside the window except that recall must cite at least one earlier Bible anchor line.
+Output only structural intent and up to six semantic cues. A cue marks a real refrain, rupture, release, hold, voice handoff, or recall; it does not describe an animation. Treat the supplied window as a narrative passage with a beginning, development, consequence and, when evidenced, recall. An active window normally uses three to five cues distributed across distinct turns; use one or two only for a genuinely narrow or restrained passage, and six when the window contains several independently evidenced turns. Zero cues is reserved for instrumental silence or an explicitly continuous hold. Do not collapse multiple real turns into one cue merely to keep the performance sparse. Cue ranges must stay inside the requested window. Evidence stays inside the window except that recall must cite at least one earlier Bible anchor line.
 
 Do not echo Bible identity, rolling state identity, or the requested window envelope. The local adapter binds those transport fields and treats any model echo as untrusted.
 

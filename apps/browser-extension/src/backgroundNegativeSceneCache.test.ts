@@ -32,12 +32,12 @@ describe("rolling negative scene cache", () => {
 
   it("enforces the whole-song semantic cue ceiling", () => {
     expect(semanticCueBudgetExceededV2(
-      [{ semanticCueCount: 3 }, { semanticCueCount: 3 }],
-      [{ semanticCueCount: 3 }, { semanticCueCount: 3 }],
+      [{ semanticCueCount: 6 }, { semanticCueCount: 6 }, { semanticCueCount: 6 }],
+      [{ semanticCueCount: 6 }, { semanticCueCount: 6 }, { semanticCueCount: 2 }],
     )).toBe(false);
     expect(semanticCueBudgetExceededV2(
-      [{ semanticCueCount: 3 }, { semanticCueCount: 3 }],
-      [{ semanticCueCount: 3 }, { semanticCueCount: 3 }, { semanticCueCount: 1 }],
+      [{ semanticCueCount: 6 }, { semanticCueCount: 6 }, { semanticCueCount: 6 }],
+      [{ semanticCueCount: 6 }, { semanticCueCount: 6 }, { semanticCueCount: 3 }],
     )).toBe(true);
   });
 });

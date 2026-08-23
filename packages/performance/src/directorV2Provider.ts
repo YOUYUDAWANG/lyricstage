@@ -1,6 +1,6 @@
 import type { LyricDocumentV0 } from "@lyricstage/contracts";
 import type { DirectorRequestProfileV1 } from "./directorProviders";
-import { compileWindowIntentV2ToSceneCardV1 } from "./directorV2Rolling";
+import { compileWindowIntentV2ToSceneCardsV1 } from "./directorV2Rolling";
 import type { WindowIntentV2 } from "./directorV2Fixtures";
 import {
   compactScenePackPromptInputV1,
@@ -52,7 +52,7 @@ export const windowIntentRequestProfileV2: DirectorRequestProfileV1<SceneCardV1[
       || !coverRoles.has(raw.coverRole as never)
       || !arcIntents.has(raw.arcIntent as never)
       || !Array.isArray(raw.cues)
-      || raw.cues.length > 3) return { reason: "window-intent-contract-invalid" };
+      || raw.cues.length > 6) return { reason: "window-intent-contract-invalid" };
     const validLineIndices = new Set(input.lyrics.lines
       .filter((line) => line.lineIndex >= requestedFrom && line.lineIndex <= requestedTo)
       .map((line) => line.lineIndex));
@@ -107,8 +107,8 @@ export const windowIntentRequestProfileV2: DirectorRequestProfileV1<SceneCardV1[
       arcIntent: raw.arcIntent as WindowIntentV2["arcIntent"],
       cues,
     };
-    const card = compileWindowIntentV2ToSceneCardV1(input.lyrics, input.bible, input.state, intent);
-    return card ? { response: [card] } : { reason: "window-intent-local-compile-invalid" };
+    const cards = compileWindowIntentV2ToSceneCardsV1(input.lyrics, input.bible, input.state, intent);
+    return cards.length > 0 ? { response: cards } : { reason: "window-intent-local-compile-invalid" };
   },
   repair(value, aiValue, reason) {
     if (!aiValue || typeof aiValue !== "object" || Array.isArray(aiValue)) return { reason };

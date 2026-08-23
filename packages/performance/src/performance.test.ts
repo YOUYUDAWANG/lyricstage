@@ -503,6 +503,20 @@ describe("EffectGrammarV1", () => {
     });
   });
 
+  it("lets the strongest overlapping authored event control the visible presentation", () => {
+    const plan = compileLocalDirectorPlanV1(lyricFixtures.longSongStructure);
+    const base = plan.effects[0]!;
+    const hero = {
+      ...base,
+      id: `${base.id}:hero-overlap`,
+      cardID: "custom" as const,
+      presentation: "hero" as const,
+      primary: { ...base.primary, intensity: 0.94 },
+    };
+    expect(effectRecipeAtV1([base, hero], base.fromMs)).toBe(hero);
+    expect(stagePresentationAtV1([base, hero], base.fromMs)).toBe("hero");
+  });
+
   it("rejects conflicting, over-budget and ungrounded strong recipes", () => {
     const plan = compileLocalDirectorPlanV1(lyricFixtures.longSongStructure);
     const section = plan.sections[0]!;

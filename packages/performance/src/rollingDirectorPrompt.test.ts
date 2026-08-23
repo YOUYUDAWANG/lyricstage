@@ -24,10 +24,10 @@ describe("rolling director prompts", () => {
     expect(scenePackSystemPromptV1).toContain("supplied lyric window");
   });
 
-  it("asks active windows for enough semantic structure without turning cue count into a hard art metric", () => {
-    expect(windowIntentSystemPromptV2).toContain("two distinct semantic turns");
-    expect(windowIntentSystemPromptV2).toContain("use two cues");
-    expect(windowIntentSystemPromptV2).toContain("Do not add cues merely to reach a count");
+  it("asks active windows for a visible narrative progression without model-authored visuals", () => {
+    expect(windowIntentSystemPromptV2).toContain("up to six semantic cues");
+    expect(windowIntentSystemPromptV2).toContain("normally uses three to five cues");
+    expect(windowIntentSystemPromptV2).toContain("Zero cues is reserved for instrumental silence");
   });
 
   it("keeps JSON Schema required fields aligned with strict local evidence validation", () => {

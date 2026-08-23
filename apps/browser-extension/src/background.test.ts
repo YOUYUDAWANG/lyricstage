@@ -1253,7 +1253,7 @@ describe("YouTube Music background routing", () => {
     expect(response).toMatchObject({
       status: "ready", source: "local", reason: expect.stringContaining("scene-local-continuity-fallback"),
     });
-    expect(response.cards).toHaveLength(1);
+    expect(response.cards.length).toBeGreaterThan(1);
     expect(Object.values((storage.get("lyricstage-director-scene-cache-v1") as Record<string, unknown> | undefined) ?? {}))
       .toHaveLength(0);
   });

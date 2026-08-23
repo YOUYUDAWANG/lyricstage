@@ -727,6 +727,16 @@ export const readingStackStateAtV1 = (
   };
 };
 
+export const readingContextLinesV1 = (
+  stage: PreparedDirectedStageV1,
+  current: PreparedDirectedLineV1,
+): PreparedDirectedLineV1[] => {
+  const position = stage.lines.findIndex((line) => line.lineIndex === current.lineIndex);
+  if (position < 0) return [current];
+  const radius = stage.plan.source !== "local" && current.section.intensity >= 0.72 ? 3 : 2;
+  return stage.lines.slice(Math.max(0, position - radius), Math.min(stage.lines.length, position + radius + 1));
+};
+
 const drawReading = (
   context: CanvasRenderingContext2D,
   stage: PreparedDirectedStageV1,
@@ -744,7 +754,22 @@ const drawReading = (
   const currentPosition = stage.lines.findIndex((line) => line.lineIndex === current.lineIndex);
   const previous = currentPosition > 0 ? stage.lines[currentPosition - 1] : undefined;
   const next = currentPosition >= 0 ? stage.lines[currentPosition + 1] : undefined;
+  const contextLines = readingContextLinesV1(stage, current);
+  const earlier = contextLines.filter((line) => line.lineIndex < current.lineIndex).reverse().slice(1);
+  const later = contextLines.filter((line) => line.lineIndex > current.lineIndex).slice(1);
   const stack = readingStackStateAtV1(current, composition, timeMs, Boolean(previous), reduceMotion);
+  earlier.forEach((line, index) => drawAnchoredLine(
+    context, stage, line, Number.POSITIVE_INFINITY, palette, true,
+    composition.previousX,
+    Math.max(height * 0.09, stack.previousY - height * (0.12 + index * 0.105)),
+    composition.adjacentWidth,
+    height * 0.15,
+    Math.max(0.24, 0.34 - index * 0.05),
+    Math.max(0.055, 0.13 - index * 0.04),
+    palette.ink,
+    "settle",
+    composition.horizontalAnchor,
+  ));
   if (previous) drawAnchoredLine(context, stage, previous, Number.POSITIVE_INFINITY, palette, true, composition.previousX, stack.previousY, composition.adjacentWidth, height * 0.25, stack.previousScale, stack.previousOpacity, palette.ink, "settle", composition.horizontalAnchor);
   drawAnchoredLine(context, stage, current, Number.POSITIVE_INFINITY, palette, true, composition.currentX, stack.currentY, composition.currentWidth, height * 0.46, stack.currentScale, 0.12 * stack.currentOpacity, palette.ink, "settle", composition.horizontalAnchor);
   drawAnchoredLine(
@@ -765,6 +790,18 @@ const drawReading = (
     composition.horizontalAnchor,
   );
   if (next) drawAnchoredLine(context, stage, next, Number.POSITIVE_INFINITY, palette, true, composition.nextX, stack.nextY, composition.adjacentWidth, height * 0.29, stack.nextScale, stack.nextOpacity, palette.ink, "settle", composition.horizontalAnchor);
+  later.forEach((line, index) => drawAnchoredLine(
+    context, stage, line, Number.POSITIVE_INFINITY, palette, true,
+    composition.nextX,
+    Math.min(height * 0.91, stack.nextY + height * (0.11 + index * 0.095)),
+    composition.adjacentWidth,
+    height * 0.14,
+    Math.max(0.22, 0.32 - index * 0.05),
+    Math.max(0.05, 0.12 - index * 0.035),
+    palette.ink,
+    "settle",
+    composition.horizontalAnchor,
+  ));
   active.slice(1).forEach((line, index) => {
     drawAnchoredLine(context, stage, line, timeMs, palette, reduceMotion, width * (index % 2 ? 0.68 : 0.32), height * 0.62, width * 0.43, height * 0.30, 0.64, 0.84, palette.secondary);
   });

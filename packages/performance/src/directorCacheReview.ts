@@ -79,6 +79,7 @@ const summaryCacheEpochs = new Set([
   "rolling-director-generation-v1.2-window-intent-v2",
   "rolling-director-generation-v1.3-window-intent-v2",
   "rolling-director-generation-v1.4-window-intent-density-v2",
+  "rolling-director-generation-v1.5-narrative-density-v2",
 ]);
 const warningOrder: readonly DirectorDiversityWarningV1[] = [
   "minimum-budget", "single-scale", "static-without-evidence", "repeated-tuple", "coverage-gap", "local-repair-heavy",
@@ -241,7 +242,7 @@ export const sanitizeDirectorCacheSummaryV1 = (value: unknown): DirectorCacheSum
     item.coveragePercent, item.layoutTransitionCount, item.actCount, item.signatureMomentCount, item.effectCount, item.quietSharePercent,
     item.gestureCounts.glyph, item.gestureCounts.token, item.gestureCounts.phrase, item.gestureCounts.total];
   if (numbers.some((number) => typeof number !== "number" || !Number.isFinite(number) || number < 0)
-    || item.coveragePercent! > 100 || item.quietSharePercent! > 100 || item.layoutTransitionCount! > 2
+    || item.coveragePercent! > 100 || item.quietSharePercent! > 100 || item.layoutTransitionCount! > 4
     || item.source !== "cache" && item.source !== "network" && item.source !== "local" || item.biblePresent !== true
     || typeof item.continuityJustificationAccepted !== "boolean" || typeof item.reachedFinalWindow !== "boolean"
     || item.localRepairFlags.some((flag) => !repairCategories.has(flag))
