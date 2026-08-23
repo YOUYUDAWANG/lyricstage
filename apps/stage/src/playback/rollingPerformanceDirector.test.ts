@@ -127,11 +127,25 @@ describe("rolling Performance Director", () => {
       status: "ready", source: "cache", cards: cards.slice(0, 1),
     }, cards[0]!.fromMs, 7);
     expect(rollingCoverageAtV1(accepted.cards, cards[0]!.fromMs).aheadMs).toBeGreaterThan(0);
-    expect(handleRollingSeekV1(accepted, local, cards[0]!.fromMs).useLocalImmediately).toBe(false);
+    expect(handleRollingSeekV1(accepted, local, cards[0]!.fromMs, fixture).useLocalImmediately).toBe(false);
     const outside = Math.min(fixture.durationMs, cards[0]!.toMs + 100);
-    const reset = handleRollingSeekV1(accepted, local, outside);
+    const reset = handleRollingSeekV1(accepted, local, outside, fixture);
     expect(reset).toMatchObject({ useLocalImmediately: true });
     expect(reset.state.compiledPlan.planIdentity).toBe(local.planIdentity);
+  });
+
+  it("rebuilds the rolling plan when a backward seek returns from an uncovered local gap", () => {
+    const accepted = reduceRollingCoverageResultV1(fixture, withBible(), {
+      status: "ready", source: "network", cards: cards.slice(0, 1),
+    }, cards[0]!.fromMs, 7);
+    const outside = Math.min(fixture.durationMs, cards[0]!.toMs + 100);
+    const localGap = handleRollingSeekV1(accepted, local, outside, fixture);
+    expect(localGap.state.compiledPlan).toBe(local);
+
+    const restored = handleRollingSeekV1(localGap.state, local, cards[0]!.fromMs, fixture);
+    expect(restored.useLocalImmediately).toBe(false);
+    expect(restored.state.compiledPlan.source).not.toBe("local");
+    expect(restored.state.compiledPlan.sections.some((section) => section.id === `rolling:${cards[0]!.sceneID}`)).toBe(true);
   });
 
   it("releases an obsolete pending window when a seek needs a new request", () => {
@@ -142,7 +156,7 @@ describe("rolling Performance Director", () => {
       pendingWindow: oldWindow,
     };
     const target = Math.min(fixture.durationMs, cards[0]!.toMs + 100);
-    const seek = handleRollingSeekV1(pending, local, target);
+    const seek = handleRollingSeekV1(pending, local, target, fixture);
     expect(seek.state.status).toBe("ready");
     expect(seek.state.pendingWindow).toBeUndefined();
     expect(shouldRefillRollingCoverageV1(seek.state, target, fixture.durationMs, false, target)).toBe(true);

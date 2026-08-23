@@ -254,14 +254,31 @@ export const handleRollingSeekV1 = (
   state: RollingDirectorRuntimeStateV1,
   localPlan: DirectorPlanV1,
   targetMs: number,
+  lyrics: LyricDocumentV0,
 ): { state: RollingDirectorRuntimeStateV1; useLocalImmediately: boolean } => {
   const covered = rollingCoverageAtV1(state.cards, targetMs).aheadMs > 0;
   const current = state.status === "coverage-requesting"
     ? { ...state, status: "ready" as const, pendingWindow: undefined }
     : state;
-  return covered
-    ? { state: current, useLocalImmediately: false }
-    : { state: { ...current, compiledPlan: localPlan, coverageFromMs: targetMs, coverageToMs: targetMs }, useLocalImmediately: true };
+  if (!covered) return {
+    state: { ...current, compiledPlan: localPlan, coverageFromMs: targetMs, coverageToMs: targetMs },
+    useLocalImmediately: true,
+  };
+  const planAlreadyCoversTarget = current.compiledPlan.sections.some((section) =>
+    section.id.startsWith("rolling:") && targetMs >= section.fromMs && targetMs < section.toMs);
+  if (planAlreadyCoversTarget || !current.bible) return { state: current, useLocalImmediately: false };
+  const restoredSource: DirectorPlanV1["source"] = current.cards.some((card) => card.directives !== undefined)
+    ? "ai"
+    : current.bibleSource === "local"
+      ? "local"
+      : current.bibleSource === "cache" ? "cache" : "ai";
+  return {
+    state: {
+      ...current,
+      compiledPlan: compileDirectorPlanFromRollingV1(lyrics, current.bible, current.cards, restoredSource),
+    },
+    useLocalImmediately: false,
+  };
 };
 
 export const rollingDirectorStatusCopyV1 = (state: RollingDirectorRuntimeStateV1): string => {

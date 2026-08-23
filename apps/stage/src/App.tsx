@@ -490,7 +490,7 @@ export default function App({ embedded = embeddedStageFromLocation, onEmbeddedRe
       rollingClockObservationRef.current = observation;
       if (detectedSeek !== undefined) {
         rollingSeekTargetRef.current = detectedSeek;
-        const seek = handleRollingSeekV1(current, localDirectorPlan, detectedSeek);
+        const seek = handleRollingSeekV1(current, localDirectorPlan, detectedSeek, lyrics);
         current = seek.state;
         rollingDirectorStateRef.current = current;
         setRollingDirectorState(current);
@@ -1099,7 +1099,7 @@ export default function App({ embedded = embeddedStageFromLocation, onEmbeddedRe
       if (rollingDirectorRoute.generateRolling) {
         const lyricTargetMs = lyricsTimeForPlaybackMs(nextMs, effectiveLyricsOffsetMs, durationMs);
         rollingSeekTargetRef.current = lyricTargetMs;
-        const seek = handleRollingSeekV1(rollingDirectorStateRef.current, localDirectorPlan, lyricTargetMs);
+        const seek = handleRollingSeekV1(rollingDirectorStateRef.current, localDirectorPlan, lyricTargetMs, lyrics);
         appliedSeekState = seek.state;
         rollingDirectorStateRef.current = seek.state;
         setRollingDirectorState(seek.state);
