@@ -1,0 +1,269 @@
+import type {
+  DirectorPlanV1,
+  EnvironmentSceneV1,
+  PerformanceMotionLawV1,
+} from "@lyricstage/performance";
+import type { DirectedStagePaletteV1 } from "@lyricstage/renderer";
+
+export interface StageAmbientFrameV1 {
+  motifTranslateXPct: number;
+  motifTranslateYPct: number;
+  motifScale: number;
+  motifRotationDeg: number;
+  motifOpacity: number;
+  washPrimaryTranslateXPct: number;
+  washPrimaryTranslateYPct: number;
+  washPrimaryScale: number;
+  washPrimaryRotationDeg: number;
+  washSecondaryTranslateXPct: number;
+  washSecondaryTranslateYPct: number;
+  washSecondaryScale: number;
+  washSecondaryRotationDeg: number;
+  artworkScale: number;
+  artworkSaturation: number;
+  artworkBrightness: number;
+}
+
+export interface StageFrameV1 {
+  generation: number;
+  playbackTimeMs: number;
+  timeMs: number;
+  plan: DirectorPlanV1;
+  environmentScene: EnvironmentSceneV1;
+  palette: DirectedStagePaletteV1;
+  reduceMotion: boolean;
+  vjMode: boolean;
+  showGuides: boolean;
+  ambient: StageAmbientFrameV1;
+}
+
+export interface StageFrameInputV1 {
+  playbackTimeMs: number;
+  timeMs: number;
+  plan: DirectorPlanV1;
+  environmentScene: EnvironmentSceneV1;
+  palette: DirectedStagePaletteV1;
+  sectionIntensity: number;
+  reduceMotion: boolean;
+  vjMode: boolean;
+  showGuides: boolean;
+}
+
+export interface StageFrameBuffersV1 {
+  readonly frames: readonly [StageFrameV1, StageFrameV1];
+  generation: number;
+  writeIndex: 0 | 1;
+}
+
+export const stageEnvironmentSceneKeyV1 = (planIdentity: string, sectionID: string): string =>
+  `${planIdentity}\u0000${sectionID}`;
+
+const TAU = Math.PI * 2;
+const clamp01 = (value: number): number => Math.min(1, Math.max(0, value));
+const finiteTime = (timeMs: number): number => Number.isFinite(timeMs) ? Math.max(0, timeMs) : 0;
+const lerp = (from: number, to: number, amount: number): number => from + (to - from) * amount;
+const easeInOutSine = (amount: number): number => (1 - Math.cos(Math.PI * clamp01(amount))) / 2;
+
+const alternateProgress = (timeMs: number, legDurationMs: number, reverse = false): number => {
+  const phase = (finiteTime(timeMs) / legDurationMs) % 2;
+  const progress = phase <= 1 ? phase : 2 - phase;
+  return reverse ? 1 - progress : progress;
+};
+
+const threePoint = (
+  progress: number,
+  midpoint: number,
+  from: number,
+  middle: number,
+  to: number,
+): number => progress <= midpoint
+  ? lerp(from, middle, easeInOutSine(progress / midpoint))
+  : lerp(middle, to, easeInOutSine((progress - midpoint) / (1 - midpoint)));
+
+const sampleWorldMotion = (
+  motionLaw: PerformanceMotionLawV1,
+  timeMs: number,
+  elasticity: number,
+  target: StageAmbientFrameV1,
+): void => {
+  target.motifTranslateXPct = 0;
+  target.motifTranslateYPct = 0;
+  target.motifScale = 1.08;
+  target.motifRotationDeg = 0;
+  const elasticScale = 0.7 + clamp01(elasticity) * 0.3;
+  if (motionLaw === "flow") {
+    const progress = easeInOutSine(alternateProgress(timeMs, 13_000));
+    target.motifTranslateXPct = lerp(-2.4, 2.8, progress) * elasticScale;
+    target.motifTranslateYPct = lerp(1.2, -1.8, progress) * elasticScale;
+    target.motifScale = lerp(1.08, 1.14, progress);
+    target.motifRotationDeg = lerp(-0.4, 0.5, progress) * elasticScale;
+    return;
+  }
+  if (motionLaw === "pulse") {
+    const progress = easeInOutSine((finiteTime(timeMs) % 4_800) / 4_800);
+    const mirrored = progress <= 0.5 ? progress * 2 : (1 - progress) * 2;
+    target.motifScale = lerp(1.06, 1.08 + clamp01(elasticity) * 0.055, mirrored);
+    return;
+  }
+  if (motionLaw === "fall") {
+    const progress = easeInOutSine(alternateProgress(timeMs, 10_000));
+    target.motifTranslateYPct = lerp(-4, 4, progress) * elasticScale;
+    target.motifScale = lerp(1.1, 1.12, progress);
+    return;
+  }
+  if (motionLaw === "orbit") {
+    const progress = (finiteTime(timeMs) % 18_000) / 18_000;
+    target.motifScale = 1.12;
+    target.motifRotationDeg = progress * 360;
+    return;
+  }
+  if (motionLaw === "converge") {
+    const progress = easeInOutSine(alternateProgress(timeMs, 8_000));
+    target.motifScale = lerp(1.24, 1.04, progress);
+    return;
+  }
+  if (motionLaw === "suspend") {
+    const progress = easeInOutSine(alternateProgress(timeMs, 14_000));
+    target.motifTranslateYPct = lerp(-0.8, 0.8, progress) * elasticScale;
+    target.motifScale = 1.1;
+    return;
+  }
+  if (motionLaw === "fracture") {
+    const progress = (finiteTime(timeMs) % 7_000) / 7_000;
+    target.motifScale = 1.1;
+    if (progress >= 0.9 && progress < 0.92) {
+      target.motifTranslateXPct = -0.6 * elasticScale;
+      target.motifTranslateYPct = 0.2 * elasticScale;
+      target.motifScale = 1.105;
+    } else if (progress >= 0.92 && progress < 0.94) {
+      target.motifTranslateXPct = 0.5 * elasticScale;
+      target.motifTranslateYPct = -0.2 * elasticScale;
+      target.motifScale = 1.095;
+    }
+  }
+};
+
+export const sampleStageAmbientIntoV1 = (
+  plan: DirectorPlanV1,
+  timeMs: number,
+  sectionIntensity: number,
+  reduceMotion: boolean,
+  target: StageAmbientFrameV1,
+): StageAmbientFrameV1 => {
+  const world = plan.world;
+  const baseOpacity = plan.source === "local"
+    ? 0.08 + clamp01(world.atmosphere) * 0.14
+    : 0.18 + clamp01(world.atmosphere) * 0.3;
+  target.motifOpacity = baseOpacity * (0.82 + clamp01(sectionIntensity) * 0.18);
+
+  const primaryProgress = alternateProgress(timeMs, 22_000);
+  target.washPrimaryTranslateXPct = threePoint(primaryProgress, 0.48, -1.4, 1.1, 0.3);
+  target.washPrimaryTranslateYPct = threePoint(primaryProgress, 0.48, 0.8, -0.9, 1.1);
+  target.washPrimaryScale = threePoint(primaryProgress, 0.48, 1.12, 1.16, 1.14);
+  target.washPrimaryRotationDeg = threePoint(primaryProgress, 0.48, -0.22, 0.16, 0.24);
+
+  const secondaryProgress = alternateProgress(timeMs, 29_000, true);
+  target.washSecondaryTranslateXPct = threePoint(secondaryProgress, 0.48, -1.4, 1.1, 0.3);
+  target.washSecondaryTranslateYPct = threePoint(secondaryProgress, 0.48, 0.8, -0.9, 1.1);
+  target.washSecondaryScale = threePoint(secondaryProgress, 0.48, 1.12, 1.16, 1.14);
+  target.washSecondaryRotationDeg = threePoint(secondaryProgress, 0.48, -0.22, 0.16, 0.24);
+
+  const coverProgress = alternateProgress(timeMs, 11_000);
+  target.artworkSaturation = threePoint(coverProgress, 0.5, 1.02, 1.065, 1.035);
+  target.artworkBrightness = threePoint(coverProgress, 0.5, 0.98, 1.018, 1.004);
+  target.artworkScale = 1;
+  sampleWorldMotion(world.motionLaw, timeMs, world.elasticity, target);
+  if (world.motionLaw === "pulse") {
+    const phase = (finiteTime(timeMs) % 4_800) / 4_800;
+    const pulse = (1 - Math.cos(phase * TAU)) / 2;
+    const low = 0.15 + clamp01(world.atmosphere) * 0.22;
+    const high = 0.22 + clamp01(world.atmosphere) * 0.34;
+    target.motifOpacity = lerp(low, high, pulse) * (0.82 + clamp01(sectionIntensity) * 0.18);
+    target.artworkScale = lerp(1, 1.018, pulse);
+    target.artworkSaturation = lerp(1.02, 1.1, pulse);
+    target.artworkBrightness = lerp(0.99, 1.025, pulse);
+  }
+
+  if (reduceMotion) {
+    target.motifTranslateXPct = 0;
+    target.motifTranslateYPct = 0;
+    target.motifScale = 1.08;
+    target.motifRotationDeg = 0;
+    target.washPrimaryTranslateXPct = 0;
+    target.washPrimaryTranslateYPct = 0;
+    target.washPrimaryScale = 1.12;
+    target.washPrimaryRotationDeg = 0;
+    target.washSecondaryTranslateXPct = 0;
+    target.washSecondaryTranslateYPct = 0;
+    target.washSecondaryScale = 1.12;
+    target.washSecondaryRotationDeg = 0;
+    target.artworkScale = 1;
+    target.artworkSaturation = 1.02;
+    target.artworkBrightness = 1;
+  }
+  return target;
+};
+
+const createAmbientFrame = (): StageAmbientFrameV1 => ({
+  motifTranslateXPct: 0,
+  motifTranslateYPct: 0,
+  motifScale: 1,
+  motifRotationDeg: 0,
+  motifOpacity: 0,
+  washPrimaryTranslateXPct: 0,
+  washPrimaryTranslateYPct: 0,
+  washPrimaryScale: 1,
+  washPrimaryRotationDeg: 0,
+  washSecondaryTranslateXPct: 0,
+  washSecondaryTranslateYPct: 0,
+  washSecondaryScale: 1,
+  washSecondaryRotationDeg: 0,
+  artworkScale: 1,
+  artworkSaturation: 1,
+  artworkBrightness: 1,
+});
+
+const createFrame = (input: StageFrameInputV1): StageFrameV1 => ({
+  generation: 0,
+  playbackTimeMs: input.playbackTimeMs,
+  timeMs: input.timeMs,
+  plan: input.plan,
+  environmentScene: input.environmentScene,
+  palette: input.palette,
+  reduceMotion: input.reduceMotion,
+  vjMode: input.vjMode,
+  showGuides: input.showGuides,
+  ambient: sampleStageAmbientIntoV1(
+    input.plan,
+    input.timeMs,
+    input.sectionIntensity,
+    input.reduceMotion,
+    createAmbientFrame(),
+  ),
+});
+
+export const createStageFrameBuffersV1 = (input: StageFrameInputV1): StageFrameBuffersV1 => ({
+  frames: [createFrame(input), createFrame(input)],
+  generation: 0,
+  writeIndex: 0,
+});
+
+export const writeStageFrameV1 = (
+  buffers: StageFrameBuffersV1,
+  input: StageFrameInputV1,
+): StageFrameV1 => {
+  const frame = buffers.frames[buffers.writeIndex];
+  buffers.generation += 1;
+  frame.generation = buffers.generation;
+  frame.playbackTimeMs = input.playbackTimeMs;
+  frame.timeMs = input.timeMs;
+  frame.plan = input.plan;
+  frame.environmentScene = input.environmentScene;
+  frame.palette = input.palette;
+  frame.reduceMotion = input.reduceMotion;
+  frame.vjMode = input.vjMode;
+  frame.showGuides = input.showGuides;
+  sampleStageAmbientIntoV1(input.plan, input.timeMs, input.sectionIntensity, input.reduceMotion, frame.ambient);
+  buffers.writeIndex = buffers.writeIndex === 0 ? 1 : 0;
+  return frame;
+};

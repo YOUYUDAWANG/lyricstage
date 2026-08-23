@@ -4,6 +4,7 @@ import type { LyricDocumentV0 } from "@lyricstage/contracts";
 import type { PlaybackClockV0 } from "@lyricstage/core";
 import {
   directorSectionAtV1,
+  compileEnvironmentSceneV1,
   effectRecipeAtV1,
   queueDirectorPlanV1,
   sampleDirectorPlanHandoffV1,
@@ -20,7 +21,10 @@ import {
   type DirectedStagePaletteV1,
   type PreparedDirectedStageV1,
 } from "@lyricstage/renderer";
-import { PerformanceEnvironment } from "./PerformanceEnvironment";
+import {
+  PerformanceEnvironment,
+  type PerformanceEnvironmentHandle,
+} from "./PerformanceEnvironment";
 import {
   extractArtworkPaletteV1,
   mergeArtworkDirectorPaletteV1,
@@ -38,6 +42,12 @@ import {
   rollingPreparedRendererIdentityV1,
 } from "./playback/rollingPerformanceDirector";
 import { artworkCandidates, artworkShapeForAspectV1, type ArtworkShapeV1 } from "./artworkCandidates";
+import {
+  createStageFrameBuffersV1,
+  stageEnvironmentSceneKeyV1,
+  writeStageFrameV1,
+  type StageFrameBuffersV1,
+} from "./stageFrame";
 
 interface StageCanvasProps {
   lyrics: LyricDocumentV0;
@@ -114,6 +124,7 @@ export function StageCanvas({
   const hostRef = useRef<HTMLDivElement>(null);
   const lyricViewportRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
+  const environmentRef = useRef<PerformanceEnvironmentHandle>(null);
   const progressRef = useRef<HTMLInputElement>(null);
   const elapsedRef = useRef<HTMLSpanElement>(null);
   const remainingRef = useRef<HTMLSpanElement>(null);
@@ -123,6 +134,7 @@ export function StageCanvas({
   const samplerRef = useRef(new FrameSamplerV0(240));
   const displayTimeRef = useRef(displayTimeMs);
   const frameTimeRef = useRef(lyricsTimeForPlaybackMs(displayTimeMs, lyricsOffsetMs, durationMs));
+  const frameBuffersRef = useRef<StageFrameBuffersV1 | null>(null);
   const handoffRef = useRef<DirectorPlanHandoffV1>({ active: entryDirectorPlan });
   const layoutTransitionIdentityRef = useRef<string | undefined>(undefined);
   const [activeDirectorPlan, setActiveDirectorPlan] = useState(entryDirectorPlan);
@@ -157,6 +169,24 @@ export function StageCanvas({
     const section = directorSectionAtV1(activeDirectorPlan, timeMs);
     return sectionPalettes.get(section.id) ?? directedPaletteForIndexV1(section.paletteIndex);
   }, [activeDirectorPlan, sectionPalettes]);
+  const environmentScenes = useMemo(() => {
+    const scenes = new Map<string, ReturnType<typeof compileEnvironmentSceneV1>>();
+    const plans = new Map([
+      [localDirectorPlan.planIdentity, localDirectorPlan],
+      [activeDirectorPlan.planIdentity, activeDirectorPlan],
+      ...(remoteDirectorPlan ? [[remoteDirectorPlan.planIdentity, remoteDirectorPlan] as const] : []),
+    ]);
+    plans.forEach((plan) => plan.sections.forEach((section) => {
+      scenes.set(
+        stageEnvironmentSceneKeyV1(plan.planIdentity, section.id),
+        compileEnvironmentSceneV1(
+          plan.recordingID,
+          `${plan.planIdentity}:${section.artDirection}:${section.paletteIndex}:${section.id}`,
+        ),
+      );
+    }));
+    return scenes;
+  }, [activeDirectorPlan, localDirectorPlan, remoteDirectorPlan]);
 
   useEffect(() => {
     setArtworkCandidateIndex(0);
@@ -370,6 +400,23 @@ export function StageCanvas({
         paletteRef.current = nextPalette;
         setPalette(nextPalette);
       }
+      const environmentScene = environmentScenes.get(stageEnvironmentSceneKeyV1(
+        handoff.active.planIdentity,
+        activeSection.id,
+      )) ?? environmentScenes.values().next().value!;
+      const stageFrameInput = {
+        playbackTimeMs,
+        timeMs,
+        plan: handoff.active,
+        environmentScene,
+        palette: nextPalette,
+        sectionIntensity: activeSection.intensity,
+        reduceMotion,
+        vjMode,
+        showGuides,
+      };
+      if (!frameBuffersRef.current) frameBuffersRef.current = createStageFrameBuffersV1(stageFrameInput);
+      const stageFrame = writeStageFrameV1(frameBuffersRef.current, stageFrameInput);
       const nextPresentation = stagePresentationAtV1(handoff.active.effects, timeMs, lyrics);
       if (presentationRef.current !== nextPresentation) {
         presentationRef.current = nextPresentation;
@@ -377,11 +424,12 @@ export function StageCanvas({
       }
       updateProgress(playbackTimeMs);
       const duration = drawDirectedStageV1(context, prepared, {
-        timeMs,
-        reduceMotion,
-        showGuides,
-        palette: paletteRef.current,
+        timeMs: stageFrame.timeMs,
+        reduceMotion: stageFrame.reduceMotion,
+        showGuides: stageFrame.showGuides,
+        palette: stageFrame.palette,
       });
+      environmentRef.current?.renderFrame(stageFrame);
       samplerRef.current.push(duration);
       frameCount += 1;
       if (frameCount % 60 === 0) {
@@ -412,7 +460,7 @@ export function StageCanvas({
       if (renderFrameRef.current === render) renderFrameRef.current = null;
       document.removeEventListener("visibilitychange", visibilityChanged);
     };
-  }, [bibleSource, clock, continuous, directorMode, durationMs, lyricsOffsetMs, onMetrics, paletteForTime, reduceMotion, remoteDirectorPlan?.planIdentity, rollingCards, showGuides]);
+  }, [bibleSource, clock, continuous, directorMode, durationMs, environmentScenes, lyricsOffsetMs, onMetrics, paletteForTime, reduceMotion, remoteDirectorPlan?.planIdentity, rollingCards, showGuides, vjMode]);
 
   useEffect(() => {
     if (!continuous) renderFrameRef.current?.();
@@ -528,13 +576,7 @@ export function StageCanvas({
       )}
       <div className="stage-world-motif" aria-hidden="true" />
       <PerformanceEnvironment
-        plan={activeDirectorPlan}
-        timeMsRef={frameTimeRef}
-        continuous={continuous}
-        displayTimeMs={lyricsTimeForPlaybackMs(displayTimeMs, lyricsOffsetMs, durationMs)}
-        reduceMotion={reduceMotion}
-        vjMode={vjMode}
-        palette={palette}
+        ref={environmentRef}
       />
       <div className="stage-now-playing-layout" data-layout-transition-phase={layoutTransitionPhase}>
         <aside className="stage-now-playing-info" aria-label="正在播放">

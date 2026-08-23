@@ -1,14 +1,11 @@
-import { useEffect, useRef, useState } from "react";
+import { forwardRef, useEffect, useImperativeHandle, useRef } from "react";
 import { Application, Graphics } from "pixi.js";
-import type { MutableRefObject } from "react";
 import {
-  compileEnvironmentSceneV1,
   directorSectionAtV1,
   effectRecipeAtV1,
   sampleEnvironmentSceneV1,
   type DirectorPlanV1,
   type EnvironmentFrameV1,
-  type EnvironmentSceneV1,
   type EnvironmentTuningV1,
 } from "@lyricstage/performance";
 import {
@@ -16,22 +13,23 @@ import {
   type DirectedStagePaletteV1,
 } from "@lyricstage/renderer";
 import { canvasBackingStoreForV1 } from "./canvasBackingStore";
+import type { StageFrameV1 } from "./stageFrame";
 
 export type PerformanceEnvironmentStatus = "loading" | "webgl" | "canvas2d" | "failed";
+
+export interface PerformanceEnvironmentHandle {
+  renderFrame: (frame: StageFrameV1) => void;
+}
 
 const tuningFor = (
   plan: DirectorPlanV1,
   timeMs: number,
   reduceMotion: boolean,
   vjMode: boolean,
-): { scene: EnvironmentSceneV1; tuning: EnvironmentTuningV1; energy: number } => {
+): { tuning: EnvironmentTuningV1; energy: number } => {
   const section = directorSectionAtV1(plan, timeMs);
   const recipe = effectRecipeAtV1(plan.effects, timeMs);
   const world = plan.world;
-  const scene = compileEnvironmentSceneV1(
-    plan.recordingID,
-    `${plan.planIdentity}:${section.artDirection}:${section.paletteIndex}:${section.id}`,
-  );
   const recipeEnergy = recipe?.primary.primitive === "field.aperture" || recipe?.primary.primitive === "density.release"
     ? 0.42
     : recipe?.primary.primitive === "density.lift" || recipe?.presentation === "hero"
@@ -66,7 +64,6 @@ const tuningFor = (
       : 0.4;
   const artDrift = Math.min(1, artDriftBase * (0.5 + world.fluidity * 1.15));
   return {
-    scene,
     energy,
     tuning: {
       intensity: energy,
@@ -129,14 +126,20 @@ const drawCanvas2D = (
   context: CanvasRenderingContext2D,
   width: number,
   height: number,
-  plan: DirectorPlanV1,
-  timeMs: number,
-  reduceMotion: boolean,
-  vjMode: boolean,
-  palette?: DirectedStagePaletteV1,
+  stageFrame: StageFrameV1,
 ) => {
-  const { scene, tuning, energy } = tuningFor(plan, timeMs, reduceMotion, vjMode);
-  const frame = applyDirectedPalette(sampleEnvironmentSceneV1(scene, timeMs, tuning, energy), palette);
+  const { tuning, energy } = tuningFor(
+    stageFrame.plan,
+    stageFrame.timeMs,
+    stageFrame.reduceMotion,
+    stageFrame.vjMode,
+  );
+  const frame = applyDirectedPalette(sampleEnvironmentSceneV1(
+    stageFrame.environmentScene,
+    stageFrame.timeMs,
+    tuning,
+    energy,
+  ), stageFrame.palette);
   clearCanvasBackingStoreV1(context);
   context.save();
   context.globalAlpha = 0.72;
@@ -181,14 +184,20 @@ const draw = (
   graphics: Graphics,
   width: number,
   height: number,
-  plan: DirectorPlanV1,
-  timeMs: number,
-  reduceMotion: boolean,
-  vjMode: boolean,
-  palette?: DirectedStagePaletteV1,
+  stageFrame: StageFrameV1,
 ) => {
-  const { scene, tuning, energy } = tuningFor(plan, timeMs, reduceMotion, vjMode);
-  const frame = applyDirectedPalette(sampleEnvironmentSceneV1(scene, timeMs, tuning, energy), palette);
+  const { tuning, energy } = tuningFor(
+    stageFrame.plan,
+    stageFrame.timeMs,
+    stageFrame.reduceMotion,
+    stageFrame.vjMode,
+  );
+  const frame = applyDirectedPalette(sampleEnvironmentSceneV1(
+    stageFrame.environmentScene,
+    stageFrame.timeMs,
+    tuning,
+    energy,
+  ), stageFrame.palette);
   graphics.clear();
   graphics.rect(0, 0, width, height).fill({ color: frame.background, alpha: 0.72 });
   frame.orbs.forEach((orb) => {
@@ -221,57 +230,37 @@ const draw = (
   });
 };
 
-export function PerformanceEnvironment({
-  plan,
-  timeMsRef,
-  continuous,
-  displayTimeMs,
-  reduceMotion,
-  vjMode,
-  palette,
-  onStatus,
-}: {
-  plan: DirectorPlanV1;
-  timeMsRef: MutableRefObject<number>;
-  continuous: boolean;
-  displayTimeMs: number;
-  reduceMotion: boolean;
-  vjMode: boolean;
-  palette?: DirectedStagePaletteV1;
+export const PerformanceEnvironment = forwardRef<PerformanceEnvironmentHandle, {
   onStatus?: (status: PerformanceEnvironmentStatus) => void;
-}) {
+}>(function PerformanceEnvironment({ onStatus }, ref) {
   const hostRef = useRef<HTMLDivElement>(null);
   const applicationRef = useRef<Application | null>(null);
   const graphicsRef = useRef<Graphics | null>(null);
   const fallbackCanvasRef = useRef<HTMLCanvasElement | null>(null);
   const fallbackContextRef = useRef<CanvasRenderingContext2D | null>(null);
   const failedRef = useRef(false);
-  const latestRef = useRef({ plan, timeMsRef, displayTimeMs, reduceMotion, vjMode, palette });
-  const [status, setStatus] = useState<PerformanceEnvironmentStatus>("loading");
-  latestRef.current = { plan, timeMsRef, displayTimeMs, reduceMotion, vjMode, palette };
+  const latestFrameRef = useRef<StageFrameV1 | null>(null);
+  const sizeRef = useRef({ width: 1, height: 1 });
+  const onStatusRef = useRef(onStatus);
+  onStatusRef.current = onStatus;
 
   const report = (next: PerformanceEnvironmentStatus) => {
     failedRef.current = next === "failed";
-    setStatus(next);
-    onStatus?.(next);
+    if (hostRef.current) hostRef.current.dataset.renderer = next;
+    onStatusRef.current?.(next);
   };
   const renderCurrent = () => {
     const application = applicationRef.current;
     const graphics = graphicsRef.current;
-    const current = latestRef.current;
-    const timeMs = Number.isFinite(current.timeMsRef.current) ? current.timeMsRef.current : current.displayTimeMs;
-    if (failedRef.current) return;
+    const frame = latestFrameRef.current;
+    if (failedRef.current || !frame) return;
     try {
       if (application && graphics) {
         draw(
           graphics,
           application.screen.width,
           application.screen.height,
-          current.plan,
-          timeMs,
-          current.reduceMotion,
-          current.vjMode,
-          current.palette,
+          frame,
         );
         application.render();
         return;
@@ -280,35 +269,43 @@ export function PerformanceEnvironment({
       const canvas = fallbackCanvasRef.current;
       const context = fallbackContextRef.current;
       if (!host || !canvas || !context) return;
-      const rect = host.getBoundingClientRect();
-      if (rect.width < 2 || rect.height < 2) return;
+      const { width, height } = sizeRef.current;
+      if (width < 2 || height < 2) return;
       const dpr = Math.min(window.devicePixelRatio || 1, 2);
-      const backing = canvasBackingStoreForV1(rect.width, rect.height, dpr);
+      const backing = canvasBackingStoreForV1(width, height, dpr);
       if (canvas.width !== backing.pixelWidth || canvas.height !== backing.pixelHeight) {
         canvas.width = backing.pixelWidth;
         canvas.height = backing.pixelHeight;
       }
-      canvas.style.width = `${rect.width}px`;
-      canvas.style.height = `${rect.height}px`;
+      canvas.style.width = `${width}px`;
+      canvas.style.height = `${height}px`;
       context.setTransform(backing.scaleX, 0, 0, backing.scaleY, 0, 0);
       drawCanvas2D(
         context,
-        rect.width,
-        rect.height,
-        current.plan,
-        timeMs,
-        current.reduceMotion,
-        current.vjMode,
-        current.palette,
+        width,
+        height,
+        frame,
       );
     } catch {
       report("failed");
     }
   };
 
+  useImperativeHandle(ref, () => ({
+    renderFrame: (frame) => {
+      latestFrameRef.current = frame;
+      renderCurrent();
+    },
+  }), []);
+
   useEffect(() => {
     const host = hostRef.current;
     if (!host) return undefined;
+    const rect = host.getBoundingClientRect();
+    sizeRef.current = {
+      width: Math.max(1, rect.width),
+      height: Math.max(1, rect.height),
+    };
     let disposed = false;
     let initialized = false;
     let onContextLost: ((event: Event) => void) | undefined;
@@ -335,7 +332,8 @@ export function PerformanceEnvironment({
       renderCurrent();
     };
     void application.init({
-      resizeTo: host,
+      width: sizeRef.current.width,
+      height: sizeRef.current.height,
       preference: "webgl",
       powerPreference: "high-performance",
       backgroundAlpha: 0,
@@ -360,10 +358,8 @@ export function PerformanceEnvironment({
       };
       onContextRestored = () => {
         if (disposed) return;
-        const current = latestRef.current;
-        const timeMs = Number.isFinite(current.timeMsRef.current)
-          ? current.timeMsRef.current
-          : current.displayTimeMs;
+        const frame = latestFrameRef.current;
+        if (!frame) return;
         try {
           // Prove that Pixi can draw and submit a frame again before removing
           // the functioning Canvas2D fallback or reporting WebGL recovery.
@@ -371,11 +367,7 @@ export function PerformanceEnvironment({
             graphics,
             application.screen.width,
             application.screen.height,
-            current.plan,
-            timeMs,
-            current.reduceMotion,
-            current.vjMode,
-            current.palette,
+            frame,
           );
           application.render();
         } catch {
@@ -405,19 +397,19 @@ export function PerformanceEnvironment({
         activateCanvasFallback(error instanceof Error ? error.message : "webgl-init-failed");
       }
     });
-    let resizeFrameID = 0;
-    const observer = new ResizeObserver(() => {
-      if (resizeFrameID) cancelAnimationFrame(resizeFrameID);
-      resizeFrameID = requestAnimationFrame(() => {
-        resizeFrameID = 0;
-        renderCurrent();
-      });
+    const observer = new ResizeObserver((entries) => {
+      const entry = entries[0];
+      if (!entry) return;
+      const width = Math.max(1, entry.contentRect.width);
+      const height = Math.max(1, entry.contentRect.height);
+      sizeRef.current = { width, height };
+      if (applicationRef.current) applicationRef.current.renderer.resize(width, height);
+      renderCurrent();
     });
     observer.observe(host);
     return () => {
       disposed = true;
       observer.disconnect();
-      if (resizeFrameID) cancelAnimationFrame(resizeFrameID);
       graphicsRef.current = null;
       applicationRef.current = null;
       fallbackContextRef.current = null;
@@ -429,32 +421,5 @@ export function PerformanceEnvironment({
     };
   }, []);
 
-  useEffect(renderCurrent, [plan, timeMsRef, displayTimeMs, reduceMotion, vjMode, palette]);
-
-  useEffect(() => {
-    if (!continuous) return undefined;
-    let frameID = 0;
-    const tick = () => {
-      frameID = 0;
-      renderCurrent();
-      if (!document.hidden) frameID = requestAnimationFrame(tick);
-    };
-    const visibilityChanged = () => {
-      if (document.hidden) {
-        if (frameID) cancelAnimationFrame(frameID);
-        frameID = 0;
-      } else if (!frameID) {
-        renderCurrent();
-        frameID = requestAnimationFrame(tick);
-      }
-    };
-    visibilityChanged();
-    document.addEventListener("visibilitychange", visibilityChanged);
-    return () => {
-      if (frameID) cancelAnimationFrame(frameID);
-      document.removeEventListener("visibilitychange", visibilityChanged);
-    };
-  }, [continuous]);
-
-  return <div className="performance-environment" ref={hostRef} data-renderer={status} aria-hidden="true" />;
-}
+  return <div className="performance-environment" ref={hostRef} data-renderer="loading" aria-hidden="true" />;
+});
