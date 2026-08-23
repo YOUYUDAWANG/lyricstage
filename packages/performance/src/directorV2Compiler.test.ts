@@ -48,6 +48,40 @@ describe("Director V2 manual cue compiler", () => {
     expect(compiled.plan.directives.find((directive) => directive.lineIndex === 3)?.behavior).toBe("echo");
   });
 
+  it("gives non-signature semantic cues bounded visible phrasing without turning holds into climaxes", () => {
+    const lyrics = lyricFixtures.wordTimedMixed;
+    const fixture: DirectorV2ManualFixtureV1 = {
+      id: "director-v2:semantic-support",
+      category: "fast",
+      recordingID: lyrics.recordingID,
+      motifAnchor: "unfinished-light",
+      windows: [{
+        id: "semantic-support:0-3",
+        fromLineIndex: 0,
+        toLineIndex: 3,
+        spatialIntent: "split",
+        coverRole: "boundary",
+        arcIntent: "lift",
+        cues: [
+          { id: "semantic:refrain", version: "semantic-cue-v2", role: "refrain", fromLineIndex: 0, evidenceLineIndices: [0], confidence: 0.9 },
+          { id: "semantic:handoff", version: "semantic-cue-v2", role: "handoff", fromLineIndex: 1, evidenceLineIndices: [1], confidence: 0.88 },
+          { id: "semantic:hold", version: "semantic-cue-v2", role: "hold", fromLineIndex: 2, evidenceLineIndices: [2], confidence: 0.86 },
+        ],
+      }],
+      expectations: { signatureEvents: [], promises: [] },
+    };
+    const compiled = compileManualDirectorV2V1(lyrics, compileLocalDirectorPlanV1(lyrics), fixture)!;
+    const semanticGestures = compiled.plan.gestures.filter((gesture) => gesture.id.startsWith("director-v2-semantic-gesture:"));
+    const semanticEffects = compiled.plan.effects.filter((effect) => effect.id.startsWith("director-v2-support-effect:"));
+    expect(semanticGestures.map((gesture) => gesture.primitive)).toEqual([
+      "phrase.contour", "phrase.handoff", "phrase.breathe",
+    ]);
+    expect(semanticEffects.map((effect) => effect.primary.primitive)).toEqual([
+      "memory.echo", "geometry.converge",
+    ]);
+    expect(semanticEffects.every((effect) => effect.presentation !== "hero")).toBe(true);
+  });
+
   it("treats confidence as ranking evidence rather than a legality threshold", () => {
     const fixture = directorV2ManualFixtures[0]!;
     const lyrics = lyricsByRecordingID.get(fixture.recordingID)!;

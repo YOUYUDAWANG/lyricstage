@@ -6,6 +6,7 @@ import {
   advanceRollingPerformanceStateV1,
   compileLocalDirectorBibleV1,
   compileLocalSceneCardsV1,
+  checkpointRollingPerformanceStateV1,
   initialRollingPerformanceStateV1,
   sanitizeSceneCardV1,
   sceneCardIdentityV1,
@@ -61,6 +62,56 @@ describe("rolling Director V2 compiler", () => {
     expect(card).not.toBeNull();
     expect(card?.intention).toContain("restrained hold window");
     expect(card?.directives).toHaveLength(lyrics.lines.length);
+  });
+
+  it("preserves three separated cue events inside an ordinary rolling window", () => {
+    const longLyrics = {
+      ...lyricFixtures.longSongStructure,
+      recordingID: "fixture:director-v2-density",
+      durationMs: 120_000,
+      lines: Array.from({ length: 30 }, (_, lineIndex) => ({
+        lineIndex,
+        fromMs: lineIndex * 4_000,
+        toMs: lineIndex * 4_000 + 3_500,
+        text: `bounded performance phrase ${lineIndex}`,
+        voiceRole: "lead" as const,
+      })),
+    };
+    const longBible = compileLocalDirectorBibleV1(longLyrics);
+    const anchorLines = new Set(longBible.signatureAnchors.flatMap((anchor) => anchor.anchorLineIndices));
+    const fromLineIndex = longLyrics.lines.find((line) => [line.lineIndex, line.lineIndex + 1, line.lineIndex + 2]
+      .every((lineIndex) => lineIndex < longLyrics.lines.length && !anchorLines.has(lineIndex)))!.lineIndex;
+    const toLineIndex = fromLineIndex + 2;
+    const targetState = checkpointRollingPerformanceStateV1(longLyrics, longBible, fromLineIndex)!;
+    const cueLines = [fromLineIndex, fromLineIndex + 1, toLineIndex];
+    const directed = compileWindowIntentV2ToSceneCardV1(longLyrics, longBible, targetState, {
+      version: "window-intent-v2",
+      bibleIdentity: longBible.bibleIdentity,
+      entryStateHash: targetState.stateHash,
+      id: `density:${fromLineIndex}-${toLineIndex}`,
+      fromLineIndex,
+      toLineIndex,
+      spatialIntent: "open",
+      coverRole: "portal",
+      arcIntent: "lift",
+      cues: [
+        { id: "density:rupture", version: "semantic-cue-v2", role: "rupture", fromLineIndex: cueLines[0]!, evidenceLineIndices: [cueLines[0]!], confidence: 0.92 },
+        { id: "density:release", version: "semantic-cue-v2", role: "release", fromLineIndex: cueLines[1]!, evidenceLineIndices: [cueLines[1]!], confidence: 0.9 },
+        { id: "density:refrain", version: "semantic-cue-v2", role: "refrain", fromLineIndex: cueLines[2]!, evidenceLineIndices: [cueLines[2]!], confidence: 0.88 },
+      ],
+    });
+    expect(directed).not.toBeNull();
+    expect(directed?.semanticCueCount).toBe(3);
+    expect(directed?.gestures).toHaveLength(3);
+    expect(directed?.effects).toHaveLength(3);
+
+    const plan = compileDirectorPlanFromRollingV1(longLyrics, longBible, [directed!]);
+    directed!.effects.forEach((effect) => {
+      expect(plan.effects.find((candidate) => candidate.id === effect.id)).toMatchObject({
+        fromMs: effect.fromMs,
+        toMs: effect.toMs,
+      });
+    });
   });
 
   it("keeps the prior visual world when local continuity follows an AI window", () => {

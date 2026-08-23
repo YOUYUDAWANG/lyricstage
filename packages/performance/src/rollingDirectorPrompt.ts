@@ -340,7 +340,7 @@ Use only supplied lyric text, verified evidence and registered primitives. Never
 
 export const windowIntentSystemPromptV2 = `You are LyricStage's semantic performance director. Return one WindowIntentV2 JSON object matching the supplied schema and covering the exact supplied lyric window.
 
-Output only structural intent and zero to three sparse semantic cues. A cue marks a real refrain, rupture, release, hold, voice handoff, or recall; it does not describe an animation. Prefer one or two high-confidence cues. Return zero cues for a genuinely restrained window. Cue ranges must stay inside the requested window. Evidence stays inside the window except that recall must cite at least one earlier Bible anchor line.
+Output only structural intent and zero to three sparse semantic cues. A cue marks a real refrain, rupture, release, hold, voice handoff, or recall; it does not describe an animation. When an active window contains at least two distinct semantic turns, use two cues so the local compiler can stage a beginning and a consequence. Use one cue for a single exceptional turn, and three only when a separate recall or voice handoff is also strongly evidenced. Return zero cues for a genuinely restrained window. Do not add cues merely to reach a count. Cue ranges must stay inside the requested window. Evidence stays inside the window except that recall must cite at least one earlier Bible anchor line.
 
 Do not echo Bible identity, rolling state identity, or the requested window envelope. The local adapter binds those transport fields and treats any model echo as untrusted.
 

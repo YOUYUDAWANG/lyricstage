@@ -646,13 +646,19 @@ export const sanitizeSceneCardV1 = (
     && !complete.signatureMoment
     ? undefined
     : signatureCandidate;
+  const semanticCueCount = Number.isInteger(complete.semanticCueCount) ? complete.semanticCueCount! : undefined;
+  const compiledV2Budgets = complete.directives !== undefined && semanticCueCount !== undefined;
   if (Boolean(complete.signatureMoment) !== Boolean(signature)
     || (signature && (!complete.signatureMoment || !signatureMomentMatchesAnchor(complete.signatureMoment, signature)))) return null;
   if (signature) {
     const scales = new Set(gestures.map((gesture) => gesture.scope));
     if (gestures.length < 2 || gestures.length > 4 || scales.size < 2 || complete.effects.length < 1 || complete.effects.length > 2
       || complete.consequence.kind !== complete.signatureMoment!.consequence) return null;
-  } else if (gestures.length > 2 || complete.effects.length > 1) return null;
+  } else {
+    const maximumGestures = compiledV2Budgets ? Math.min(3, Math.max(2, semanticCueCount)) : 2;
+    const maximumEffects = compiledV2Budgets ? Math.min(3, Math.max(1, semanticCueCount)) : 1;
+    if (gestures.length > maximumGestures || complete.effects.length > maximumEffects) return null;
+  }
   if (!consequenceKinds.has(complete.consequence.kind) || !clean(complete.consequence.rationale, 320)) return null;
   const validLineIndices = new Set(range.map((line) => line.lineIndex));
   let directives: DirectorLineDirectiveV1[] | undefined;
@@ -669,8 +675,7 @@ export const sanitizeSceneCardV1 = (
     if (seenDirectiveLines.size !== validLineIndices.size) return null;
     directives.sort((left, right) => left.lineIndex - right.lineIndex);
   }
-  if (complete.semanticCueCount !== undefined
-    && (!Number.isInteger(complete.semanticCueCount) || complete.semanticCueCount < 0 || complete.semanticCueCount > 3)) return null;
+  if (semanticCueCount !== undefined && (semanticCueCount < 0 || semanticCueCount > 3)) return null;
   const evidence = sanitizeEvidence(complete.evidence, validLineIndices, 0.65);
   if (!evidence) return null;
   if (complete.effects.some((effect) => effect.sectionID !== complete.sceneID
@@ -1095,7 +1100,13 @@ export const compileDirectorPlanFromRollingV1 = (
   const sectionByCard = new Map(accepted.map((card) => [card.sceneID, blockedSections.find((section) => section.id === `rolling:${card.sceneID}`)!]));
   const cardEffects = accepted.flatMap((card) => card.effects.map((effect) => {
     const section = sectionByCard.get(card.sceneID)!;
-    return { ...effect, sectionID: section.id, fromMs: effect.presentation === "hero" ? effect.fromMs : section.fromMs, toMs: effect.presentation === "hero" ? effect.toMs : section.toMs };
+    const cueScoped = effect.cardID === "custom" && effect.id.startsWith("director-v2-");
+    return {
+      ...effect,
+      sectionID: section.id,
+      fromMs: cueScoped || effect.presentation === "hero" ? effect.fromMs : section.fromMs,
+      toMs: cueScoped || effect.presentation === "hero" ? effect.toMs : section.toMs,
+    };
   }));
   const coveredLines = new Set(cardByLine.keys());
   const localGestures = local.gestures.filter((gesture) => !coveredLines.has(gesture.lineIndex));

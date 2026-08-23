@@ -304,6 +304,12 @@ const gestureIDFor = (
   branch: SignatureRecipeBranchV1,
 ): string => `director-v2-gesture:${cueID}:${recipe}:${branch}`;
 
+const semanticGestureIDFor = (cue: ManualSemanticCueV2): string =>
+  `director-v2-semantic-gesture:${cue.id}:${cue.role}`;
+
+const semanticEffectIDFor = (cue: ManualSemanticCueV2): string =>
+  `director-v2-support-effect:${cue.id}:${cue.role}`;
+
 const promiseFactFor = (
   recipe: SignatureRecipeIDV1,
   branch: SignatureRecipeBranchV1,
@@ -511,6 +517,116 @@ const compileRecipeGesture = (
   };
 };
 
+const compileSemanticGesture = (
+  lyrics: LyricDocumentV0,
+  plan: DirectorPlanV1,
+  context: SignatureCueContextV1,
+): LyricGestureV1 | undefined => {
+  if (context.cue.role !== "refrain" && context.cue.role !== "handoff" && context.cue.role !== "hold") return undefined;
+  const targetLineIndex = context.cue.focus?.lineIndex ?? context.cue.fromLineIndex;
+  const line = lyrics.lines.find((candidate) => candidate.lineIndex === targetLineIndex);
+  if (!line) return undefined;
+  const pieces = lyricGraphemesV1(line.text);
+  if (pieces.length === 0) return undefined;
+  const focus = context.cue.focus;
+  const phrasePrimitive: LyricGesturePrimitiveV1 = context.cue.role === "refrain"
+    ? "phrase.contour"
+    : context.cue.role === "handoff" ? "phrase.handoff" : "phrase.breathe";
+  const tokenPrimitive: LyricGesturePrimitiveV1 = context.cue.role === "refrain"
+    ? "token.echo"
+    : context.cue.role === "handoff" ? "token.elasticFocus" : "token.halo";
+  const semanticRole: LyricGestureSemanticRoleV1 = context.cue.role === "refrain"
+    ? "repetition"
+    : context.cue.role === "handoff" ? "collective" : "identity";
+  const intensity = context.cue.role === "hold"
+    ? clamp(0.32 + context.cue.confidence * 0.12, 0.38, 0.44)
+    : clamp(0.42 + context.cue.confidence * 0.16, 0.52, 0.58);
+  return {
+    version: "lyric-gesture-v1",
+    id: semanticGestureIDFor(context.cue),
+    lineIndex: targetLineIndex,
+    scope: focus ? "token" : "phrase",
+    target: focus
+      ? { fromGrapheme: focus.fromGrapheme, toGrapheme: focus.toGrapheme, expectedText: focus.expectedText }
+      : { fromGrapheme: 0, toGrapheme: pieces.length, expectedText: line.text },
+    primitive: focus ? tokenPrimitive : phrasePrimitive,
+    driver: context.cue.role === "hold" ? "lineHold" : "structuralMoment",
+    space: context.cue.role === "handoff" ? "fullStage" : context.cue.role === "refrain" ? "lyricToArtwork" : "lyricLocal",
+    envelope: context.cue.role === "handoff"
+      ? { attackMs: 260, holdMs: 180, releaseMs: 520 }
+      : { attackMs: 320, holdMs: 260, releaseMs: 520 },
+    intensity,
+    direction: plan.directives.find((directive) => directive.lineIndex === targetLineIndex)?.direction ?? 1,
+    paletteRole: context.cue.role === "refrain" ? "secondary" : context.cue.role === "handoff" ? "accent" : "primary",
+    evidence: {
+      semanticRole,
+      rationale: `${context.cue.role} receives one bounded phrase gesture while local timing remains authoritative.`,
+      confidence: clamp(0.72 + context.cue.confidence * 0.18, 0.72, 0.9),
+    },
+  };
+};
+
+const compileSemanticSupportEffect = (
+  lyrics: LyricDocumentV0,
+  plan: DirectorPlanV1,
+  context: SignatureCueContextV1,
+): EffectRecipeV1 | undefined => {
+  if (context.cue.role !== "refrain" && context.cue.role !== "handoff") return undefined;
+  const line = lyrics.lines.find((candidate) => candidate.lineIndex === context.cue.fromLineIndex);
+  const section = sectionForLine(plan.sections, context.cue.fromLineIndex);
+  if (!line || !section) return undefined;
+  const handoff = context.cue.role === "handoff";
+  const intensity = clamp((handoff ? 0.34 : 0.32) + context.cue.confidence * 0.16, 0.44, 0.5);
+  return {
+    version: "effect-recipe-v1",
+    id: semanticEffectIDFor(context.cue),
+    cardID: "custom",
+    sectionID: section.id,
+    fromMs: line.fromMs,
+    toMs: line.toMs,
+    presentation: handoff ? "duet" : "reading",
+    primary: {
+      primitive: handoff ? "geometry.converge" : "memory.echo",
+      intensity,
+      direction: plan.directives.find((directive) => directive.lineIndex === line.lineIndex)?.direction ?? 1,
+    },
+    support: [{ primitive: handoff ? "field.drift" : "motif.recall", intensity: clamp(intensity * 0.62, 0.26, 0.32) }],
+    evidence: {
+      songMotif: plan.motif,
+      sectionTriggers: [handoff ? "voice_handoff" : "repeated_hook"],
+      lineIndices: [line.lineIndex],
+      rationale: `${context.cue.role} receives a restrained support layer, not a hero event.`,
+      confidence: clamp(0.72 + context.cue.confidence * 0.18, 0.72, 0.9),
+    },
+  };
+};
+
+const fitSemanticGestureBudget = (
+  existing: readonly LyricGestureV1[],
+  candidates: readonly LyricGestureV1[],
+): LyricGestureV1[] => {
+  const counts = {
+    glyph: existing.filter((gesture) => gesture.scope === "glyph").length,
+    token: existing.filter((gesture) => gesture.scope === "token").length,
+    phrase: existing.filter((gesture) => gesture.scope === "phrase").length,
+    fullStage: existing.filter((gesture) => gesture.space === "fullStage").length,
+    total: existing.length,
+  };
+  const accepted: LyricGestureV1[] = [];
+  for (const candidate of candidates) {
+    if (counts.total >= 48
+      || candidate.scope === "glyph" && counts.glyph >= 24
+      || candidate.scope === "token" && counts.token >= 16
+      || candidate.scope === "phrase" && counts.phrase >= 8
+      || candidate.space === "fullStage" && counts.fullStage >= 6) continue;
+    accepted.push(candidate);
+    counts[candidate.scope] += 1;
+    counts.fullStage += candidate.space === "fullStage" ? 1 : 0;
+    counts.total += 1;
+  }
+  return accepted;
+};
+
 const compilePromiseConsequenceEffect = (
   lyrics: LyricDocumentV0,
   plan: DirectorPlanV1,
@@ -637,6 +753,12 @@ export const compileManualDirectorV2V1 = (
     contextByCueID.get(event.cueID)!,
     event,
   ));
+  const semanticContexts = [...contextByCueID.values()]
+    .filter((context) => context.cue.role === "refrain" || context.cue.role === "handoff" || context.cue.role === "hold")
+    .sort((left, right) => left.cue.fromLineIndex - right.cue.fromLineIndex || left.cue.id.localeCompare(right.cue.id));
+  const semanticEffects = semanticContexts
+    .map((context) => compileSemanticSupportEffect(lyrics, provisionalPlan, context))
+    .filter((effect): effect is EffectRecipeV1 => Boolean(effect));
   const consequenceEffects = signature.promises
     .map((promise) => compilePromiseConsequenceEffect(lyrics, provisionalPlan, promise))
     .filter((effect): effect is EffectRecipeV1 => Boolean(effect));
@@ -646,14 +768,18 @@ export const compileManualDirectorV2V1 = (
     contextByCueID.get(event.cueID)!,
     event,
   ));
-  const gestures = sanitizeLyricGesturesV1(lyrics, [...localPlan.gestures, ...recipeGestures]);
+  const semanticGestureCandidates = semanticContexts
+    .map((context) => compileSemanticGesture(lyrics, provisionalPlan, context))
+    .filter((gesture): gesture is LyricGestureV1 => Boolean(gesture));
+  const semanticGestures = fitSemanticGestureBudget([...localPlan.gestures, ...recipeGestures], semanticGestureCandidates);
+  const gestures = sanitizeLyricGesturesV1(lyrics, [...localPlan.gestures, ...recipeGestures, ...semanticGestures]);
   if (!gestures) return null;
   const { planIdentity: _ignored, ...withoutIdentity } = localPlan;
   const plan = reidentifyPlan({
     ...withoutIdentity,
     directorVersion: `${localPlan.directorVersion}+director-v2-manual-recipes`,
     directives,
-    effects: [...recipeEffects, ...consequenceEffects, ...localPlan.effects],
+    effects: [...recipeEffects, ...semanticEffects, ...consequenceEffects, ...localPlan.effects],
     gestures,
   });
   return {

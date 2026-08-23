@@ -8,6 +8,7 @@ import {
   directorBibleSystemPromptV1,
   scenePackSchemaV1,
   scenePackSystemPromptV1,
+  windowIntentSystemPromptV2,
 } from "./rollingDirectorPrompt";
 
 describe("rolling director prompts", () => {
@@ -21,6 +22,12 @@ describe("rolling director prompts", () => {
     expect(JSON.stringify(scenePackSchemaV1)).toContain('"stageAction"');
     expect((scenePackSchemaV1.properties as any).scenes.maxItems).toBe(1);
     expect(scenePackSystemPromptV1).toContain("supplied lyric window");
+  });
+
+  it("asks active windows for enough semantic structure without turning cue count into a hard art metric", () => {
+    expect(windowIntentSystemPromptV2).toContain("two distinct semantic turns");
+    expect(windowIntentSystemPromptV2).toContain("use two cues");
+    expect(windowIntentSystemPromptV2).toContain("Do not add cues merely to reach a count");
   });
 
   it("keeps JSON Schema required fields aligned with strict local evidence validation", () => {

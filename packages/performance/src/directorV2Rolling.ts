@@ -19,8 +19,9 @@ const uniqueByID = <T extends { id: string }>(items: readonly T[]): T[] =>
 const gesturesForCard = (
   localCard: SceneCardV1,
   v2Gestures: readonly LyricGestureV1[],
+  semanticCueCount: number,
 ): LyricGestureV1[] => {
-  const maximum = localCard.signatureMoment ? 4 : 2;
+  const maximum = localCard.signatureMoment ? 4 : Math.min(3, Math.max(2, semanticCueCount));
   const candidate = uniqueByID([...v2Gestures, ...localCard.gestures]).slice(0, maximum);
   if (!localCard.signatureMoment) return candidate;
   const scopes = new Set(candidate.map((gesture) => gesture.scope));
@@ -30,8 +31,9 @@ const gesturesForCard = (
 const effectsForCard = (
   localCard: SceneCardV1,
   v2Effects: readonly EffectRecipeV1[],
+  semanticCueCount: number,
 ): EffectRecipeV1[] => uniqueByID([...v2Effects, ...localCard.effects])
-  .slice(0, localCard.signatureMoment ? 2 : 1);
+  .slice(0, localCard.signatureMoment ? 2 : Math.min(3, Math.max(1, semanticCueCount)));
 
 const reidentifySceneCard = (card: Omit<SceneCardV1, "sceneID">): SceneCardV1 => {
   const sceneID = sceneCardIdentityV1(card);
@@ -121,7 +123,7 @@ export const compileWindowIntentV2ToSceneCardV1 = (
   const inRange = (lineIndex: number) => lineIndex >= intent.fromLineIndex && lineIndex <= intent.toLineIndex;
   const directives = compiled.plan.directives.filter((directive) => inRange(directive.lineIndex));
   const v2Gestures = compiled.plan.gestures.filter((gesture) =>
-    gesture.id.startsWith("director-v2-gesture:") && inRange(gesture.lineIndex));
+    gesture.id.startsWith("director-v2-") && inRange(gesture.lineIndex));
   const v2Effects = compiled.plan.effects
     .filter((effect) => effect.id.startsWith("director-v2-"))
     .map((effect) => {
@@ -142,8 +144,8 @@ export const compileWindowIntentV2ToSceneCardV1 = (
     coverRole: intent.coverRole,
     directives,
     semanticCueCount: intent.cues.length,
-    gestures: gesturesForCard(localCard, v2Gestures),
-    effects: effectsForCard(localCard, v2Effects),
+    gestures: gesturesForCard(localCard, v2Gestures, intent.cues.length),
+    effects: effectsForCard(localCard, v2Effects, intent.cues.length),
   };
   const candidate = reidentifySceneCard(withoutID);
   return sanitizeSceneCardV1(lyrics, bible, state, candidate);
