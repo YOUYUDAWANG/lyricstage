@@ -165,42 +165,75 @@ export const compileEnvironmentSceneV1 = (recordingID: string, directionIdentity
   };
 };
 
+export const createEnvironmentFrameV1 = (scene: EnvironmentSceneV1): EnvironmentFrameV1 => ({
+  background: scene.palette.background,
+  shadow: scene.palette.shadow,
+  paper: scene.palette.paper,
+  particles: scene.particles.map(() => ({ x: 0, y: 0, radius: 0, alpha: 0, color: 0 })),
+  rails: scene.rails.map(() => ({ offset: 0, angle: 0, width: 0, alpha: 0, color: 0 })),
+  orbs: scene.orbs.map(() => ({ x: 0, y: 0, radius: 0, alpha: 0, color: 0 })),
+});
+
+export const sampleEnvironmentSceneIntoV1 = (
+  scene: EnvironmentSceneV1,
+  timeMs: number,
+  tuning: EnvironmentTuningV1,
+  structureEnergy: number,
+  target: EnvironmentFrameV1,
+): EnvironmentFrameV1 => {
+  if (
+    target.particles.length !== scene.particles.length
+    || target.rails.length !== scene.rails.length
+    || target.orbs.length !== scene.orbs.length
+  ) throw new Error("environment-frame-shape-mismatch");
+  const time = Math.max(0, timeMs) / 1000;
+  const intensity = clamp01(tuning.intensity) * (0.52 + clamp01(structureEnergy) * 0.48);
+  const drift = clamp01(tuning.drift);
+  target.background = scene.palette.background;
+  target.shadow = scene.palette.shadow;
+  target.paper = scene.palette.paper;
+  for (let index = 0; index < scene.particles.length; index += 1) {
+    const particle = scene.particles[index]!;
+    const output = target.particles[index]!;
+    const pulse = 0.55 + Math.sin(time * particle.speed * 2.4 + particle.phase) * 0.45;
+    output.x = wrap01(particle.x + Math.sin(time * particle.speed + particle.phase) * particle.driftX * drift);
+    output.y = wrap01(particle.y + Math.cos(time * particle.speed * 0.74 + particle.phase) * particle.driftY * drift);
+    output.radius = particle.radius * (0.8 + pulse * 0.38);
+    output.alpha = clamp01(particle.alpha * pulse * intensity);
+    output.color = colorForTone(scene.palette, particle.tone);
+  }
+  for (let index = 0; index < scene.rails.length; index += 1) {
+    const rail = scene.rails[index]!;
+    const output = target.rails[index]!;
+    output.offset = wrap01(rail.offset + time * rail.speed * drift + Math.sin(time * 0.08 + rail.phase) * 0.025);
+    output.angle = rail.angle;
+    output.width = rail.width;
+    output.alpha = clamp01(rail.alpha * intensity * clamp01(tuning.railOpacity));
+    output.color = colorForTone(scene.palette, rail.tone);
+  }
+  for (let index = 0; index < scene.orbs.length; index += 1) {
+    const orb = scene.orbs[index]!;
+    const output = target.orbs[index]!;
+    output.x = clamp01(orb.x + Math.sin(time * orb.speed + orb.phase) * 0.08 * drift);
+    output.y = clamp01(orb.y + Math.cos(time * orb.speed * 0.82 + orb.phase) * 0.06 * drift);
+    output.radius = orb.radius * (0.92 + Math.sin(time * orb.speed * 1.7 + orb.phase) * 0.08);
+    output.alpha = clamp01(orb.alpha * intensity * clamp01(tuning.bloom));
+    output.color = colorForTone(scene.palette, orb.tone);
+  }
+  return target;
+};
+
 export const sampleEnvironmentSceneV1 = (
   scene: EnvironmentSceneV1,
   timeMs: number,
   tuning: EnvironmentTuningV1 = defaultEnvironmentTuningV1,
   structureEnergy = 0.6,
 ): EnvironmentFrameV1 => {
-  const time = Math.max(0, timeMs) / 1000;
-  const intensity = clamp01(tuning.intensity) * (0.52 + clamp01(structureEnergy) * 0.48);
-  const drift = clamp01(tuning.drift);
-  return {
-    background: scene.palette.background,
-    shadow: scene.palette.shadow,
-    paper: scene.palette.paper,
-    particles: scene.particles.map((particle) => {
-      const pulse = 0.55 + Math.sin(time * particle.speed * 2.4 + particle.phase) * 0.45;
-      return {
-        x: wrap01(particle.x + Math.sin(time * particle.speed + particle.phase) * particle.driftX * drift),
-        y: wrap01(particle.y + Math.cos(time * particle.speed * 0.74 + particle.phase) * particle.driftY * drift),
-        radius: particle.radius * (0.8 + pulse * 0.38),
-        alpha: clamp01(particle.alpha * pulse * intensity),
-        color: colorForTone(scene.palette, particle.tone),
-      };
-    }),
-    rails: scene.rails.map((rail) => ({
-      offset: wrap01(rail.offset + time * rail.speed * drift + Math.sin(time * 0.08 + rail.phase) * 0.025),
-      angle: rail.angle,
-      width: rail.width,
-      alpha: clamp01(rail.alpha * intensity * clamp01(tuning.railOpacity)),
-      color: colorForTone(scene.palette, rail.tone),
-    })),
-    orbs: scene.orbs.map((orb) => ({
-      x: clamp01(orb.x + Math.sin(time * orb.speed + orb.phase) * 0.08 * drift),
-      y: clamp01(orb.y + Math.cos(time * orb.speed * 0.82 + orb.phase) * 0.06 * drift),
-      radius: orb.radius * (0.92 + Math.sin(time * orb.speed * 1.7 + orb.phase) * 0.08),
-      alpha: clamp01(orb.alpha * intensity * clamp01(tuning.bloom)),
-      color: colorForTone(scene.palette, orb.tone),
-    })),
-  };
+  return sampleEnvironmentSceneIntoV1(
+    scene,
+    timeMs,
+    tuning,
+    structureEnergy,
+    createEnvironmentFrameV1(scene),
+  );
 };

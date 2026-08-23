@@ -1,7 +1,12 @@
-import type {
-  DirectorPlanV1,
-  EnvironmentSceneV1,
-  PerformanceMotionLawV1,
+import {
+  createEnvironmentFrameV1,
+  directorSectionAtV1,
+  effectRecipeAtV1,
+  sampleEnvironmentSceneIntoV1,
+  type DirectorPlanV1,
+  type EnvironmentFrameV1,
+  type EnvironmentSceneV1,
+  type PerformanceMotionLawV1,
 } from "@lyricstage/performance";
 import type { DirectedStagePaletteV1 } from "@lyricstage/renderer";
 
@@ -35,6 +40,7 @@ export interface StageFrameV1 {
   vjMode: boolean;
   showGuides: boolean;
   ambient: StageAmbientFrameV1;
+  environment: EnvironmentFrameV1;
 }
 
 export interface StageFrameInputV1 {
@@ -53,6 +59,14 @@ export interface StageFrameBuffersV1 {
   readonly frames: readonly [StageFrameV1, StageFrameV1];
   generation: number;
   writeIndex: 0 | 1;
+}
+
+export interface StageFrameDOMTargetsV1 {
+  host: HTMLDivElement;
+  motif: HTMLDivElement | null;
+  washPrimary: HTMLImageElement | null;
+  washSecondary: HTMLImageElement | null;
+  artwork: HTMLImageElement | null;
 }
 
 export const stageEnvironmentSceneKeyV1 = (planIdentity: string, sectionID: string): string =>
@@ -141,6 +155,80 @@ const sampleWorldMotion = (
       target.motifScale = 1.095;
     }
   }
+};
+
+const numericColor = (value: string, fallback: number): number => {
+  const match = value.match(/^#([\da-f]{6})$/iu);
+  return match ? Number.parseInt(match[1]!, 16) : fallback;
+};
+
+const sampleStageEnvironmentIntoV1 = (
+  input: StageFrameInputV1,
+  target: EnvironmentFrameV1,
+): EnvironmentFrameV1 => {
+  const { plan, timeMs, reduceMotion, vjMode, environmentScene, palette } = input;
+  const section = directorSectionAtV1(plan, timeMs);
+  const recipe = effectRecipeAtV1(plan.effects, timeMs);
+  const world = plan.world;
+  const recipeEnergy = recipe?.primary.primitive === "field.aperture" || recipe?.primary.primitive === "density.release"
+    ? 0.42
+    : recipe?.primary.primitive === "density.lift" || recipe?.presentation === "hero"
+      ? 1.08
+      : 1;
+  const presentationEnergy = recipe?.presentation === "hero"
+    ? 0.86
+    : recipe?.presentation === "duet"
+      ? 0.72
+      : recipe?.presentation === "aperture"
+        ? 0.28
+        : recipe?.presentation === "section"
+          ? 0.58
+          : 0.68;
+  const sectionEnergy = Math.min(1, Math.max(
+    0.22,
+    section.intensity * recipeEnergy * presentationEnergy * (0.72 + world.atmosphere * 0.44),
+  ));
+  const energy = vjMode && !reduceMotion
+    ? Math.min(1, 0.24 + sectionEnergy * 0.82)
+    : sectionEnergy;
+  const artBloomBase = section.artDirection === "monoImpact"
+    ? 0.28
+    : section.artDirection === "neonRail" || section.artDirection === "celestialGrid"
+      ? 0.82
+      : 0.62;
+  const artBloom = Math.min(1, artBloomBase * (0.72 + world.depth * 0.5));
+  const artDriftBase = section.artDirection === "liquidMemory"
+    ? 0.72
+    : section.artDirection === "paperCut"
+      ? 0.24
+      : 0.4;
+  const artDrift = Math.min(1, artDriftBase * (0.5 + world.fluidity * 1.15));
+  sampleEnvironmentSceneIntoV1(environmentScene, timeMs, {
+    intensity: energy,
+    bloom: vjMode && !reduceMotion ? Math.min(1, artBloom + 0.14) : artBloom,
+    drift: reduceMotion ? 0 : vjMode ? Math.min(0.96, artDrift + 0.2) : artDrift,
+    railOpacity: section.artDirection === "neonRail"
+      || section.layout.startsWith("rail")
+      || world.motionLaw === "flow"
+      || world.motionLaw === "converge"
+      ? vjMode && !reduceMotion ? 0.96 : 0.82
+      : 0,
+  }, energy, target);
+  const signal = numericColor(palette.signal, target.orbs[0]?.color ?? target.paper);
+  const signalAlt = numericColor(palette.signalAlt, target.rails[0]?.color ?? target.paper);
+  target.background = numericColor(palette.ground, target.background);
+  target.shadow = numericColor(palette.groundLift, target.shadow);
+  target.paper = numericColor(palette.ink, target.paper);
+  for (let index = 0; index < target.particles.length; index += 1) {
+    target.particles[index]!.color = index % 3 === 0 ? signalAlt : signal;
+  }
+  for (let index = 0; index < target.rails.length; index += 1) {
+    target.rails[index]!.color = index % 2 === 0 ? signal : signalAlt;
+  }
+  for (let index = 0; index < target.orbs.length; index += 1) {
+    target.orbs[index]!.color = index % 2 === 0 ? signal : signalAlt;
+  }
+  return target;
 };
 
 export const sampleStageAmbientIntoV1 = (
@@ -240,6 +328,10 @@ const createFrame = (input: StageFrameInputV1): StageFrameV1 => ({
     input.reduceMotion,
     createAmbientFrame(),
   ),
+  environment: sampleStageEnvironmentIntoV1(
+    input,
+    createEnvironmentFrameV1(input.environmentScene),
+  ),
 });
 
 export const createStageFrameBuffersV1 = (input: StageFrameInputV1): StageFrameBuffersV1 => ({
@@ -264,6 +356,72 @@ export const writeStageFrameV1 = (
   frame.vjMode = input.vjMode;
   frame.showGuides = input.showGuides;
   sampleStageAmbientIntoV1(input.plan, input.timeMs, input.sectionIntensity, input.reduceMotion, frame.ambient);
+  sampleStageEnvironmentIntoV1(input, frame.environment);
   buffers.writeIndex = buffers.writeIndex === 0 ? 1 : 0;
   return frame;
+};
+
+const transformFor = (
+  translateXPct: number,
+  translateYPct: number,
+  scale: number,
+  rotationDeg: number,
+): string => `translate3d(${translateXPct.toFixed(4)}%, ${translateYPct.toFixed(4)}%, 0) scale(${scale.toFixed(5)}) rotate(${rotationDeg.toFixed(4)}deg)`;
+
+export const applyStageFrameDOMV1 = (
+  frame: StageFrameV1,
+  targets: StageFrameDOMTargetsV1,
+): void => {
+  const { host, motif, washPrimary, washSecondary, artwork } = targets;
+  const { palette, plan, ambient } = frame;
+  host.style.background = `radial-gradient(circle at 12% 78%, ${palette.signal}66, transparent 46%), radial-gradient(circle at 86% 18%, ${palette.signalAlt}59, transparent 44%), radial-gradient(circle at 58% 92%, ${palette.warm}38, transparent 42%), linear-gradient(128deg, ${palette.groundLift}, ${palette.ground} 48%, ${palette.ground})`;
+  host.style.setProperty("--stage-signal", palette.signal);
+  host.style.setProperty("--stage-signal-alt", palette.signalAlt);
+  host.style.setProperty("--stage-ground", palette.ground);
+  host.style.setProperty("--stage-ink", palette.ink);
+  host.style.setProperty("--stage-ink-muted", palette.inkMuted);
+  host.style.setProperty("--stage-world-blur-silk", `${24 + plan.world.depth * 42}px`);
+  host.style.setProperty("--stage-world-blur-ink", `${34 + plan.world.depth * 54}px`);
+  host.style.setProperty("--stage-world-blur-mist", `${58 + plan.world.depth * 72}px`);
+  host.style.setProperty("--stage-world-blur-glass", `${12 + plan.world.depth * 26}px`);
+  host.style.setProperty("--stage-world-blur-paper", `${8 + plan.world.depth * 16}px`);
+  host.style.setProperty("--stage-world-blur-light", `${18 + plan.world.depth * 34}px`);
+  host.style.setProperty("--stage-world-glow-portal", `${72 + plan.world.atmosphere * 90}px`);
+  host.style.setProperty("--stage-world-glow-directed", `${90 + plan.world.atmosphere * 120}px`);
+  host.dataset.directorSource = plan.source;
+  host.dataset.directorVersion = plan.directorVersion;
+  host.dataset.worldSpatial = plan.world.spatialMode;
+  host.dataset.worldMotion = plan.world.motionLaw;
+  host.dataset.worldArtwork = plan.world.artworkRole;
+  host.dataset.worldTexture = plan.world.texture;
+  host.dataset.reduceMotion = frame.reduceMotion ? "true" : "false";
+  if (motif) {
+    motif.style.transform = transformFor(
+      ambient.motifTranslateXPct,
+      ambient.motifTranslateYPct,
+      ambient.motifScale,
+      ambient.motifRotationDeg,
+    );
+    motif.style.opacity = ambient.motifOpacity.toFixed(5);
+  }
+  if (washPrimary) {
+    washPrimary.style.transform = transformFor(
+      ambient.washPrimaryTranslateXPct,
+      ambient.washPrimaryTranslateYPct,
+      ambient.washPrimaryScale,
+      ambient.washPrimaryRotationDeg,
+    );
+  }
+  if (washSecondary) {
+    washSecondary.style.transform = transformFor(
+      ambient.washSecondaryTranslateXPct,
+      ambient.washSecondaryTranslateYPct,
+      ambient.washSecondaryScale,
+      ambient.washSecondaryRotationDeg,
+    );
+  }
+  if (artwork) {
+    artwork.style.transform = `scale(${ambient.artworkScale.toFixed(5)})`;
+    artwork.style.filter = `saturate(${ambient.artworkSaturation.toFixed(5)}) brightness(${ambient.artworkBrightness.toFixed(5)})`;
+  }
 };

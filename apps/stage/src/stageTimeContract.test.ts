@@ -20,7 +20,7 @@ describe("Stage authoritative-time contract", () => {
   it("does not enqueue React state from the continuous frame body", () => {
     const frameBody = stageSource.match(/const render = \(\) => \{([\s\S]*?)\n      if \(continuous/um)?.[1] ?? "";
     expect(frameBody.length).toBeGreaterThan(100);
-    expect(frameBody).not.toMatch(/\bset[A-Z]\w*\(/u);
+    expect(frameBody).not.toMatch(/(?<!\.)\bset[A-Z]\w*\(/u);
   });
 
   it("does not let CSS own directed Stage time", () => {

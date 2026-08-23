@@ -1,17 +1,6 @@
 import { forwardRef, useEffect, useImperativeHandle, useRef } from "react";
 import { Application, Graphics } from "pixi.js";
-import {
-  directorSectionAtV1,
-  effectRecipeAtV1,
-  sampleEnvironmentSceneV1,
-  type DirectorPlanV1,
-  type EnvironmentFrameV1,
-  type EnvironmentTuningV1,
-} from "@lyricstage/performance";
-import {
-  clearCanvasBackingStoreV1,
-  type DirectedStagePaletteV1,
-} from "@lyricstage/renderer";
+import { clearCanvasBackingStoreV1 } from "@lyricstage/renderer";
 import { canvasBackingStoreForV1 } from "./canvasBackingStore";
 import type { StageFrameV1 } from "./stageFrame";
 
@@ -21,70 +10,7 @@ export interface PerformanceEnvironmentHandle {
   renderFrame: (frame: StageFrameV1) => void;
 }
 
-const tuningFor = (
-  plan: DirectorPlanV1,
-  timeMs: number,
-  reduceMotion: boolean,
-  vjMode: boolean,
-): { tuning: EnvironmentTuningV1; energy: number } => {
-  const section = directorSectionAtV1(plan, timeMs);
-  const recipe = effectRecipeAtV1(plan.effects, timeMs);
-  const world = plan.world;
-  const recipeEnergy = recipe?.primary.primitive === "field.aperture" || recipe?.primary.primitive === "density.release"
-    ? 0.42
-    : recipe?.primary.primitive === "density.lift" || recipe?.presentation === "hero"
-      ? 1.08
-      : 1;
-  const presentationEnergy = recipe?.presentation === "hero"
-    ? 0.86
-    : recipe?.presentation === "duet"
-      ? 0.72
-      : recipe?.presentation === "aperture"
-        ? 0.28
-        : recipe?.presentation === "section"
-          ? 0.58
-        : 0.68;
-  const sectionEnergy = Math.min(1, Math.max(
-    0.22,
-    section.intensity * recipeEnergy * presentationEnergy * (0.72 + world.atmosphere * 0.44),
-  ));
-  const energy = vjMode && !reduceMotion
-    ? Math.min(1, 0.24 + sectionEnergy * 0.82)
-    : sectionEnergy;
-  const artBloomBase = section.artDirection === "monoImpact"
-    ? 0.28
-    : section.artDirection === "neonRail" || section.artDirection === "celestialGrid"
-      ? 0.82
-      : 0.62;
-  const artBloom = Math.min(1, artBloomBase * (0.72 + world.depth * 0.5));
-  const artDriftBase = section.artDirection === "liquidMemory"
-    ? 0.72
-    : section.artDirection === "paperCut"
-      ? 0.24
-      : 0.4;
-  const artDrift = Math.min(1, artDriftBase * (0.5 + world.fluidity * 1.15));
-  return {
-    energy,
-    tuning: {
-      intensity: energy,
-      bloom: vjMode && !reduceMotion ? Math.min(1, artBloom + 0.14) : artBloom,
-      drift: reduceMotion ? 0 : vjMode ? Math.min(0.96, artDrift + 0.2) : artDrift,
-      railOpacity: section.artDirection === "neonRail"
-        || section.layout.startsWith("rail")
-        || world.motionLaw === "flow"
-        || world.motionLaw === "converge"
-        ? vjMode && !reduceMotion ? 0.96 : 0.82
-        : 0,
-    },
-  };
-};
-
 const cssColor = (value: number): string => `#${value.toString(16).padStart(6, "0")}`;
-
-const numericColor = (value: string, fallback: number): number => {
-  const match = value.match(/^#([\da-f]{6})$/iu);
-  return match ? Number.parseInt(match[1]!, 16) : fallback;
-};
 
 const mixNumericColor = (base: number, toward: number, amount: number): number => {
   const mixChannel = (shift: number) => {
@@ -95,51 +21,13 @@ const mixNumericColor = (base: number, toward: number, amount: number): number =
   return (mixChannel(16) << 16) | (mixChannel(8) << 8) | mixChannel(0);
 };
 
-const applyDirectedPalette = (
-  frame: EnvironmentFrameV1,
-  palette?: DirectedStagePaletteV1,
-): EnvironmentFrameV1 => {
-  if (!palette) return frame;
-  const signal = numericColor(palette.signal, frame.orbs[0]?.color ?? frame.paper);
-  const signalAlt = numericColor(palette.signalAlt, frame.rails[0]?.color ?? frame.paper);
-  return {
-    ...frame,
-    background: numericColor(palette.ground, frame.background),
-    shadow: numericColor(palette.groundLift, frame.shadow),
-    paper: numericColor(palette.ink, frame.paper),
-    particles: frame.particles.map((particle, index) => ({
-      ...particle,
-      color: index % 3 === 0 ? signalAlt : signal,
-    })),
-    rails: frame.rails.map((rail, index) => ({
-      ...rail,
-      color: index % 2 === 0 ? signal : signalAlt,
-    })),
-    orbs: frame.orbs.map((orb, index) => ({
-      ...orb,
-      color: index % 2 === 0 ? signal : signalAlt,
-    })),
-  };
-};
-
 const drawCanvas2D = (
   context: CanvasRenderingContext2D,
   width: number,
   height: number,
   stageFrame: StageFrameV1,
 ) => {
-  const { tuning, energy } = tuningFor(
-    stageFrame.plan,
-    stageFrame.timeMs,
-    stageFrame.reduceMotion,
-    stageFrame.vjMode,
-  );
-  const frame = applyDirectedPalette(sampleEnvironmentSceneV1(
-    stageFrame.environmentScene,
-    stageFrame.timeMs,
-    tuning,
-    energy,
-  ), stageFrame.palette);
+  const frame = stageFrame.environment;
   clearCanvasBackingStoreV1(context);
   context.save();
   context.globalAlpha = 0.72;
@@ -186,18 +74,7 @@ const draw = (
   height: number,
   stageFrame: StageFrameV1,
 ) => {
-  const { tuning, energy } = tuningFor(
-    stageFrame.plan,
-    stageFrame.timeMs,
-    stageFrame.reduceMotion,
-    stageFrame.vjMode,
-  );
-  const frame = applyDirectedPalette(sampleEnvironmentSceneV1(
-    stageFrame.environmentScene,
-    stageFrame.timeMs,
-    tuning,
-    energy,
-  ), stageFrame.palette);
+  const frame = stageFrame.environment;
   graphics.clear();
   graphics.rect(0, 0, width, height).fill({ color: frame.background, alpha: 0.72 });
   frame.orbs.forEach((orb) => {

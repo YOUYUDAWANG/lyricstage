@@ -2,7 +2,9 @@ import { describe, expect, it } from "vitest";
 import { lyricFixtures } from "@lyricstage/contracts";
 import {
   compileEnvironmentSceneV1,
+  createEnvironmentFrameV1,
   defaultEnvironmentTuningV1,
+  sampleEnvironmentSceneIntoV1,
   sampleEnvironmentSceneV1,
 } from "./environmentScene";
 import {
@@ -114,6 +116,20 @@ describe("EnvironmentSceneV1", () => {
     ))).toBe(true);
     expect(frame.rails.every((rail) => rail.offset >= 0 && rail.offset <= 1)).toBe(true);
     expect(frame.orbs.every((orb) => orb.x >= 0 && orb.x <= 1 && orb.y >= 0 && orb.y <= 1)).toBe(true);
+  });
+
+  it("can resample into one retained frame without allocating replacement arrays", () => {
+    const scene = compileEnvironmentSceneV1("fixture:retained-environment");
+    const target = createEnvironmentFrameV1(scene);
+    const particles = target.particles;
+    const rails = target.rails;
+    const orbs = target.orbs;
+    sampleEnvironmentSceneIntoV1(scene, 1_000, defaultEnvironmentTuningV1, 0.7, target);
+    const expected = sampleEnvironmentSceneV1(scene, 9_321, defaultEnvironmentTuningV1, 0.7);
+    expect(sampleEnvironmentSceneIntoV1(scene, 9_321, defaultEnvironmentTuningV1, 0.7, target)).toEqual(expected);
+    expect(target.particles).toBe(particles);
+    expect(target.rails).toBe(rails);
+    expect(target.orbs).toBe(orbs);
   });
 
   it("lets a safe baseline suppress environmental light without changing geometry", () => {

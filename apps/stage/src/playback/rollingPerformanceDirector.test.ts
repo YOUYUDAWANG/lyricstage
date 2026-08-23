@@ -204,19 +204,20 @@ describe("rolling Performance Director", () => {
     expect(moments.some((moment) => moment.id === finalAnchor.recallOf)).toBe(true);
   });
 
-  it("keeps Stage layout arrival CSS transform/opacity-only and at most 300ms", () => {
+  it("keeps directed Stage motion off CSS wall-clock timelines", () => {
     const css = readFileSync(new URL("../styles.css", import.meta.url), "utf8");
     const layoutRule = css.match(/\.stage-now-playing-layout \{([\s\S]*?)\n\}/u)?.[1] ?? "";
     const artworkRule = css.match(/\.stage-artwork-frame \{([\s\S]*?)\n\}/u)?.[1] ?? "";
     expect(layoutRule).not.toMatch(/transition:[^;]*(grid-template-columns|gap|padding)/u);
     expect(artworkRule).not.toMatch(/transition:[^;]*(width|border-radius|box-shadow)/u);
-    expect(css).toContain("200ms cubic-bezier(0.23, 1, 0.32, 1)");
-    expect(css).not.toContain("stage-directed-arrival 820ms");
-    expect(css).toMatch(/\[data-reduce-motion="true"\][\s\S]*:is\(\.stage-now-playing-info, \.stage-lyric-viewport, \.stage-artwork-frame\)[\s\S]*transition: none/u);
+    expect(css).not.toMatch(/animation:[^;\n]*\binfinite\b/u);
+    expect(css).not.toContain("data-layout-transition-phase");
     const stageSource = readFileSync(new URL("../StageCanvas.tsx", import.meta.url), "utf8");
     expect(stageSource).toMatch(/useLayoutEffect\(\(\) => \{\s*if \(!remoteDirectorPlan\)/u);
     expect(stageSource).toContain("handoffRef.current = { active: localDirectorPlan }");
     expect(stageSource).toContain('directorMode === "legacy" && Boolean(remoteDirectorPlan)');
+    expect(stageSource).toContain("applyStageFrameDOMV1(stageFrame");
+    expect(stageSource).not.toContain("setLayoutTransitionPhase");
     const appSource = readFileSync(new URL("../App.tsx", import.meta.url), "utf8");
     expect(appSource).toContain("const priorRollingState = rollingDirectorStateRef.current");
     expect(appSource).toContain("setRollingDirectorState(priorRollingState)");
