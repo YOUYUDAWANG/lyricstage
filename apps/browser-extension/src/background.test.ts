@@ -628,7 +628,7 @@ describe("YouTube Music background routing", () => {
     const positiveSceneCache = storage.get("lyricstage-director-scene-cache-v1") as Record<string, any>;
     expect(Object.values(positiveSceneCache)).not.toHaveLength(0);
     expect(Object.values(positiveSceneCache).every((entry) =>
-      entry.provenance === "ai-positive" && entry.schemaVersion === "scene-pack-v2")).toBe(true);
+      entry.provenance === "ai-positive" && entry.schemaVersion === "layered-director-v2")).toBe(true);
     const stored = JSON.stringify({
       bible: storage.get("lyricstage-director-bible-cache-v1"),
       scenes: storage.get("lyricstage-director-scene-cache-v1"),

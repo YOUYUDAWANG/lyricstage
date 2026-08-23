@@ -102,6 +102,7 @@ const summaryCacheEpochs = new Set([
   "rolling-director-generation-v1.7-window-recovery-v2",
   "rolling-director-generation-v1.8-spatial-support-v2",
   "rolling-director-generation-v1.9-scene-pack-v2",
+  "rolling-director-generation-v2.0-layered-director-v2",
 ]);
 const warningOrder: readonly DirectorDiversityWarningV1[] = [
   "minimum-budget", "scene-density-low", "line-direction-low", "signature-choreography-low", "single-scale",
@@ -208,7 +209,7 @@ export const summarizeDirectorCacheEntryV1 = (input: DirectorCacheSummaryInputV1
     durationMs: input.lyrics.durationMs,
     lineCount: input.lyrics.lines.length,
     cacheVersion: "rolling-v1",
-    compilerVersion: input.cacheEpoch.includes("scene-pack-v2")
+    compilerVersion: input.cacheEpoch.includes("scene-pack-v2") || input.cacheEpoch.includes("layered-director-v2")
       ? "scene-pack-v2" : semanticDirectiveCount > 0 ? "window-intent-v2" : "scene-pack-v1",
     semanticDirectiveCount,
     cacheEpoch: clean(input.cacheEpoch, 80),
