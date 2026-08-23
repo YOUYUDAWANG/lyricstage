@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { readFileSync } from "node:fs";
-import { artworkCandidates, artworkShapeForAspectV1 } from "./StageCanvas";
+import { artworkCandidates, artworkShapeForAspectV1 } from "./artworkCandidates";
 
 describe("artworkCandidates", () => {
   it("prefers the real YouTube max-resolution image and keeps safe fallbacks", () => {

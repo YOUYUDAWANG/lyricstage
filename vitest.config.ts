@@ -21,5 +21,22 @@ export default defineConfig({
       "apps/stage/src/**/*.test.ts",
       "apps/browser-extension/src/**/*.test.ts",
     ],
+    coverage: {
+      provider: "v8",
+      reporter: ["text-summary", "json-summary"],
+      include: [
+        "packages/**/*.ts",
+        "apps/stage/src/playback/**/*.ts",
+        "apps/stage/src/column/*.ts",
+        "apps/browser-extension/src/**/*.ts",
+      ],
+      exclude: ["**/*.test.ts", "**/generated/**", "**/*.d.ts"],
+      thresholds: {
+        statements: 70,
+        branches: 65,
+        functions: 75,
+        lines: 75,
+      },
+    },
   },
 });

@@ -138,19 +138,25 @@ const settingsSource = settingsResources
 const contentScripts = manifest.content_scripts?.[0]?.js ?? [];
 if (
   contentScripts.length !== 2 ||
-  contentScripts[0] !== "content-ui.js" ||
+  contentScripts[0] !== "content-ui-loader.js" ||
   contentScripts[1] !== "content.js"
 ) {
-  throw new Error("Extension must load content-ui.js before content.js.");
+  throw new Error("Extension must load the content UI module loader before content.js.");
 }
-const contentUIPath = join(extensionRoot, "content-ui.js");
+const contentUILoaderPath = join(extensionRoot, "content-ui-loader.js");
+const contentUIPath = join(extensionRoot, "assets/content-ui.js");
+if (!existsSync(contentUILoaderPath) || statSync(contentUILoaderPath).size === 0) {
+  throw new Error("Extension build is missing the embedded Column module loader.");
+}
 if (!existsSync(contentUIPath) || statSync(contentUIPath).size === 0) {
   throw new Error("Extension build is missing the embedded Column runtime.");
 }
-if (statSync(contentUIPath).size > 1_200_000) {
-  throw new Error("Embedded Column/fullscreen runtime exceeded the 1.2MB launch budget.");
+if (statSync(contentUIPath).size > 650_000) {
+  throw new Error("Embedded Column entry exceeded the 650KB launch budget.");
 }
-const contentUISource = readFileSync(contentUIPath, "utf8");
+const contentModulePaths = javascriptFiles(join(extensionRoot, "assets"))
+  .filter((path) => /\/content(?:-ui|-[^/]+)\.js$/u.test(path));
+const contentUISource = contentModulePaths.map((path) => readFileSync(path, "utf8")).join("\n");
 if (!contentUISource.includes("director-plan-v1") || !contentUISource.includes("environment-scene-v1")) {
   throw new Error("Embedded fullscreen runtime is missing the production performance engine.");
 }
@@ -183,8 +189,16 @@ const exposedStage = (manifest.web_accessible_resources ?? []).some((entry) =>
 if (exposedStage) {
   throw new Error("Embedded Column no longer needs Stage resources exposed to the host page.");
 }
+const exposedContentModules = (manifest.web_accessible_resources ?? []).some((entry) =>
+  (entry.resources ?? []).includes("assets/content-ui.js")
+    && (entry.resources ?? []).includes("assets/content-*.js")
+    && (entry.matches ?? []).includes("https://music.youtube.com/*"),
+);
+if (!exposedContentModules) {
+  throw new Error("Embedded Column ES modules are not narrowly exposed to YouTube Music.");
+}
 
-for (const filename of ["content.js", "manifest.json"]) {
+for (const filename of ["content-ui-loader.js", "content.js", "manifest.json"]) {
   const source = readFileSync(join(publicRoot, filename));
   const built = readFileSync(join(extensionRoot, filename));
   if (!source.equals(built)) {

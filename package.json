@@ -16,9 +16,17 @@
     "build:performance": "npm run sync:director-contract && tsc -p tsconfig.json && vite build --config performance.vite.config.ts",
     "build:extension": "npm run generate:contracts && npm run sync:director-contract && tsc -p tsconfig.json && vite build --config extension.vite.config.ts && vite build --config extension-content.vite.config.ts && npm run verify:extension-csp",
     "build:all": "npm run build && npm run build:performance && npm run build:extension",
-    "verify:extension-csp": "node scripts/verify-extension-csp.mjs",
+    "ci": "npm run test:coverage && npm run typecheck && npm run build:all && npm run test:gateway && npm run verify:release-status && npm run verify:bundle-budgets && npm run verify:module-budgets",
     "test": "npm run sync:director-contract && vitest run",
-    "typecheck": "npm run sync:director-contract && tsc -p tsconfig.json"
+    "test:browser-smoke": "node scripts/smoke-extension-chrome.mjs",
+    "test:coverage": "npm run sync:director-contract && vitest run --coverage",
+    "test:gateway": "npm --prefix services/director-gateway test",
+    "typecheck": "npm run sync:director-contract && tsc -p tsconfig.json",
+    "verify:bundle-budgets": "node scripts/verify-bundle-budgets.mjs",
+    "verify:deterministic-extension": "node scripts/verify-deterministic-extension.mjs",
+    "verify:extension-csp": "node scripts/verify-extension-csp.mjs",
+    "verify:module-budgets": "node scripts/verify-module-budgets.mjs",
+    "verify:release-status": "node scripts/verify-release-status.mjs"
   },
   "dependencies": {
     "ajv": "8.20.0",
@@ -34,6 +42,7 @@
     "@types/react": "19.2.14",
     "@types/react-dom": "19.2.3",
     "@vitejs/plugin-react": "6.0.2",
+    "@vitest/coverage-v8": "4.1.0",
     "typescript": "5.9.3",
     "vite": "8.2.2",
     "vitest": "4.1.0"

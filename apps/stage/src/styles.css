@@ -506,6 +506,17 @@ h1 {
   box-shadow: 18px 22px 0 rgba(255, 77, 125, 0.11);
 }
 
+.stage-canvas-loading {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  color: rgba(255, 255, 255, 0.64);
+  background: #08090b;
+  font-size: 13px;
+  letter-spacing: 0.04em;
+}
+
 .app-shell[data-benchmark] .workspace {
   grid-template-columns: minmax(0, 1fr);
 }

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { lyricFixtures, type LyricDocumentV0 } from "@lyricstage/contracts";
 import {
   youtubeMusicRecordingID,
@@ -33,7 +33,6 @@ import {
 import { ColumnStageView } from "./column/ColumnStageView";
 import { FullscreenTrackTransition } from "./column/FullscreenTrackTransition";
 import { retainCandidatesAfterChoice } from "./column/timedLineText";
-import { StageCanvas } from "./StageCanvas";
 import {
   controlYouTubeMusic,
   isYouTubeMusicExtensionContext,
@@ -94,6 +93,10 @@ import {
   requestAutomaticLyrics,
   requestManualLyrics,
 } from "./playback/youtubeMusicLyrics";
+
+const loadStageCanvasModule = () => import("./StageCanvas");
+const StageCanvas = lazy(() => loadStageCanvasModule().then((module) => ({ default: module.StageCanvas })));
+const stageCanvasFallback = <div className="stage-canvas-loading" role="status">正在装入全屏演出引擎…</div>;
 
 const fixtureParameter = import.meta.env.DEV
   ? new URLSearchParams(globalThis.location?.search ?? "").get("fixture")
@@ -1251,6 +1254,7 @@ export default function App({ embedded = embeddedStageFromLocation, onEmbeddedRe
         ? startYouTubeMusicAudioAnalysis(captureTrackID, youtubeMusic.snapshot.playback.durationMs)
         : undefined;
       // Must stay in the user-gesture stack: reveal host then requestFullscreen.
+      void loadStageCanvasModule();
       host.hidden = false;
       host.setAttribute("aria-hidden", "false");
       try {
@@ -1411,31 +1415,33 @@ export default function App({ embedded = embeddedStageFromLocation, onEmbeddedRe
           ) : null}
           {fullscreenSurface === "stage" ? (
             <div className="fullscreen-stage-layer" key={lyrics.recordingID}>
-              <StageCanvas
-                lyrics={lyrics}
-                localDirectorPlan={localDirectorPlan}
-                remoteDirectorPlan={displayedRemoteDirectorPlan}
-                directorLookupState={directorLookupState}
-                directorMode={rollingDirectorRoute.renderRolling ? "rolling" : "legacy"}
-                bibleSource={rollingDirectorState.bibleSource}
-                rollingCards={rollingDirectorRoute.renderRolling ? rollingDirectorState.cards : []}
-                clock={youtubeMusic.clock}
-                continuous={selectedPlaying || benchmarkStage}
-                displayTimeMs={displayTimeMs}
-                lyricsOffsetMs={effectiveLyricsOffsetMs}
-                reduceMotion={reduceMotion || lightweight}
-                vjMode={vjMode}
-                showGuides={false}
-                onMetrics={handleMetrics}
-                title={stageTitle}
-                artist={stageSubtitle}
-                artworkURL={stageArtworkURL}
-                durationMs={durationMs}
-                playbackState={stagePlaybackState}
-                controls={stageControls}
-                onSeek={seekStage}
-                onTransport={controlStageTransport}
-              />
+              <Suspense fallback={stageCanvasFallback}>
+                <StageCanvas
+                  lyrics={lyrics}
+                  localDirectorPlan={localDirectorPlan}
+                  remoteDirectorPlan={displayedRemoteDirectorPlan}
+                  directorLookupState={directorLookupState}
+                  directorMode={rollingDirectorRoute.renderRolling ? "rolling" : "legacy"}
+                  bibleSource={rollingDirectorState.bibleSource}
+                  rollingCards={rollingDirectorRoute.renderRolling ? rollingDirectorState.cards : []}
+                  clock={youtubeMusic.clock}
+                  continuous={selectedPlaying || benchmarkStage}
+                  displayTimeMs={displayTimeMs}
+                  lyricsOffsetMs={effectiveLyricsOffsetMs}
+                  reduceMotion={reduceMotion || lightweight}
+                  vjMode={vjMode}
+                  showGuides={false}
+                  onMetrics={handleMetrics}
+                  title={stageTitle}
+                  artist={stageSubtitle}
+                  artworkURL={stageArtworkURL}
+                  durationMs={durationMs}
+                  playbackState={stagePlaybackState}
+                  controls={stageControls}
+                  onSeek={seekStage}
+                  onTransport={controlStageTransport}
+                />
+              </Suspense>
             </div>
           ) : null}
           <p className="sr-only" aria-live="polite">
@@ -1610,31 +1616,33 @@ export default function App({ embedded = embeddedStageFromLocation, onEmbeddedRe
         </aside>
 
         <section ref={stageShellRef} className="stage-shell" data-fullscreen={isFullscreen || undefined}>
-          <StageCanvas
-            lyrics={lyrics}
-            localDirectorPlan={localDirectorPlan}
-            remoteDirectorPlan={displayedRemoteDirectorPlan}
-            directorLookupState={directorLookupState}
-            directorMode={rollingDirectorRoute.renderRolling ? "rolling" : "legacy"}
-            bibleSource={rollingDirectorState.bibleSource}
-            rollingCards={rollingDirectorRoute.renderRolling ? rollingDirectorState.cards : []}
-            clock={selectedClock}
-            continuous={selectedPlaying || benchmarkStage}
-            displayTimeMs={stageDisplayTimeMs}
-            lyricsOffsetMs={effectiveLyricsOffsetMs}
-            reduceMotion={reduceMotion}
-            vjMode={vjMode}
-            showGuides={showGuides}
-            onMetrics={handleMetrics}
-            title={stageTitle}
-            artist={stageSubtitle}
-            artworkURL={stageArtworkURL}
-            durationMs={durationMs}
-            playbackState={stagePlaybackState}
-            controls={stageControls}
-            onSeek={seekStage}
-            onTransport={controlStageTransport}
-          />
+          <Suspense fallback={stageCanvasFallback}>
+            <StageCanvas
+              lyrics={lyrics}
+              localDirectorPlan={localDirectorPlan}
+              remoteDirectorPlan={displayedRemoteDirectorPlan}
+              directorLookupState={directorLookupState}
+              directorMode={rollingDirectorRoute.renderRolling ? "rolling" : "legacy"}
+              bibleSource={rollingDirectorState.bibleSource}
+              rollingCards={rollingDirectorRoute.renderRolling ? rollingDirectorState.cards : []}
+              clock={selectedClock}
+              continuous={selectedPlaying || benchmarkStage}
+              displayTimeMs={stageDisplayTimeMs}
+              lyricsOffsetMs={effectiveLyricsOffsetMs}
+              reduceMotion={reduceMotion}
+              vjMode={vjMode}
+              showGuides={showGuides}
+              onMetrics={handleMetrics}
+              title={stageTitle}
+              artist={stageSubtitle}
+              artworkURL={stageArtworkURL}
+              durationMs={durationMs}
+              playbackState={stagePlaybackState}
+              controls={stageControls}
+              onSeek={seekStage}
+              onTransport={controlStageTransport}
+            />
+          </Suspense>
           <div className="stage-header">
             <div>
               <span>{stageSubtitle}</span>

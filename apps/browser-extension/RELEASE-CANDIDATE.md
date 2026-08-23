@@ -1,4 +1,4 @@
-# LyricStage for YouTube Music 0.3.0 Release Candidate
+# LyricStage for YouTube Music 0.3.1 Release Candidate
 
 Build artifact: `extension-dist`
 
@@ -25,8 +25,8 @@ Build artifact: `extension-dist`
 - [x] Latin text wraps at word boundaries, long CJK remains complete, and Reading motion cannot delay or obscure source-owned reveal.
 - [x] System reduced-motion and lightweight mode override personal VJ intensity.
 - [x] Production extension excludes Theatre Studio, `MediaRecorder`, `captureStream`, eval and CommonJS require; `tabCapture` is limited to user-started, in-memory feature analysis in the offscreen document.
-- [x] `content-ui.js` stays below the 1.2MB launch ceiling.
-- [x] Full local release suite: 32 Web files and 297/297 tests passing; dedicated Director: 27/27 passing. The final race gates cover same-recording standalone A→B ownership/clock reset (including no-capture B and late A status), captureID/StrictMode/fullscreen cleanup, immutable follow-authority/bound-tab ownership including authorization-pending promotion, MV3 worker rehydration, four BYOK protocols, fallback/retry, one shared 105-second deadline, Key-free cache identity and bounded host recovery.
+- [x] The initial content scripts stay below the committed launch budget; the embedded Column loads as an extension ES module and the Pixi/fullscreen renderer remains in a lazy chunk until Stage is requested.
+- [x] The committed CI suite covers Web and Director contracts, source authority/clock reset, capture ownership, MV3 worker rehydration, four BYOK protocols, Legacy and Rolling budgets, Key-free cache identity, coverage thresholds, deterministic extension artifacts, bundle budgets, and a real Chromium extension-page smoke. Exact counts and artifact evidence belong to the current CI run rather than this document.
 - [x] TypeScript and `build:all` pass; the aggregate build explicitly rebuilds standalone Stage, Performance Lab and both Manifest V3 extension surfaces, followed by CSP verification.
 - [x] A clean temporary source copy independently rebuilt every file in `extension-dist` byte-for-byte; source `content.js` and `manifest.json` are packaged verbatim.
 - [x] The Companion no longer depends on `director.hachi-mi.uk`; the existing 1.5.8/V4 service and deployment files remain an optional gateway/rollback implementation and are not a source of user provider Keys.

@@ -65,78 +65,48 @@ import {
   type SceneCardV1,
   type VocalTimingMapV1,
 } from "@lyricstage/performance";
-
-interface ExtensionPort {
-  name: string;
-  sender?: { tab?: ExtensionTab; url?: string };
-  postMessage(message: unknown): void;
-  onMessage: { addListener(listener: (message: unknown) => void): void };
-  onDisconnect: { addListener(listener: () => void): void };
-}
-
-interface ExtensionTab {
-  id?: number;
-  url?: string;
-}
-
-interface ExtensionChrome {
-  runtime: {
-    getURL(path: string): string;
-    sendMessage(message: unknown): Promise<unknown>;
-    getContexts?(options: { contextTypes: string[]; documentUrls: string[] }): Promise<unknown[]>;
-    onConnect: { addListener(listener: (port: ExtensionPort) => void): void };
-    onMessage: {
-      addListener(
-        listener: (
-          message: unknown,
-          sender: { tab?: ExtensionTab; url?: string },
-          sendResponse: (response: unknown) => void,
-        ) => boolean | void,
-      ): void;
-    };
-  };
-  offscreen: {
-    createDocument(options: { url: string; reasons: string[]; justification: string }): Promise<void>;
-    closeDocument?(): Promise<void>;
-  };
-  tabCapture: {
-    getMediaStreamId(options: { targetTabId: number }): Promise<string>;
-  };
-  tabs: {
-    create(options: { url: string; active?: boolean }): Promise<ExtensionTab>;
-    query(options: Record<string, unknown>): Promise<ExtensionTab[]>;
-    sendMessage(tabID: number, message: unknown): Promise<unknown>;
-    update(tabID: number, options: { active: boolean }): Promise<ExtensionTab>;
-    onRemoved: { addListener(listener: (tabID: number) => void): void };
-    onUpdated: {
-      addListener(listener: (tabID: number, change: { url?: string }) => void): void;
-    };
-  };
-  storage: {
-    local: {
-      get(key: string): Promise<Record<string, unknown>>;
-      set(values: Record<string, unknown>): Promise<void>;
-    };
-  };
-}
+import {
+  backgroundStorageKeys,
+  directorCacheEpoch,
+  directorCacheLimit,
+  lyricsCacheLimit,
+  rollingDirectorEpoch,
+  sponsorBlockCategories,
+  type RollingGenerationLedgerV1,
+  type StoredDirectorBibleCache,
+  type StoredDirectorBibleCacheEntry,
+  type StoredDirectorCache,
+  type StoredDirectorSceneCache,
+  type StoredDirectorSceneCacheEntry,
+  type StoredLocalLyrics,
+  type StoredLyricsCache,
+} from "./backgroundStorage";
+import type {
+  AudioAnalysisReplayState,
+  AudioCaptureOperation,
+  AudioCaptureOwnerScope,
+  AudioCaptureState,
+  ExtensionChrome,
+  ExtensionPort,
+  ExtensionTab,
+  OffscreenAudioCaptureStatus,
+} from "./backgroundRuntime";
 
 const chromeAPI = (globalThis as typeof globalThis & { chrome: ExtensionChrome }).chrome;
 const stagePorts = new Map<ExtensionPort, number | undefined>();
 const sourceRegistry = new YouTubeMusicSourceRegistryV0();
-const lyricsCacheStorageKey = "lyricstage-youtube-music-lyrics-v9";
-const localLyricsStorageKey = "lyricstage-local-lyrics-v0";
-const privateLyricsConfigurationStorageKey = "lyricstage-private-lyrics-backend-v0";
-const legacyDirectorConfigurationStorageKey = "lyricstage-director-backend-v1";
-const directorConfigurationStorageKey = "lyricstage-director-byok-v1";
-const legacyDirectorCacheStorageKey = "lyricstage-director-cache-v4";
-const directorCacheStorageKey = "lyricstage-director-cache-v5";
-const directorLastTimingStorageKey = "lyricstage-director-last-timing-v1";
-const directorBibleCacheStorageKey = "lyricstage-director-bible-cache-v1";
-const directorSceneCacheStorageKey = "lyricstage-director-scene-cache-v1";
-const directorCacheEpoch = "fullscreen-director-v4-client-contract-v8.7-byok-intent-v1";
-const rollingDirectorEpoch = "rolling-director-generation-v1.1";
-const lyricsCacheLimit = 100;
-const directorCacheLimit = 100;
+const {
+  lyricsCache: lyricsCacheStorageKey,
+  localLyrics: localLyricsStorageKey,
+  privateLyricsConfiguration: privateLyricsConfigurationStorageKey,
+  legacyDirectorConfiguration: legacyDirectorConfigurationStorageKey,
+  directorConfiguration: directorConfigurationStorageKey,
+  legacyDirectorCache: legacyDirectorCacheStorageKey,
+  directorCache: directorCacheStorageKey,
+  directorLastTiming: directorLastTimingStorageKey,
+  directorBibleCache: directorBibleCacheStorageKey,
+  directorSceneCache: directorSceneCacheStorageKey,
+} = backgroundStorageKeys;
 const lyricsLookupTasks = new Map<string, Promise<LyricsLookupResponseV0>>();
 const manualLyricsLookupTasks = new Map<string, Promise<LyricsLookupResponseV0>>();
 const directorLookupTasks = new Map<string, Promise<DirectorResolutionResponseV1>>();
@@ -148,45 +118,6 @@ let rollingDirectorGeneration = 0;
 let activeRollingFingerprint: string | undefined;
 let sourceLeaseTimer: ReturnType<typeof setInterval> | undefined;
 let offscreenCreation: Promise<void> | undefined;
-type AudioAnalysisStatus = "analyzing" | "ready" | "error";
-type AudioCaptureOwnerScope = "boundTab" | "followAuthority";
-
-interface AudioCaptureState {
-  captureID: string;
-  trackID: string;
-  tabID: number;
-  durationMs: number;
-  generation: number;
-  ownerScope: AudioCaptureOwnerScope;
-  status: AudioAnalysisStatus;
-  reason?: string;
-  latestMusicMap?: MusicMapV1;
-  latestVocalMap?: VocalTimingMapV1;
-  mapForwarded: boolean;
-  expiresAtUnixMs?: number;
-  startTask?: Promise<void>;
-}
-
-interface AudioCaptureOperation {
-  capture: AudioCaptureState;
-  task: Promise<void>;
-}
-
-interface OffscreenAudioCaptureStatus {
-  captureID: string;
-  trackID: string;
-  tabID: number;
-  generation: number;
-  durationMs: number;
-  status: AudioAnalysisStatus;
-  ownerScope: AudioCaptureOwnerScope;
-  latestMusicMap?: MusicMapV1;
-  latestVocalMap?: VocalTimingMapV1;
-}
-
-type AudioAnalysisReplayState = Omit<AudioCaptureState, "status" | "startTask"> & {
-  status: AudioAnalysisStatus | "idle";
-};
 
 let audioCapture: AudioCaptureState | undefined;
 let pendingAudioCapture: AudioCaptureState | undefined;
@@ -197,85 +128,6 @@ let audioCaptureRehydrated = false;
 let audioCaptureRehydrationTask: Promise<void> | undefined;
 const audioAnalysisReplayByTab = new Map<number, AudioAnalysisReplayState>();
 let lastBroadcastAuthoritativeTabID: number | undefined;
-const sponsorBlockCategories = [
-  "sponsor",
-  "selfpromo",
-  "interaction",
-  "intro",
-  "outro",
-  "preview",
-  "filler",
-  "music_offtopic",
-];
-
-interface StoredLyricsCacheEntry {
-  fingerprint: string;
-  expiresAtUnixMs: number;
-  response: LyricsLookupResponseV0;
-}
-
-type StoredLyricsCache = Record<string, StoredLyricsCacheEntry>;
-
-interface StoredLocalLyricsEntry {
-  fingerprint: string;
-  fileName: string;
-  rawLyrics: string;
-  updatedAtUnixMs: number;
-}
-
-type StoredLocalLyrics = Record<string, StoredLocalLyricsEntry>;
-
-interface StoredDirectorCacheEntry {
-  fingerprint: string;
-  expiresAtUnixMs: number;
-  plan: DirectorPlanV1;
-}
-
-type StoredDirectorCache = Record<string, StoredDirectorCacheEntry>;
-
-interface StoredDirectorBibleCacheEntry {
-  fingerprint: string;
-  epoch: string;
-  createdAtUnixMs: number;
-  expiresAtUnixMs: number;
-  trackTitle: string;
-  trackArtist: string;
-  summary?: DirectorCacheSummaryV1;
-  bible: DirectorBibleV1;
-}
-
-interface StoredDirectorSceneCacheEntry {
-  fingerprint: string;
-  epoch: string;
-  createdAtUnixMs: number;
-  expiresAtUnixMs: number;
-  trackID: string;
-  trackTitle: string;
-  trackArtist: string;
-  bibleIdentity: string;
-  fromLineIndex: number;
-  entryStateHash: string;
-  entryState: RollingPerformanceStateV1;
-  cards: SceneCardV1[];
-  summary?: DirectorCacheSummaryV1;
-}
-
-type StoredDirectorBibleCache = Record<string, StoredDirectorBibleCacheEntry>;
-type StoredDirectorSceneCache = Record<string, StoredDirectorSceneCacheEntry>;
-
-interface RollingGenerationLedgerV1 {
-  fingerprint: string;
-  generation: number;
-  bibleLogicalRequests: number;
-  sceneLogicalRequests: number;
-  providerAttempts: number;
-  providerMs: number;
-  consecutiveFailures: number;
-  inFlight?: Promise<void>;
-  inFlightKind?: "bible" | "scene-pack";
-  inFlightWindow?: { fromLineIndex: number; toLineIndex: number };
-  generatedCoverage: Array<{ fromLineIndex: number; toLineIndex: number; sceneIDs: string[] }>;
-}
 
 const rollingGenerationLedgers = new Map<string, RollingGenerationLedgerV1>();
 

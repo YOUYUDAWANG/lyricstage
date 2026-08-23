@@ -1,5 +1,5 @@
 import { useMemo, useState } from "react";
-import { artworkCandidates } from "../StageCanvas";
+import { artworkCandidates } from "../artworkCandidates";
 
 export interface FullscreenTrackTransitionProps {
   active: boolean;

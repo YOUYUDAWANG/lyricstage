@@ -24,19 +24,19 @@ The current product line is `0.3.1`:
 - Provider keys stay in `chrome.storage.local`; never copy them into a worktree, prompt, log, fixture, commit, or deployment.
 - AI failure must preserve the complete deterministic local performance.
 - BYOK generation uses compact Director intent, a 45-second total budget, at most three HTTP attempts, and one in-flight request per track/lyrics identity. Late MusicMap data is fused locally without a second provider call.
+- Rolling Director V1 is an explicit `off | shadow | on` preference. It keeps one provider request in flight, one Bible plus bounded Scene Packs, at most six provider attempts and 90 seconds of cumulative provider time; every gap fails locally without disabling the deterministic performance.
 - Settings exposes only sanitized last-run phase timing; provider keys, endpoints, lyric text and response bodies are not diagnostic data.
 
 ## Commands
 
 ```sh
 npm ci
-npm test
-npm run typecheck
-npm run build:all
-(cd services/director-gateway && npm test)
+npm run ci
+npm run verify:deterministic-extension
+npm run test:browser-smoke # requires Chromium/Chrome for Testing
 ```
 
-During iteration, run only the narrowest relevant test. Before release-bound changes, run the complete commands above plus `npm audit`, the independent artifact comparison, and a real Chrome reload/UAT.
+During iteration, run only the narrowest relevant test. Before release-bound changes, run the complete commands above plus `npm audit` and a real Chrome reload/UAT. CI is the source of truth for exact test counts, coverage, build output and artifact evidence.
 
 Development entry points:
 
@@ -64,15 +64,14 @@ Never inspect, print, or migrate the user's provider key. If a fresh extension i
 
 ## Current verified baseline
 
-- Web: `0.3.1` passes 340/340 tests.
-- Director gateway: 27/27 tests.
+- The committed CI workflow gates Web coverage, type safety, every production build, the Director gateway, MV3 CSP, version drift, bundle size, deterministic extension artifacts, dependency audit and a Chromium extension-page smoke. Read the latest CI run for exact counts.
 - The low-latency Director authors a compact whole-song intent under a 45-second/three-request boundary and expands routine per-line mechanics locally.
 - The settings UI uses the light Control Room system in `docs/uiux-light-control-room.md`: one stable split view, warm neutral canvas, grouped rows, progressive provider setup, explicit unsaved/saving/error states, and destructive credential wording. It keeps the sanitized last-run timing row without exposing endpoint, Key, lyrics, or response bodies.
 - AI provider setup discovers the account's available models through the provider's Models API; model selection is no longer free text. OpenAI, OpenAI-compatible/local, Gemini, and Anthropic discovery paths have bounded unit and background-integration coverage.
 - The popup is a compact remote for current track, Stage launch, quick performance preferences, and settings navigation. Preference persistence failure restores the prior switch state and uses an independent notice instead of replacing song metadata. The embedded lyrics column keeps only `More` and fullscreen as persistent toolbar actions; search, timing, versions, import, and vocal timing live under `More`.
 - Queue advances use the current internal YouTube player identity instead of a stale radio-seed URL. Track-relative Stage seeks are translated onto YouTube Music's reused media timeline, and stale controls fail closed as soon as the internal player changes recordings. Real Chrome UAT switched from `斜陽` to `青春の温度` while the page URL stayed stale, updated Stage title/artwork to the new track, and dragged playback back to 0:32 without returning to the previous recording.
 - TypeScript, the full Vite 8.2.2 production build, deterministic extension artifact comparison, Manifest V3 CSP, `npm audit`, and the Director gateway suite pass.
-- The last verified `0.3.1` extension build was mirrored byte-for-byte to `/Users/chaoyiliu/Desktop/bilibili-music/web/extension-dist` and reloaded under the original extension ID. The subsequent light Control Room build passes static and production gates; at handoff, Computer Use could navigate the correct Chrome window but Chrome exposed only the window title, not a screenshot/accessibility tree, so fresh visual UAT must be rechecked without blind coordinate clicks.
+- The stable unpacked extension remains `/Users/chaoyiliu/Desktop/bilibili-music/web/extension-dist` under the original extension ID. Before claiming current runtime acceptance, compare it to a reviewed commit build, reload that exact path, refresh YouTube Music and record the bounded UAT evidence below.
 - Owner-only Stage deployment: `https://lyricstage.yihanchen617.chatgpt.site`.
 - Frozen extraction tag: `lyricstage-monorepo-v0.3.0`.
 
@@ -80,10 +79,8 @@ Recheck drift-prone runtime and deployment state before claiming it is still cur
 
 ## Open work
 
-1. Diagnose the current real Gemini attempt: Settings recorded 320 ms total / 307 ms provider / two attempts, then Stage returned to `AI 暂不可用`; its project/source restrictions also reject `ListModels` with HTTP 403. Never read or record the key.
-2. Reload and visually verify the light Control Room settings/popup under the original extension identity once Chrome exposes a screenshot/accessibility tree again.
-3. Verify one successful real provider model-list refresh, compact-intent takeover, the 45-second/three-attempt fallback boundary, and deterministic local fallback without recording either key.
-4. Run whole-song subjective A/B for fast, slow, repeated-chorus, duet, and long-line tracks.
-5. Run a bounded multi-tab soak covering authority handoff, pause/seek, artwork fallback, capture ownership, and extension reload recovery.
+1. Run the five-song fast/slow/repeated-hook/duet/long-line visual matrix against the reviewed commit and record visible output, not the badge alone.
+2. Run a bounded multi-tab soak covering authority handoff, pause/seek, artwork fallback, capture ownership and extension reload recovery.
+3. Verify primary/fallback provider boundaries without reading or recording either key.
 
 These are post-migration quality gates. Repository extraction, GitHub upload, owner-only deployment, and the final local Chrome lifecycle gate are complete.

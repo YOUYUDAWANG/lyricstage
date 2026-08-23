@@ -19,8 +19,8 @@ Requires Node.js 22.13 or newer.
 
 ```sh
 npm ci
-npm test
-npm run build:all
+npm run ci
+npm run verify:deterministic-extension
 ```
 
 Load `extension-dist` as an unpacked Chrome/Edge extension. The standalone Stage build is emitted to `dist`; Performance Lab is emitted to `performance-dist`.

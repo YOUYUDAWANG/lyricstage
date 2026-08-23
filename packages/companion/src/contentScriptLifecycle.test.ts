@@ -1353,8 +1353,11 @@ describe("YouTube Music companion isolated content script lifecycle (real DOM sh
     expect(manifestSource.includes("page-bridge.js")).toBe(false);
     expect(manifestSource.includes('"world": "MAIN"')).toBe(false);
     expect(manifestSource.includes('"world":"MAIN"')).toBe(false);
-    expect(manifest.content_scripts?.[0]?.js).toEqual(["content-ui.js", "content.js"]);
-    expect(manifest.web_accessible_resources).toBeUndefined();
+    expect(manifest.content_scripts?.[0]?.js).toEqual(["content-ui-loader.js", "content.js"]);
+    expect(manifest.web_accessible_resources).toEqual([{
+      resources: ["assets/content-ui.js", "assets/content-*.js"],
+      matches: ["https://music.youtube.com/*"],
+    }]);
     expect(contentUISource).toContain('const contentUIStopEvent = "lyricstage-content-ui-stop-v2"');
     expect(contentUISource).toContain("hostObserver.disconnect()");
     expect(contentUISource).toContain("root.unmount()");

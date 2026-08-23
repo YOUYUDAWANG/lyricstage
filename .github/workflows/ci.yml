@@ -1,0 +1,31 @@
+name: LyricStage CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  release-gates:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22.22.3
+          cache: npm
+      - run: npm ci
+      - run: npm run ci
+      - run: npm audit --audit-level=high
+      - run: npm run verify:deterministic-extension
+      - uses: browser-actions/setup-chrome@v2
+        id: chrome
+        with:
+          chrome-version: latest
+      - run: npm run test:browser-smoke
+        env:
+          CHROME_PATH: ${{ steps.chrome.outputs.chrome-path }}

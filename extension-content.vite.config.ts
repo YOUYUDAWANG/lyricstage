@@ -24,11 +24,14 @@ export default defineConfig({
   build: {
     outDir: fromRoot("./extension-dist"),
     emptyOutDir: false,
-    lib: {
-      entry: fromRoot("./apps/browser-extension/src/content-ui.tsx"),
-      name: "LyricStageEmbeddedColumn",
-      formats: ["iife"],
-      fileName: () => "content-ui.js",
+    rollupOptions: {
+      input: fromRoot("./apps/browser-extension/src/content-ui.tsx"),
+      output: {
+        format: "es",
+        entryFileNames: "assets/content-ui.js",
+        chunkFileNames: "assets/content-[name]-[hash].js",
+        assetFileNames: "assets/content-[name]-[hash][extname]",
+      },
     },
   },
 });

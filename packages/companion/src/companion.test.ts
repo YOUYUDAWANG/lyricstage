@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { YouTubeMusicPlaybackClockV0 } from "./clock";
 import { YouTubeMusicSourceRegistryV0 } from "./sourceRegistry";
+import { SourceRegistryV1, type BrowserSourceAdapterV1, type PortableSourceSnapshotV1 } from "./source";
 import {
   isYouTubeMusicSnapshotV0,
   youtubeMusicBridgeFailureReasonV0,
@@ -37,6 +38,30 @@ const snapshot = (overrides: Partial<YouTubeMusicSnapshotV0> = {}): YouTubeMusic
 });
 
 describe("YouTube Music companion protocol", () => {
+  it("keeps authority and lease policy provider-neutral", () => {
+    interface FixtureSnapshot extends PortableSourceSnapshotV1 {
+      track: PortableSourceSnapshotV1["track"] & { provider: "fixture" };
+    }
+    const adapter: BrowserSourceAdapterV1<FixtureSnapshot> = {
+      provider: "fixture",
+      snapshotVersion: "fixture-v1",
+      isSnapshot: (value): value is FixtureSnapshot => Boolean(
+        value && typeof value === "object"
+          && (value as FixtureSnapshot).track?.provider === "fixture"
+          && Number.isSafeInteger((value as FixtureSnapshot).sequence),
+      ),
+    };
+    const registry = new SourceRegistryV1(adapter, 1000);
+    const fixture = {
+      ...snapshot(),
+      track: { ...snapshot().track, provider: "fixture" as const },
+    };
+    expect(registry.accept(4, fixture, 100)).toBe(true);
+    expect(registry.snapshot?.track.provider).toBe("fixture");
+    expect(registry.expire(1101)).toBe(true);
+    expect(registry.snapshot).toBeUndefined();
+  });
+
   it("accepts a bounded, provider-neutral playback snapshot", () => {
     expect(isYouTubeMusicSnapshotV0(snapshot())).toBe(true);
     expect(youtubeMusicRecordingID("abc 123")).toBe("youtubeMusic:abc%20123");
