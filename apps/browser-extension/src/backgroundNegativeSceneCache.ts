@@ -3,6 +3,9 @@ import type { SceneCardV1 } from "@lyricstage/performance";
 
 export const scenePackSchemaVersion = "window-intent-v2" as const;
 
+export const rollingSceneProviderBudgetMsV2 = (remainingProviderMs: number): number =>
+  Math.max(1, Math.min(12_000, remainingProviderMs));
+
 export const negativeSceneCacheIdentityV1 = (
   fingerprint: string,
   bibleIdentity: string,

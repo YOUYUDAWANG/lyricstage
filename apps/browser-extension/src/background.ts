@@ -80,6 +80,7 @@ import {
 } from "./backgroundStorage";
 import {
   negativeSceneCacheIdentityV1, RollingSceneNegativeCacheV1,
+  rollingSceneProviderBudgetMsV2,
   scenePackSchemaVersion,
   semanticCueBudgetExceededV2,
 } from "./backgroundNegativeSceneCache";
@@ -1337,7 +1338,7 @@ const resolveDirectorCoverageV1 = async (
         },
         windowIntentRequestProfileV2,
         fetch,
-        Math.min(45_000, 90_000 - ledger.providerMs),
+        rollingSceneProviderBudgetMsV2(90_000 - ledger.providerMs),
         6 - ledger.providerAttempts,
         sceneSignal,
       );

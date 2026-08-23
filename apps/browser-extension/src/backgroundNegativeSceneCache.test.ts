@@ -2,10 +2,17 @@ import { describe, expect, it } from "vitest";
 import {
   negativeSceneCacheIdentityV1,
   RollingSceneNegativeCacheV1,
+  rollingSceneProviderBudgetMsV2,
   semanticCueBudgetExceededV2,
 } from "./backgroundNegativeSceneCache";
 
 describe("rolling negative scene cache", () => {
+  it("finishes a Scene request before the 35-second refill runway expires", () => {
+    expect(rollingSceneProviderBudgetMsV2(90_000)).toBe(12_000);
+    expect(rollingSceneProviderBudgetMsV2(7_500)).toBe(7_500);
+    expect(rollingSceneProviderBudgetMsV2(-10)).toBe(1);
+  });
+
   it("binds failures to fingerprint, Bible, range, state, and schema", () => {
     const base = negativeSceneCacheIdentityV1("provider-a", "bible-a", 4, "state-a");
     expect(negativeSceneCacheIdentityV1("provider-b", "bible-a", 4, "state-a")).not.toBe(base);
