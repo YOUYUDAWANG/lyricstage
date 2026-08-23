@@ -33,6 +33,36 @@ const effectsForCard = (
 ): EffectRecipeV1[] => uniqueByID([...v2Effects, ...localCard.effects])
   .slice(0, localCard.signatureMoment ? 2 : 1);
 
+const reidentifySceneCard = (card: Omit<SceneCardV1, "sceneID">): SceneCardV1 => {
+  const sceneID = sceneCardIdentityV1(card);
+  return { ...card, sceneID, effects: card.effects.map((effect) => ({ ...effect, sectionID: sceneID })) };
+};
+
+export const compileLocalContinuitySceneCardV2 = (
+  lyrics: LyricDocumentV0,
+  bible: DirectorBibleV1,
+  state: RollingPerformanceStateV1,
+  acceptedCards: readonly SceneCardV1[],
+  fromLineIndex: number,
+  toLineIndex: number,
+): SceneCardV1 | null => {
+  const local = compileLocalSceneCardForWindowV1(lyrics, bible, state, fromLineIndex, toLineIndex);
+  if (!local) return null;
+  const predecessor = [...acceptedCards]
+    .filter((card) => card.toLineIndex + 1 === fromLineIndex)
+    .sort((left, right) => right.toLineIndex - left.toLineIndex)[0];
+  if (!predecessor) return local;
+  const { sceneID: _ignored, ...withoutID } = local;
+  const inherited = reidentifySceneCard({
+    ...withoutID,
+    artDirection: predecessor.artDirection,
+    typography: predecessor.typography,
+    coverRole: predecessor.coverRole,
+    presentation: predecessor.presentation === "hero" ? "section" : predecessor.presentation,
+  });
+  return sanitizeSceneCardV1(lyrics, bible, state, inherited);
+};
+
 export const compileWindowIntentV2ToSceneCardV1 = (
   lyrics: LyricDocumentV0,
   bible: DirectorBibleV1,
@@ -115,11 +145,6 @@ export const compileWindowIntentV2ToSceneCardV1 = (
     gestures: gesturesForCard(localCard, v2Gestures),
     effects: effectsForCard(localCard, v2Effects),
   };
-  const sceneID = sceneCardIdentityV1(withoutID);
-  const candidate: SceneCardV1 = {
-    ...withoutID,
-    sceneID,
-    effects: withoutID.effects.map((effect) => ({ ...effect, sectionID: sceneID })),
-  };
+  const candidate = reidentifySceneCard(withoutID);
   return sanitizeSceneCardV1(lyrics, bible, state, candidate);
 };

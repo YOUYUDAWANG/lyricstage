@@ -105,6 +105,20 @@ describe("Director V2 manual cue compiler", () => {
     ]));
   });
 
+  it("makes release reveal spatially legible without a brightness flash", () => {
+    const candidates = directorV2ManualFixtures.flatMap((fixture) => {
+      const lyrics = lyricsByRecordingID.get(fixture.recordingID)!;
+      const compiled = compileManualDirectorV2V1(lyrics, compileLocalDirectorPlanV1(lyrics), fixture)!;
+      return compiled.recipeEvents
+        .filter((event) => event.recipe === "release" && event.branch === "reveal")
+        .map((event) => compiled.plan.effects.find((effect) => effect.id === event.effectID)!);
+    });
+    expect(candidates.length).toBeGreaterThan(0);
+    expect(candidates.every((effect) => effect.primary.primitive === "geometry.expand")).toBe(true);
+    expect(candidates.flatMap((effect) => [effect.primary, ...effect.support])
+      .some((use) => use.primitive === "transition.bloom")).toBe(false);
+  });
+
   it("turns every promise into a producer fact, persistent consequence, and matching consumer", () => {
     directorV2ManualFixtures.forEach((fixture) => {
       const lyrics = lyricsByRecordingID.get(fixture.recordingID)!;

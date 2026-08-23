@@ -429,7 +429,7 @@ const recipeEffectSpec = (
     return { presentation: "section", primary: "geometry.expand", support: ["density.release", "motif.recall"], trigger: "density_release" };
   }
   if (event.recipe === "release") {
-    return { presentation: "section", primary: "transition.bloom", support: ["field.aperture", "memory.trail"], trigger: "density_release" };
+    return { presentation: "section", primary: "geometry.expand", support: ["field.aperture", "memory.trail"], trigger: "density_release" };
   }
   if (event.branch === "absenceResolve") {
     return { presentation: "reading", primary: "geometry.converge", support: ["field.aperture"], trigger: "repeated_hook" };

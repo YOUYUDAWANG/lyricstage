@@ -75,16 +75,19 @@ Transport windows are not scenes. Scene and layout changes remain local compiler
 `scene-pack-v1` provider output remains frozen for compatibility. The live provider now uses one explicit wire-version change, while its locally compiled result continues through the existing SceneCard runtime:
 
 ```ts
-interface WindowIntentV2 {
+interface WindowIntentModelOutputV2 {
   version: "window-intent-v2";
-  bibleIdentity: string;
-  entryStateHash: string;
-  fromLineIndex: number;
-  toLineIndex: number;
   spatialIntent: "hold" | "split" | "open" | "stack";
   coverRole: DramaticCoverRoleV1;
   arcIntent: "hold" | "lift" | "break" | "recall";
   cues: SemanticCueV2[]; // at most 6 in one window
+}
+
+interface WindowIntentV2 extends WindowIntentModelOutputV2 {
+  bibleIdentity: string; // locally bound
+  entryStateHash: string; // locally bound
+  fromLineIndex: number; // locally bound
+  toLineIndex: number; // locally bound
 }
 
 interface SemanticCueV2 {

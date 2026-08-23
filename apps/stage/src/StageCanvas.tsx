@@ -496,9 +496,12 @@ export function StageCanvas({
   const observedTimeMs = frameTimeRef.current;
   const observedPalette = paletteForPlanTime(observedPlan, observedTimeMs);
   const paletteTone = paletteToneForV1(observedPalette);
-  const directorStatusSource = directorMode === "rolling"
-    && (remoteDirectorPlan?.source === "ai" || remoteDirectorPlan?.source === "cache")
-    ? remoteDirectorPlan.source
+  const observedSection = directorSectionAtV1(observedPlan, observedTimeMs);
+  const observedScene = rollingCards.find((card) => observedSection.id === `rolling:${card.sceneID}`
+    && observedTimeMs >= card.fromMs && observedTimeMs < card.toMs);
+  const hasSemanticRollingCard = rollingCards.some((card) => card.directives !== undefined);
+  const directorStatusSource = directorMode === "rolling" && hasSemanticRollingCard
+    ? observedScene?.directives !== undefined ? observedPlan.source : "continuity"
     : observedPlan.source;
   const directorStatus = directorStatusLabel(
     directorLookupState,
@@ -506,9 +509,6 @@ export function StageCanvas({
     directorMode === "legacy" && Boolean(remoteDirectorPlan),
   );
   const renderedPlaybackState = playbackState ?? (continuous ? "playing" : "paused");
-  const observedSection = directorSectionAtV1(observedPlan, observedTimeMs);
-  const observedScene = rollingCards.find((card) => observedSection.id === `rolling:${card.sceneID}`
-    && observedTimeMs >= card.fromMs && observedTimeMs < card.toMs);
   const observedSceneCoverageMs = observedScene ? Math.max(0, observedScene.toMs - observedTimeMs) : 0;
 
   return (

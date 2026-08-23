@@ -77,6 +77,7 @@ const summaryOutcomes = new Set(["ready", "http-error", "parse-error", "contract
 const summaryCacheEpochs = new Set([
   "rolling-director-generation-v1.1",
   "rolling-director-generation-v1.2-window-intent-v2",
+  "rolling-director-generation-v1.3-window-intent-v2",
 ]);
 const warningOrder: readonly DirectorDiversityWarningV1[] = [
   "minimum-budget", "single-scale", "static-without-evidence", "repeated-tuple", "coverage-gap", "local-repair-heavy",

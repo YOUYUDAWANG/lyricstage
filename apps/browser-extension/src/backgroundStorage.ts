@@ -21,7 +21,7 @@ export const backgroundStorageKeys = {
 } as const;
 
 export const directorCacheEpoch = "fullscreen-director-v4-client-contract-v8.7-byok-intent-v1";
-export const rollingDirectorEpoch = "rolling-director-generation-v1.2-window-intent-v2";
+export const rollingDirectorEpoch = "rolling-director-generation-v1.3-window-intent-v2";
 export const lyricsCacheLimit = 100;
 export const directorCacheLimit = 100;
 export const sponsorBlockCategories = [

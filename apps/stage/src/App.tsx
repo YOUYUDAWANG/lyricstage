@@ -1304,7 +1304,13 @@ export default function App({ embedded = embeddedStageFromLocation, onEmbeddedRe
     : youtubeMusic.snapshot?.playback.currentTimeMs ?? displayTimeMs;
   const columnTitle = youtubeMusic.snapshot?.track.title || lastTrackRef.current.title || "LyricStage";
   const columnArtist = youtubeMusic.snapshot?.track.artist || lastTrackRef.current.artist || "YouTube Music";
-  const columnDirectorSource = displayedRemoteDirectorPlan?.source === "cache"
+  const activeRollingCard = rollingDirectorState.cards.find((card) =>
+    stageLyricTimeMs >= card.fromMs && stageLyricTimeMs < card.toMs);
+  const columnDirectorSource = rollingDirectorRoute.renderRolling
+    && rollingDirectorState.cards.some((card) => card.directives !== undefined)
+    && activeRollingCard?.directives === undefined
+    ? "continuity" as const
+    : displayedRemoteDirectorPlan?.source === "cache"
     ? "cache" as const
     : displayedRemoteDirectorPlan?.source === "ai"
       ? "ai" as const

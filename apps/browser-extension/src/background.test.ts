@@ -446,6 +446,51 @@ describe("YouTube Music background routing", () => {
     expect(fetcher).toHaveBeenCalledTimes(callsBeforeRestart + 2);
   });
 
+  it("covers three rolling windows without spending retries on untrusted transport echoes", async () => {
+    await send({
+      type: "youtube-music-save-director-config",
+      configuration: {
+        version: "lyricstage-director-byok-v1",
+        primary: { protocol: "openai-responses", endpoint: "https://api.openai.com/v1", model: "fixture", apiKey: "rolling-secret" },
+      },
+    }, sender(10));
+    const track = rollingTrack();
+    const lyrics = rollingLyrics();
+    const bible = compileLocalDirectorBibleV1(lyrics);
+    const fetcher = vi.fn(async (_input: string | URL | Request, init?: RequestInit) => {
+      const payload = JSON.parse(String(init?.body)) as any;
+      if (payload.instructions?.includes("whole-song constitution")) {
+        return new Response(JSON.stringify({ output_text: JSON.stringify(bible) }), { status: 200 });
+      }
+      const prompt = JSON.parse(payload.input[0].content[0].text) as any;
+      return new Response(JSON.stringify({ output_text: JSON.stringify({
+        version: "window-intent-v2",
+        bibleIdentity: "untrusted-stale-echo",
+        entryStateHash: "untrusted-stale-echo",
+        fromLineIndex: prompt.window.toLineIndex,
+        toLineIndex: prompt.window.fromLineIndex,
+        spatialIntent: "hold",
+        coverRole: "anchor",
+        arcIntent: "hold",
+        cues: [],
+      }) }), { status: 200 });
+    });
+    vi.stubGlobal("fetch", fetcher);
+    expect(await sendResolved({ type: "youtube-music-resolve-director-bible-v1", track, lyrics }, sender(10)))
+      .toMatchObject({ status: "ready", source: "network" });
+    let targetMs = 1;
+    for (let windowIndex = 0; windowIndex < 3; windowIndex += 1) {
+      const response = await sendResolved({
+        type: "youtube-music-resolve-director-coverage-v1", track, lyrics, bible,
+        playheadMs: targetMs, desiredHorizonMs: 60_000,
+      }, sender(10));
+      expect(response).toMatchObject({ status: "ready", source: "network" });
+      expect(response.reason ?? "").not.toContain("budget-exhausted");
+      targetMs = response.coverage.toMs;
+    }
+    expect(fetcher).toHaveBeenCalledTimes(4);
+  });
+
   it("falls back after bounded HTTP retries without promoting the local repair to AI-positive cache", async () => {
     await send({
       type: "youtube-music-save-director-config",

@@ -243,10 +243,12 @@ describe("Director BYOK provider adapters", () => {
     const toLineIndex = lyrics.lines.at(-1)!.lineIndex;
     const wire = {
       version: "window-intent-v2",
-      bibleIdentity: bible.bibleIdentity,
-      entryStateHash: state.stateHash,
-      fromLineIndex,
-      toLineIndex,
+      // Transport identity is an untrusted model echo. The local adapter must
+      // ignore even stale values instead of spending another provider attempt.
+      bibleIdentity: "stale-model-echo",
+      entryStateHash: "stale-model-echo",
+      fromLineIndex: toLineIndex,
+      toLineIndex: fromLineIndex,
       spatialIntent: "open",
       coverRole: "portal",
       arcIntent: "break",
@@ -264,7 +266,13 @@ describe("Director BYOK provider adapters", () => {
       fetchMock as typeof fetch,
     );
     expect((payloads[0]?.text as any)?.format?.schema).toEqual(windowIntentSchemaV2);
+    expect(windowIntentSchemaV2.required).not.toEqual(expect.arrayContaining([
+      "bibleIdentity", "entryStateHash", "fromLineIndex", "toLineIndex",
+    ]));
+    expect(windowIntentSchemaV2.properties).not.toHaveProperty("bibleIdentity");
+    expect(windowIntentSchemaV2.properties).not.toHaveProperty("entryStateHash");
     expect(payloads[0]?.instructions).toBe(windowIntentSystemPromptV2);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
     expect(result.response).toHaveLength(1);
     expect(result.response[0]?.directives).toHaveLength(lyrics.lines.length);
     expect(result.response[0]?.effects.some((effect) => effect.id.startsWith("director-v2-effect:"))).toBe(true);

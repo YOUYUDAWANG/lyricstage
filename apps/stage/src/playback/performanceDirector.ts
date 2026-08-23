@@ -224,10 +224,11 @@ export const requestDirectorCoverageV1 = async (
 
 export const directorStatusLabel = (
   state: DirectorLookupState,
-  activeSource: "local" | "ai" | "cache" = "local",
+  activeSource: "local" | "ai" | "cache" | "continuity" = "local",
   hasQueuedPlan = false,
 ): string => {
   if (activeSource === "ai" || activeSource === "cache") return "AI 导演 · 已接管";
+  if (activeSource === "continuity") return "AI 结构 · 本地续演";
   if (hasQueuedPlan || state.status === "ready") return "AI 导演 · 下一段接管";
   if (state.status === "requesting") return "AI 导演 · 正在生成";
   if (state.status === "error") {

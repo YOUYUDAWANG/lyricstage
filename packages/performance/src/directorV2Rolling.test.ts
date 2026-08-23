@@ -7,8 +7,10 @@ import {
   compileLocalDirectorBibleV1,
   compileLocalSceneCardsV1,
   initialRollingPerformanceStateV1,
+  sanitizeSceneCardV1,
+  sceneCardIdentityV1,
 } from "./rollingDirector";
-import { compileWindowIntentV2ToSceneCardV1 } from "./directorV2Rolling";
+import { compileLocalContinuitySceneCardV2, compileWindowIntentV2ToSceneCardV1 } from "./directorV2Rolling";
 import type { WindowIntentV2 } from "./directorV2Fixtures";
 
 const lyrics = lyricFixtures.wordTimedMixed;
@@ -59,6 +61,52 @@ describe("rolling Director V2 compiler", () => {
     expect(card).not.toBeNull();
     expect(card?.intention).toContain("restrained hold window");
     expect(card?.directives).toHaveLength(lyrics.lines.length);
+  });
+
+  it("keeps the prior visual world when local continuity follows an AI window", () => {
+    const longLyrics = lyricFixtures.longSongStructure;
+    const longBible = compileLocalDirectorBibleV1(longLyrics);
+    const initial = initialRollingPerformanceStateV1(longBible);
+    const firstRange = compileLocalSceneCardsV1(longLyrics, longBible)[0]!;
+    const directed = compileWindowIntentV2ToSceneCardV1(longLyrics, longBible, initial, {
+      version: "window-intent-v2",
+      bibleIdentity: longBible.bibleIdentity,
+      entryStateHash: initial.stateHash,
+      id: "continuity:directed",
+      fromLineIndex: firstRange.fromLineIndex,
+      toLineIndex: firstRange.toLineIndex,
+      spatialIntent: "open",
+      coverRole: "portal",
+      arcIntent: "hold",
+      cues: [],
+    })!;
+    const styledWithoutID = {
+      ...directed,
+      artDirection: "liquidMemory" as const,
+      typography: "jpGothic" as const,
+      coverRole: "portal" as const,
+      presentation: "section" as const,
+    };
+    const styledID = sceneCardIdentityV1(styledWithoutID);
+    const styled = {
+      ...styledWithoutID,
+      sceneID: styledID,
+      effects: styledWithoutID.effects.map((effect) => ({ ...effect, sectionID: styledID })),
+    };
+    expect(sanitizeSceneCardV1(longLyrics, longBible, initial, styled)).not.toBeNull();
+    const nextState = advanceRollingPerformanceStateV1(initial, styled);
+    const nextRange = compileLocalSceneCardsV1(longLyrics, longBible)
+      .find((card) => card.fromLineIndex === styled.toLineIndex + 1)!;
+    const continuity = compileLocalContinuitySceneCardV2(
+      longLyrics, longBible, nextState, [styled], nextRange.fromLineIndex, nextRange.toLineIndex,
+    );
+    expect(continuity).toMatchObject({
+      artDirection: "liquidMemory",
+      typography: "jpGothic",
+      coverRole: "portal",
+      presentation: "section",
+    });
+    expect(continuity?.directives).toBeUndefined();
   });
 
   it("fails closed on stale Bible or state identity", () => {

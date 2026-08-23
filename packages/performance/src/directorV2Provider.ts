@@ -48,10 +48,6 @@ export const windowIntentRequestProfileV2: DirectorRequestProfileV1<SceneCardV1[
     const requestedFrom = Number.isInteger(requested.fromLineIndex) ? requested.fromLineIndex as number : -1;
     const requestedTo = Number.isInteger(requested.toLineIndex) ? requested.toLineIndex as number : -1;
     if (raw.version !== "window-intent-v2"
-      || raw.bibleIdentity !== input.bible.bibleIdentity
-      || raw.entryStateHash !== input.state.stateHash
-      || raw.fromLineIndex !== requestedFrom
-      || raw.toLineIndex !== requestedTo
       || !spatialIntents.has(raw.spatialIntent as never)
       || !coverRoles.has(raw.coverRole as never)
       || !arcIntents.has(raw.arcIntent as never)

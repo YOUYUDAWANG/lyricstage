@@ -294,15 +294,10 @@ export const windowIntentSchemaV2: JSONSchema = {
   type: "object",
   additionalProperties: false,
   required: [
-    "version", "bibleIdentity", "entryStateHash", "fromLineIndex", "toLineIndex",
-    "spatialIntent", "coverRole", "arcIntent", "cues",
+    "version", "spatialIntent", "coverRole", "arcIntent", "cues",
   ],
   properties: {
     version: { const: "window-intent-v2" },
-    bibleIdentity: { type: "string", minLength: 1, maxLength: 80 },
-    entryStateHash: { type: "string", minLength: 1, maxLength: 80 },
-    fromLineIndex: { type: "integer", minimum: 0 },
-    toLineIndex: { type: "integer", minimum: 0 },
     spatialIntent: { enum: ["hold", "split", "open", "stack"] },
     coverRole: { enum: ["anchor", "origin", "destination", "boundary", "memory", "portal", "absent"] },
     arcIntent: { enum: ["hold", "lift", "break", "recall"] },
@@ -346,6 +341,8 @@ Use only supplied lyric text, verified evidence and registered primitives. Never
 export const windowIntentSystemPromptV2 = `You are LyricStage's semantic performance director. Return one WindowIntentV2 JSON object matching the supplied schema and covering the exact supplied lyric window.
 
 Output only structural intent and zero to three sparse semantic cues. A cue marks a real refrain, rupture, release, hold, voice handoff, or recall; it does not describe an animation. Prefer one or two high-confidence cues. Return zero cues for a genuinely restrained window. Cue ranges must stay inside the requested window. Evidence stays inside the window except that recall must cite at least one earlier Bible anchor line.
+
+Do not echo Bible identity, rolling state identity, or the requested window envelope. The local adapter binds those transport fields and treats any model echo as untrusted.
 
 Never output scene cards, layouts, typography, gestures, effects, primitives, intensity, duration, coordinates, paths, SVG, CSS, JavaScript, colors, keyframes, rewritten lyrics, translations, audio instructions, provider diagnostics or secrets. The local compiler owns every visual execution value. Output JSON only.`;
 

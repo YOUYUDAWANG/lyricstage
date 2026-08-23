@@ -195,6 +195,7 @@ describe("requestAutomaticDirectorPlan", () => {
     })).toBe("AI 导演 · 下一段接管");
     expect(directorStatusLabel({ status: "requesting" }, "local", true)).toBe("AI 导演 · 下一段接管");
     expect(directorStatusLabel({ status: "idle" }, "ai")).toBe("AI 导演 · 已接管");
+    expect(directorStatusLabel({ status: "idle" }, "continuity")).toBe("AI 结构 · 本地续演");
     expect(directorStatusLabel({
       type: "director-resolution-v1",
       status: "unavailable",

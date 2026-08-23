@@ -32,7 +32,7 @@ import {
   advanceRollingPerformanceStateV1,
   buildDirectorRequestPayloadV1,
   compileLocalDirectorBibleV1,
-  compileLocalSceneCardForWindowV1,
+  compileLocalContinuitySceneCardV2,
   directorBYOKCacheIdentityV1,
   directorBYOKDiagnosticsFromErrorV1,
   directorBibleRequestProfileV1,
@@ -1313,8 +1313,8 @@ const resolveDirectorCoverageV1 = async (
   );
   const activeNegativeReason = rollingSceneNegativeCache.reason(negativeKey);
   const commitLocalContinuity = async (reason: string, timing: RollingTimingV1): Promise<DirectorCoverageResolutionV1> => {
-    const localCard = compileLocalSceneCardForWindowV1(
-      lyrics, sanitizedBible, state, window.fromLineIndex, window.toLineIndex,
+    const localCard = compileLocalContinuitySceneCardV2(
+      lyrics, sanitizedBible, state, cards, window.fromLineIndex, window.toLineIndex,
     );
     if (!localCard || !await rollingFingerprintStillCurrent(track, lyrics, fingerprint, generation)) {
       return { ...empty("unavailable", reason), cards, coverage: { ...coverage, activation: "local" }, timing };
