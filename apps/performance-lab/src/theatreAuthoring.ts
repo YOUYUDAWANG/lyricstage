@@ -41,6 +41,7 @@ export const connectTheatreAuthoring = async (
   await project.ready;
   const unsubscribe = atmosphere.onValuesChange((values) => onValues(values));
   studio.setSelection([atmosphere]);
+  studio.ui.hide();
 
   return {
     setPosition(timeMs: number) {

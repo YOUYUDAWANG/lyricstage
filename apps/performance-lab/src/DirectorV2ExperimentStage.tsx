@@ -1,6 +1,6 @@
 import { useEffect, useLayoutEffect, useRef } from "react";
 import type { LyricDocumentV0 } from "@lyricstage/contracts";
-import { directorSectionAtV1, effectRecipeAtV1, type DirectorPlanV1 } from "@lyricstage/performance";
+import { directorSectionAtV1, type DirectorPlanV1 } from "@lyricstage/performance";
 import {
   directedPaletteForIndexV1,
   drawDirectedStageV1,
@@ -12,14 +12,14 @@ export function DirectorV2ExperimentStage({
   lyrics,
   plan,
   timeMs,
-  variantID,
-  variantLabel,
+  blindLabel,
+  grayscale,
 }: {
   lyrics: LyricDocumentV0;
   plan: DirectorPlanV1;
   timeMs: number;
-  variantID: string;
-  variantLabel: string;
+  blindLabel: string;
+  grayscale: boolean;
 }) {
   const hostRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -80,16 +80,15 @@ export function DirectorV2ExperimentStage({
 
   useEffect(draw, [timeMs, plan.planIdentity]);
 
-  const activeEffect = effectRecipeAtV1(plan.effects, timeMs);
   return (
-    <section ref={hostRef} className="director-v2-experiment-stage" data-variant={variantID}>
-      <canvas ref={canvasRef} aria-label={`Director V2 ${variantID} 演出预览`} />
+    <section ref={hostRef} className="director-v2-experiment-stage" data-grayscale={grayscale ? "true" : "false"}>
+      <canvas ref={canvasRef} aria-label={`Director V2 Version ${blindLabel} 演出预览`} />
       <div className="director-v2-experiment-label">
-        <strong>{variantID}</strong>
-        <span>{variantLabel}</span>
+        <strong>{blindLabel}</strong>
+        <span>BLIND REVIEW</span>
       </div>
       <div className="director-v2-experiment-effect">
-        {activeEffect ? `${activeEffect.primary.primitive} · ${activeEffect.presentation}` : "local reading"}
+        {grayscale ? "GRAYSCALE CHECK" : "FULL-COLOR CHECK"}
       </div>
     </section>
   );

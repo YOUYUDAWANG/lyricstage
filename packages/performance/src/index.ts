@@ -18,3 +18,4 @@ export * from "./vocalTiming";
 export * from "./directorV2Fixtures";
 export * from "./directorV2Compiler";
 export * from "./directorV2Experiment";
+export * from "./directorV2ReviewProtocol";

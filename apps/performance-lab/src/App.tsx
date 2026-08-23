@@ -3,6 +3,7 @@ import { lyricFixtures, type LyricDocumentV0 } from "@lyricstage/contracts";
 import {
   compileEnvironmentSceneV1,
   compileDirectorV2ExperimentV1,
+  createDirectorV2BlindReviewSessionV1,
   defaultEnvironmentTuningV1,
   directorV2ManualFixtures,
   motionClipsV1,
@@ -28,6 +29,25 @@ const fixtures = {
   "重叠二重唱": lyricFixtures.duetOverlap,
   "长结构歌曲": lyricFixtures.longSongStructure,
 } satisfies Record<string, LyricDocumentV0>;
+
+const directorFixtureIDs = directorV2ManualFixtures.map(({ id }) => id);
+const directorFixtureLabels = Object.fromEntries(
+  directorV2ManualFixtures.map(({ id, category }) => [id, category]),
+) as Readonly<Record<string, string>>;
+
+const fullPlayStorageKey = (reviewerID: string): string => {
+  const session = createDirectorV2BlindReviewSessionV1(directorFixtureIDs, reviewerID);
+  return `lyricstage:${session.reviewerSeed}:full-plays`;
+};
+
+const loadFullPlays = (reviewerID: string): Record<string, boolean> => {
+  try {
+    const raw = localStorage.getItem(fullPlayStorageKey(reviewerID));
+    return raw ? JSON.parse(raw) as Record<string, boolean> : {};
+  } catch {
+    return {};
+  }
+};
 
 const formatTime = (timeMs: number): string => {
   const seconds = Math.max(0, timeMs) / 1000;
@@ -97,7 +117,10 @@ function LabStage({
 export default function App() {
   const [fixtureName, setFixtureName] = useState<keyof typeof fixtures>("逐字混排");
   const [directorFixtureID, setDirectorFixtureID] = useState(directorV2ManualFixtures[0]!.id);
-  const [directorVariantID, setDirectorVariantID] = useState<DirectorV2ExperimentVariantID>("B");
+  const [directorVariantID, setDirectorVariantID] = useState<DirectorV2ExperimentVariantID>("A");
+  const [reviewerID, setReviewerID] = useState("reviewer-1");
+  const [directorGrayscale, setDirectorGrayscale] = useState(false);
+  const [fullPlayCompleted, setFullPlayCompleted] = useState<Record<string, boolean>>(() => loadFullPlays("reviewer-1"));
   const [clipID, setClipID] = useState(motionClipsV1[0]!.id);
   const [rollingFixtureID, setRollingFixtureID] = useState(rollingArrivalFixturesV1[0]!.id);
   const [timeMs, setTimeMs] = useState(0);
@@ -110,8 +133,13 @@ export default function App() {
   const [studioVisible, setStudioVisible] = useState(false);
   const [environmentTuning, setEnvironmentTuning] = useState<EnvironmentTuningV1>(defaultEnvironmentTuningV1);
   const anchorRef = useRef({ wallMs: 0, mediaMs: 0 });
+  const fullPlayProgressRef = useRef(new Map<string, { lastTimeMs: number; continuous: boolean }>());
   const authoringRef = useRef<TheatreAuthoringHandle | null>(null);
   const lyrics = fixtures[fixtureName];
+  const reviewSession = useMemo(
+    () => createDirectorV2BlindReviewSessionV1(directorFixtureIDs, reviewerID),
+    [reviewerID],
+  );
   const directorFixture = directorV2ManualFixtures.find((fixture) => fixture.id === directorFixtureID)!;
   const directorLyrics = Object.values(lyricFixtures).find((candidate) => candidate.recordingID === directorFixture.recordingID)!;
   const directorExperiment = useMemo(
@@ -119,6 +147,8 @@ export default function App() {
     [directorFixture, directorLyrics],
   )!;
   const directorVariant = directorExperiment.variants.find((variant) => variant.id === directorVariantID)!;
+  const directorAssignment = reviewSession.assignments.find((assignment) => assignment.fixtureID === directorFixtureID)!;
+  const directorBlindLabel = directorAssignment.labelByVariant[directorVariantID];
   const clip = motionClipsV1.find((candidate) => candidate.id === clipID) ?? motionClipsV1[0]!;
   const index = useMemo(() => new TimedTextIndexV1(lyrics), [lyrics]);
   const environment = useMemo(() => compileEnvironmentSceneV1(lyrics.recordingID), [lyrics.recordingID]);
@@ -153,7 +183,7 @@ export default function App() {
         }
         authoringRef.current = handle;
         setAuthoringStatus("ready");
-        setStudioVisible(true);
+        setStudioVisible(false);
       })
       .catch((error: unknown) => {
         if (!cancelled) {
@@ -190,6 +220,59 @@ export default function App() {
     return () => cancelAnimationFrame(frameID);
   }, [lyrics.durationMs, playing]);
 
+  useEffect(() => {
+    const firstFixtureID = reviewSession.fixtureOrder[0]!;
+    const selected = directorV2ManualFixtures.find((fixture) => fixture.id === firstFixtureID)!;
+    const matchingName = Object.entries(fixtures)
+      .find(([, candidate]) => candidate.recordingID === selected.recordingID)?.[0] as keyof typeof fixtures | undefined;
+    setDirectorFixtureID(firstFixtureID);
+    if (matchingName) setFixtureName(matchingName);
+    setPlaying(false);
+    setTimeMs(0);
+  }, [reviewSession]);
+
+  useEffect(() => {
+    const assignment = reviewSession.assignments.find((candidate) => candidate.fixtureID === directorFixtureID)!;
+    const firstBlindLabel = assignment.playbackOrder[0]!;
+    setDirectorVariantID(assignment.variantByLabel[firstBlindLabel]);
+    setPlaying(false);
+    setTimeMs(0);
+  }, [directorFixtureID, reviewSession]);
+
+  useEffect(() => {
+    const key = `${directorFixtureID}:${directorVariantID}`;
+    const current = fullPlayProgressRef.current.get(key);
+    if (playing && timeMs <= 100 && (
+      !current
+      || !current.continuous
+      || current.lastTimeMs > 100
+      || timeMs < current.lastTimeMs - 10
+    )) {
+      fullPlayProgressRef.current.set(key, { lastTimeMs: timeMs, continuous: true });
+      return;
+    }
+    if (playing && current) {
+      const delta = timeMs - current.lastTimeMs;
+      fullPlayProgressRef.current.set(key, {
+        lastTimeMs: timeMs,
+        continuous: current.continuous && delta >= -10 && delta <= 500,
+      });
+      return;
+    }
+    const finalDelta = current ? timeMs - current.lastTimeMs : Number.POSITIVE_INFINITY;
+    if (!playing
+      && timeMs >= directorLyrics.durationMs - 10
+      && current?.continuous
+      && finalDelta >= -10
+      && finalDelta <= 500) {
+      setFullPlayCompleted((current) => current[key] ? current : { ...current, [key]: true });
+    }
+  }, [directorFixtureID, directorLyrics.durationMs, directorVariantID, playing, timeMs]);
+
+  useEffect(() => {
+    localStorage.setItem(fullPlayStorageKey(reviewerID), JSON.stringify(fullPlayCompleted));
+  }, [fullPlayCompleted, reviewerID]);
+
   const selectFixture = (name: keyof typeof fixtures) => {
     setPlaying(false);
     setFixtureName(name);
@@ -203,9 +286,29 @@ export default function App() {
     const matchingName = Object.entries(fixtures).find(([, candidate]) => candidate.recordingID === selected.recordingID)?.[0] as keyof typeof fixtures | undefined;
     setPlaying(false);
     setDirectorFixtureID(fixtureID);
-    setDirectorVariantID("B");
     if (matchingName) setFixtureName(matchingName);
     setTimeMs(0);
+  };
+
+  const selectDirectorVariant = (variantID: DirectorV2ExperimentVariantID) => {
+    setPlaying(false);
+    setDirectorVariantID(variantID);
+    setTimeMs(0);
+  };
+
+  const startReviewerSession = (nextReviewerID: string) => {
+    setPlaying(false);
+    setTimeMs(0);
+    setFullPlayCompleted(loadFullPlays(nextReviewerID));
+    fullPlayProgressRef.current.clear();
+    setReviewerID(nextReviewerID);
+  };
+
+  const resetReviewerSession = () => {
+    setPlaying(false);
+    setTimeMs(0);
+    setFullPlayCompleted({});
+    fullPlayProgressRef.current.clear();
   };
 
   return (
@@ -254,8 +357,8 @@ export default function App() {
             <span>scene seed</span><strong>{environment.seed}</strong>
             <span>authoring</span><strong>{authoringStatus}</strong>
             <span>rolling</span><strong>{rollingFixtureState}</strong>
-            <span>gate variant</span><strong>{directorVariantID}</strong>
-            <span>recipe events</span><strong>{directorVariant.metrics.recipeEventCount}</strong>
+            <span>blind version</span><strong>{directorBlindLabel}</strong>
+            <span>full plays</span><strong>{Object.values(fullPlayCompleted).filter(Boolean).length} / 20</strong>
           </div>
           {authoringError && <p className="lab-authoring-error">{authoringError}</p>}
           {authoringStatus === "ready" && (
@@ -288,14 +391,23 @@ export default function App() {
             lyrics={directorLyrics}
             plan={directorVariant.plan}
             timeMs={Math.min(directorLyrics.durationMs, timeMs)}
-            variantID={directorVariant.id}
-            variantLabel={directorVariant.label}
+            blindLabel={directorBlindLabel}
+            grayscale={directorGrayscale}
           />
           <DirectorV2GatePanel
-            key={directorExperiment.fixtureID}
+            key={reviewSession.reviewerSeed}
+            session={reviewSession}
             experiment={directorExperiment}
+            fixtureLabels={directorFixtureLabels}
             activeVariantID={directorVariantID}
-            onSelectVariant={setDirectorVariantID}
+            fullPlayCompleted={fullPlayCompleted}
+            timeMs={timeMs}
+            grayscale={directorGrayscale}
+            onReviewerIDChange={startReviewerSession}
+            onSelectFixture={selectDirectorFixture}
+            onSelectVariant={selectDirectorVariant}
+            onGrayscaleChange={setDirectorGrayscale}
+            onResetSession={resetReviewerSession}
           />
           <div className="lab-transport">
             <button type="button" onClick={() => setPlaying((value) => !value)}>{playing ? "Pause" : "Play"}</button>
@@ -354,16 +466,10 @@ export default function App() {
           <h2>Director V2 gate</h2>
           <pre>{JSON.stringify({
             fixture: directorExperiment.fixtureID,
-            variant: directorVariant.id,
-            metrics: directorVariant.metrics,
-            events: directorVariant.compiled?.recipeEvents.map((event) => ({
-              cueID: event.cueID,
-              recipe: event.recipe,
-              branch: event.branch,
-              creates: event.promiseCreates,
-              consumes: event.promiseConsumes,
-            })) ?? [],
-            promises: directorVariant.compiled?.promises ?? [],
+            reviewer: reviewSession.reviewerID,
+            candidate: reviewSession.candidateCommit,
+            blindVersion: directorBlindLabel,
+            fullPlayComplete: Boolean(fullPlayCompleted[`${directorFixtureID}:${directorVariantID}`]),
           }, null, 2)}</pre>
         </aside>
       </div>
