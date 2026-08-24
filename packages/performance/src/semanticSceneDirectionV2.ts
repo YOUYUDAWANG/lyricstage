@@ -36,12 +36,13 @@ export const layoutForSemanticSceneV2 = (
   transitionsUsed: number,
   direction: SemanticSceneDirectionV2,
 ): PerformanceLayoutV1 => {
-  if (transitionsUsed >= 4 || direction.purpose === "establish") return prior;
+  if (direction.purpose === "establish" || transitionsUsed >= 3) return prior;
+  if (transitionsUsed >= 2 && direction.purpose !== "resolve") return prior;
   if (direction.spatialIntent === "split") return prior === "duetDivide" ? prior : "duetDivide";
   if (direction.purpose === "resolve") return "monument";
   if (direction.purpose === "turn") {
     if (direction.spatialIntent === "open") return prior === "editorialSplit" ? alternateRail(prior) : "editorialSplit";
-    return alternateRail(prior);
+    return prior;
   }
   if (direction.purpose === "aftermath" && direction.spatialIntent === "open") {
     return prior === "editorialSplit" ? "railTrailing" : "editorialSplit";

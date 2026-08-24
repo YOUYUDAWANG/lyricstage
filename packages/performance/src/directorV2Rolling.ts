@@ -16,14 +16,14 @@ import {
   type SceneCardV1,
 } from "./rollingDirector";
 import type { EffectRecipeV1 } from "./effectGrammar";
-import { lyricGraphemesV1, type LyricGestureV1 } from "./lyricChoreography";
+import type { LyricGestureV1 } from "./lyricChoreography";
 import {
   compileLocalSceneRangesV3,
   compileLocalSceneTreatmentV3,
   type LocalSceneTreatmentV3,
 } from "./localDirectorV3";
 import type { MusicMapV1 } from "./musicMap";
-import { layoutForSemanticSceneV2, localSemanticSceneDirectionV2 } from "./semanticSceneDirectionV2";
+import { layoutForSemanticSceneV2, type SemanticSceneDirectionV2 } from "./semanticSceneDirectionV2";
 import { applySignatureChoreographyV2 } from "./signatureChoreographyV2";
 
 const uniqueByID = <T extends { id: string }>(items: readonly T[]): T[] =>
@@ -34,7 +34,7 @@ const gesturesForCard = (
   v2Gestures: readonly LyricGestureV1[],
   semanticCueCount: number,
 ): LyricGestureV1[] => {
-  const maximum = localCard.signatureMoment ? 6 : Math.min(6, Math.max(3, semanticCueCount * 2));
+  const maximum = localCard.signatureMoment ? 4 : Math.min(3, Math.max(1, semanticCueCount));
   const authored = v2Gestures.filter((gesture) => gesture.id.startsWith("director-v2-"));
   const localSupport = v2Gestures.filter((gesture) => !gesture.id.startsWith("director-v2-"));
   const candidate = uniqueByID([...authored, ...localCard.gestures, ...localSupport]).slice(0, maximum);
@@ -48,7 +48,7 @@ const effectsForCard = (
   v2Effects: readonly EffectRecipeV1[],
   semanticCueCount: number,
 ): EffectRecipeV1[] => uniqueByID([...v2Effects, ...localCard.effects])
-  .slice(0, localCard.signatureMoment ? 4 : Math.min(4, Math.max(2, semanticCueCount)));
+  .slice(0, localCard.signatureMoment ? 4 : Math.min(2, semanticCueCount));
 
 const reidentifySceneCard = (card: Omit<SceneCardV1, "sceneID">): SceneCardV1 => {
   const sceneID = sceneCardIdentityV1(card);
@@ -108,82 +108,20 @@ const denseWindowRangesV2 = (
   return ranges;
 };
 
-const localSupportGestureV2 = (
-  lyrics: LyricDocumentV0,
-  sceneIndex: number,
-  lineIndex: number,
-): LyricGestureV1 | undefined => {
-  const line = lyrics.lines.find((candidate) => candidate.lineIndex === lineIndex);
-  if (!line) return undefined;
-  const graphemes = lyricGraphemesV1(line.text);
-  if (graphemes.length === 0) return undefined;
-  const primitives = ["phrase.arc", "phrase.handoff", "phrase.breakReform", "phrase.breathe"] as const;
-  const primitive = primitives[sceneIndex % primitives.length]!;
-  return {
-    version: "lyric-gesture-v1",
-    id: `rolling-v2-support:${sceneIndex}:${lineIndex}`,
-    lineIndex,
-    scope: "phrase",
-    target: { fromGrapheme: 0, toGrapheme: graphemes.length, expectedText: line.text },
-    primitive,
-    driver: "lineEnter",
-    space: primitive === "phrase.handoff" ? "lyricToArtwork" : "lyricLocal",
-    envelope: { attackMs: 280, holdMs: 420, releaseMs: 640 },
-    intensity: 0.58 + sceneIndex % 3 * 0.06,
-    direction: sceneIndex % 2 === 0 ? 1 : -1,
-    paletteRole: sceneIndex % 3 === 0 ? "accent" : "primary",
-    evidence: {
-      semanticRole: "motion",
-      rationale: "A local phrase pulse keeps the staged narrative alive between semantic events.",
-      confidence: 0.72,
-    },
-  };
-};
-
-const localSupportEffectV2 = (
-  bible: DirectorBibleV1,
-  card: SceneCardV1,
-): EffectRecipeV1 => {
-  const primitives = ["field.ribbon", "geometry.orbit", "density.lift", "memory.trail"] as const;
-  return {
-    version: "effect-recipe-v1",
-    id: `rolling-v2-support-effect:${card.sceneIndex}:${card.fromLineIndex}-${card.toLineIndex}`,
-    cardID: "custom",
-    sectionID: card.sceneID,
-    fromMs: card.fromMs,
-    toMs: card.toMs,
-    presentation: "section",
-    primary: { primitive: primitives[card.sceneIndex % primitives.length]!, intensity: 0.56 + card.sceneIndex % 4 * 0.06 },
-    support: [],
-    evidence: {
-      songMotif: bible.motifActor.relationship,
-      sectionTriggers: card.evidence.sectionTriggers,
-      lineIndices: [card.fromLineIndex],
-      rationale: "A bounded local field marks this narrative beat without inventing lyric timing.",
-      confidence: 0.72,
-    },
-  };
-};
-
 const localTreatmentEffectV3 = (
   bible: DirectorBibleV1,
   card: SceneCardV1,
   treatment: LocalSceneTreatmentV3,
-): EffectRecipeV1 => {
-  const primitiveByPurpose: Record<LocalSceneTreatmentV3["semanticScene"]["purpose"], EffectRecipeV1["primary"]["primitive"]> = {
-    establish: "field.drift",
-    develop: treatment.triggers.includes("repeated_hook") ? "density.lift" : "field.ribbon",
-    turn: treatment.triggers.includes("duet_overlap") ? "geometry.mirror" : "geometry.cut",
-    aftermath: treatment.triggers.includes("silence_gap") ? "field.aperture" : "density.release",
-    resolve: "geometry.converge",
-  };
-  const intensityByPurpose: Record<LocalSceneTreatmentV3["semanticScene"]["purpose"], number> = {
-    establish: 0.58,
-    develop: 0.68,
-    turn: 0.84,
-    aftermath: 0.56,
-    resolve: 0.88,
-  };
+): EffectRecipeV1 | undefined => {
+  const triggers = new Set(treatment.triggers);
+  const selected: { primitive: EffectRecipeV1["primary"]["primitive"]; intensity: number } | undefined =
+    triggers.has("final_resolution") ? { primitive: "geometry.converge", intensity: 0.52 }
+      : triggers.has("silence_gap") ? { primitive: "field.aperture", intensity: 0.28 }
+        : triggers.has("duet_overlap") || triggers.has("voice_handoff") ? { primitive: "memory.trail", intensity: 0.32 }
+          : triggers.has("semantic_contrast") ? { primitive: "geometry.suspend", intensity: 0.4 }
+            : triggers.has("repeated_hook") ? { primitive: "motif.recall", intensity: 0.34 }
+              : undefined;
+  if (!selected) return undefined;
   return {
     version: "effect-recipe-v1",
     id: `local-first-v3-effect:${card.sceneIndex}:${card.fromLineIndex}-${card.toLineIndex}`,
@@ -192,10 +130,7 @@ const localTreatmentEffectV3 = (
     fromMs: card.fromMs,
     toMs: card.toMs,
     presentation: "section",
-    primary: {
-      primitive: primitiveByPurpose[treatment.semanticScene.purpose],
-      intensity: intensityByPurpose[treatment.semanticScene.purpose],
-    },
+    primary: selected,
     support: [],
     evidence: {
       songMotif: bible.motifActor.relationship,
@@ -258,9 +193,10 @@ const densifyLocalCardV2 = (
     },
   };
   const identified = reidentifySceneCard(withoutID);
-  const withEffect = card.signatureMoment ? identified : reidentifySceneCard({
+  const localEffect = card.signatureMoment ? undefined : localTreatmentEffectV3(bible, identified, treatment);
+  const withEffect = card.signatureMoment || !localEffect ? identified : reidentifySceneCard({
     ...withoutID,
-    effects: [localTreatmentEffectV3(bible, identified, treatment)],
+    effects: [localEffect],
   });
   const staged = sanitizeSceneCardV1(lyrics, bible, state, withEffect);
   if (!staged) return null;
@@ -400,6 +336,12 @@ export const compileWindowIntentV2ToSceneCardV1 = (
     intent.toLineIndex,
   );
   if (!localCard) return null;
+  const localTreatment = compileLocalSceneTreatmentV3(
+    lyrics,
+    state,
+    [],
+    { fromLineIndex: intent.fromLineIndex, toLineIndex: intent.toLineIndex },
+  );
   const fixture: DirectorV2ManualFixtureV1 = {
     id: `rolling-v2:${state.nextSceneIndex}:${intent.fromLineIndex}-${intent.toLineIndex}`,
     category: "fast",
@@ -440,12 +382,8 @@ export const compileWindowIntentV2ToSceneCardV1 = (
   if (!compiled) return null;
   const inRange = (lineIndex: number) => lineIndex >= intent.fromLineIndex && lineIndex <= intent.toLineIndex;
   const directives = compiled.plan.directives.filter((directive) => inRange(directive.lineIndex));
-  const supportGesture = localCard.signatureMoment
-    ? undefined
-    : localSupportGestureV2(lyrics, state.nextSceneIndex, intent.fromLineIndex);
   const v2Gestures = compiled.plan.gestures
     .filter((gesture) => gesture.id.startsWith("director-v2-") && inRange(gesture.lineIndex));
-  if (supportGesture) v2Gestures.push(supportGesture);
   const v2Effects = compiled.plan.effects
     .filter((effect) => effect.id.startsWith("director-v2-"))
     .map((effect) => {
@@ -461,7 +399,6 @@ export const compileWindowIntentV2ToSceneCardV1 = (
       };
     })
     .filter((effect) => effect.fromMs < effect.toMs);
-  if (v2Effects.length === 0 && !localCard.signatureMoment) v2Effects.push(localSupportEffectV2(bible, localCard));
   const withoutID: Omit<SceneCardV1, "sceneID"> = {
     ...localCard,
     intention: intent.cues.length > 0
@@ -474,7 +411,25 @@ export const compileWindowIntentV2ToSceneCardV1 = (
     effects: effectsForCard(localCard, v2Effects, intent.cues.length),
   };
   const candidate = reidentifySceneCard(withoutID);
-  return sanitizeSceneCardV1(lyrics, bible, state, candidate);
+  const sanitized = sanitizeSceneCardV1(lyrics, bible, state, candidate);
+  if (!sanitized || intent.cues.length > 0) return sanitized;
+  return applyLinePerformancesV2(lyrics, bible, state, sanitized, localTreatment.linePerformances) ?? sanitized;
+};
+
+const semanticSceneForIntentV2 = (
+  lyrics: LyricDocumentV0,
+  state: RollingPerformanceStateV1,
+  acceptedCards: readonly SceneCardV1[],
+  range: { fromLineIndex: number; toLineIndex: number },
+  cues: WindowIntentV2["cues"],
+): SemanticSceneDirectionV2 => {
+  const roles = new Set(cues.map((cue) => cue.role));
+  if (roles.has("handoff")) return { version: "semantic-scene-direction-v2", purpose: "turn", spatialIntent: "split" };
+  if (roles.has("rupture")) return { version: "semantic-scene-direction-v2", purpose: "turn", spatialIntent: "open" };
+  if (range.toLineIndex === lyrics.lines.at(-1)?.lineIndex) {
+    return { version: "semantic-scene-direction-v2", purpose: "resolve", spatialIntent: "open" };
+  }
+  return compileLocalSceneTreatmentV3(lyrics, state, acceptedCards, range).semanticScene;
 };
 
 export const compileWindowIntentV2ToSceneCardsV1 = (
@@ -501,7 +456,7 @@ export const compileWindowIntentV2ToSceneCardsV1 = (
       cues,
     });
     if (!compiled) return [];
-    const semanticScene = localSemanticSceneDirectionV2(compiled.sceneIndex);
+    const semanticScene = semanticSceneForIntentV2(lyrics, currentState, cards, range, cues);
     const { sceneID: _ignored, ...withoutID } = compiled;
     const card = reidentifySceneCard({ ...withoutID, semanticScene, layout: layoutForSemanticSceneV2(currentState.layout, currentState.layoutTransitionsUsed, semanticScene) });
     if (!sanitizeSceneCardV1(lyrics, bible, currentState, card)) return [];

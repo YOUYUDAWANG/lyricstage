@@ -56,7 +56,7 @@ describe("Signature Choreography V2", () => {
     expect(signatureChoreographyClipsV2.every((clip) => clip.reducedMotionStrategy.length > 20)).toBe(true);
   });
 
-  it.each(signatureChoreographyClipIDsV2)("compiles %s into anticipation/event/consequence using existing primitives", (clipID) => {
+  it.each(signatureChoreographyClipIDsV2)("compiles %s into one lyric event and a restrained consequence", (clipID) => {
     const bible = compileLocalDirectorBibleV1(lyrics);
     const state = initialRollingPerformanceStateV1(bible);
     const card = compileLocalSceneCardForWindowV1(lyrics, bible, state, 0, 5);
@@ -72,7 +72,8 @@ describe("Signature Choreography V2", () => {
     );
     expect(result, clipID).not.toBeNull();
     expect(result?.gestures.filter((gesture) => gesture.id.startsWith(`signature-clip-v2:${clipID}:`))).toHaveLength(2);
-    expect(result?.effects.map((effect) => effect.id.split(":").at(-1))).toEqual(["anticipation", "event", "consequence"]);
+    expect(result?.effects.map((effect) => effect.id.split(":").at(-1))).toEqual(["event", "consequence"]);
+    expect(Math.max(...result!.effects.map((effect) => effect.primary.intensity))).toBeLessThanOrEqual(0.76);
     expect(result?.consequence.rationale).toContain(signatureChoreographyClipsV2.find((clip) => clip.id === clipID)!.observableFact);
   });
 });

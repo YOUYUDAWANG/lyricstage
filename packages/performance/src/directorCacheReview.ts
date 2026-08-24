@@ -104,6 +104,7 @@ const summaryCacheEpochs = new Set([
   "rolling-director-generation-v1.9-scene-pack-v2",
   "rolling-director-generation-v2.0-layered-director-v2",
   "rolling-director-generation-v2.1-perceptual-stage-v2",
+  "rolling-director-generation-v2.2-lyric-first-v3",
 ]);
 const warningOrder: readonly DirectorDiversityWarningV1[] = [
   "minimum-budget", "scene-density-low", "line-direction-low", "signature-choreography-low", "single-scale",

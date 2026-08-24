@@ -21,7 +21,7 @@ export const backgroundStorageKeys = {
 } as const;
 
 export const directorCacheEpoch = "fullscreen-director-v4-client-contract-v8.7-byok-intent-v1";
-export const rollingDirectorEpoch = "rolling-director-generation-v2.1-perceptual-stage-v2";
+export const rollingDirectorEpoch = "rolling-director-generation-v2.2-lyric-first-v3";
 export const lyricsCacheLimit = 100;
 export const lyricsCacheByteLimit = 1_500_000;
 export const localLyricsByteLimit = 1_500_000;

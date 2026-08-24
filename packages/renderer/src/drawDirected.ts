@@ -984,7 +984,11 @@ const drawLyricGesture = (
   } else if (gesture.primitive === "phrase.breathe") {
     drawGestureTextCopy(context, line, prepared, transform, color, 0.08 + strength * 0.18, 0, motion * line.fontSize * 0.055);
   } else if (gesture.primitive === "phrase.contour") {
-    context.strokeRect(bounds.x, bounds.y, bounds.width, bounds.height);
+    const y = bounds.y + bounds.height + Math.max(2, line.fontSize * transform.scale * 0.06);
+    context.beginPath();
+    context.moveTo(bounds.x, y);
+    context.quadraticCurveTo(bounds.x + bounds.width * 0.52, y + bounds.height * 0.08, bounds.x + bounds.width, y);
+    context.stroke();
   }
   context.restore();
 };

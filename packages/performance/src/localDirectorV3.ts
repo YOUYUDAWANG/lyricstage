@@ -268,14 +268,13 @@ const selectLocalSignatureClipV3 = (
   const contrast = evidence.some((item) => item.contrast);
   if (final && !used.has("final-resolve")) return "final-resolve";
   if (range.fromLineIndex === lyrics.lines[0]?.lineIndex && !used.has("motif-introduce")) return "motif-introduce";
-  if (used.size >= 6) return "none";
+  if (used.size >= 5) return "none";
   if (duet && progress < 0.72 && !used.has("duet-handoff")) return "duet-handoff";
   if (returnedRefrain && progress >= 0.48 && !used.has("refrain-upgrade")) return "refrain-upgrade";
   if (repeated && progress >= 0.14 && progress < 0.48 && !used.has("chorus-lift")) return "chorus-lift";
   if (release && progress >= 0.2 && !used.has("silence-vacuum")) return "silence-vacuum";
-  if ((contrast || progress >= 0.38) && progress < (contrast ? 0.68 : 0.55) && !used.has("bridge-fracture")) return "bridge-fracture";
-  if (progress >= 0.55 && progress < 0.7 && !used.has("silence-vacuum")) return "silence-vacuum";
-  if (progress >= 0.7 && progress < 0.94 && !used.has("motif-recall")) return "motif-recall";
+  if (contrast && progress < 0.72 && !used.has("bridge-fracture")) return "bridge-fracture";
+  if (returnedRefrain && progress >= 0.7 && used.has("chorus-lift") && !used.has("motif-recall")) return "motif-recall";
   return "none";
 };
 
@@ -298,20 +297,20 @@ const semanticSceneFor = (
     purpose: state.layoutTransitionsUsed >= 3 ? "develop" : "turn",
     spatialIntent: "split",
   };
-  if (signatureClip === "bridge-fracture") return { version: "semantic-scene-direction-v2", purpose: "turn", spatialIntent: "open" };
+  if (signatureClip === "bridge-fracture") return { version: "semantic-scene-direction-v2", purpose: "turn", spatialIntent: "hold" };
   if (signatureClip === "silence-vacuum") return {
     version: "semantic-scene-direction-v2",
     purpose: "aftermath",
-    spatialIntent: state.layoutTransitionsUsed >= 3 ? "hold" : "open",
+    spatialIntent: "hold",
   };
   if (signatureClip === "refrain-upgrade") return {
     version: "semantic-scene-direction-v2",
     purpose: "develop",
-    spatialIntent: "stack",
+    spatialIntent: "hold",
   };
   if (signatureClip === "motif-recall") return { version: "semantic-scene-direction-v2", purpose: "aftermath", spatialIntent: "hold" };
   if (signatureClip === "final-resolve" || final) return { version: "semantic-scene-direction-v2", purpose: "resolve", spatialIntent: "open" };
-  if (signatureClip === "chorus-lift") return { version: "semantic-scene-direction-v2", purpose: "develop", spatialIntent: "stack" };
+  if (signatureClip === "chorus-lift") return { version: "semantic-scene-direction-v2", purpose: "develop", spatialIntent: "hold" };
   if (first) return { version: "semantic-scene-direction-v2", purpose: "establish", spatialIntent: "hold" };
   if (acceptedCards.at(-1)?.semanticScene?.purpose === "turn") {
     return { version: "semantic-scene-direction-v2", purpose: "aftermath", spatialIntent: "hold" };
@@ -320,11 +319,10 @@ const semanticSceneFor = (
   if (evidence.some((item) => item.triggers.includes("density_release"))) {
     return { version: "semantic-scene-direction-v2", purpose: "aftermath", spatialIntent: "hold" };
   }
-  if (state.layoutTransitionsUsed === 0 && progress >= 0.34
-    || state.layoutTransitionsUsed === 1 && progress >= 0.66) {
+  if (state.layoutTransitionsUsed < 2 && evidence.some((item) => item.contrast)) {
     return { version: "semantic-scene-direction-v2", purpose: "turn", spatialIntent: "open" };
   }
-  return { version: "semantic-scene-direction-v2", purpose: "develop", spatialIntent: evidence.some((item) => item.repetitionCount > 1) ? "stack" : "hold" };
+  return { version: "semantic-scene-direction-v2", purpose: "develop", spatialIntent: "hold" };
 };
 
 const roleFor = (
@@ -377,14 +375,14 @@ const intensityFor = (
   semanticScene: SemanticSceneDirectionV2,
 ): number => {
   const roleBase: Record<LineDramaticRoleV2, number> = {
-    statement: 0.58, confession: 0.64, question: 0.7, answer: 0.68,
-    refrain: evidence.repetitionOrdinal > 1 ? 0.9 : 0.8, rupture: 0.9, release: 0.76,
+    statement: 0.38, confession: 0.48, question: 0.58, answer: 0.52,
+    refrain: evidence.repetitionOrdinal > 1 ? 0.8 : 0.72, rupture: 0.82, release: 0.64,
   };
-  const purposeLift = semanticScene.purpose === "turn" ? 0.06
-    : semanticScene.purpose === "resolve" ? 0.08
-      : semanticScene.purpose === "aftermath" ? -0.08 : 0;
-  const audioLift = evidence.energy === null ? 0 : (evidence.energy - 0.5) * 0.18;
-  return Math.round(clamp(roleBase[role] + purposeLift + audioLift, 0.38, 1) * 1000) / 1000;
+  const purposeLift = semanticScene.purpose === "turn" ? 0.04
+    : semanticScene.purpose === "resolve" ? 0.05
+      : semanticScene.purpose === "aftermath" ? -0.04 : 0;
+  const audioLift = evidence.energy === null ? 0 : (evidence.energy - 0.5) * 0.06;
+  return Math.round(clamp(roleBase[role] + purposeLift + audioLift, 0.35, 0.9) * 1000) / 1000;
 };
 
 const compileLinePerformances = (

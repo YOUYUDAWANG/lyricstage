@@ -167,7 +167,7 @@ export const applyLinePerformancesV2 = (
     return {
       ...directive,
       behavior: behaviorByRole[performance.dramaticRole],
-      intensity: Math.min(1.25, Math.max(0.35, performance.intensity * 1.1)),
+      intensity: Math.min(1, Math.max(0.35, performance.intensity)),
       alignment: performance.dramaticRole === "question" ? "center" as const : directive.alignment,
       direction: performance.exit === "exit-recede" || performance.exit === "exit-cut" ? -1 as const : 1 as const,
       fontScale: Math.min(1.22, Math.max(0.78, directive.fontScale + (performance.dramaticRole === "release" ? 0.025 : 0))),

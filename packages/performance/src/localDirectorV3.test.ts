@@ -93,12 +93,13 @@ describe("Local-First Director V3", () => {
     expect(first.gestures.length).toBeLessThanOrEqual(48);
     const signatureClips = signatureChoreographyClipIDsV2.filter((clip) =>
       first.effects.some((effect) => effect.id.startsWith(`signature-clip-v2:${clip}:`)));
-    expect(signatureClips.length).toBeGreaterThanOrEqual(5);
-    expect(signatureClips.length).toBeLessThanOrEqual(7);
+    expect(signatureClips.length).toBeGreaterThanOrEqual(4);
+    expect(signatureClips.length).toBeLessThanOrEqual(6);
     const layoutChanges = first.sections.slice(1).filter((section, index) =>
       section.layout !== first.sections[index]!.layout).length;
-    expect(layoutChanges).toBeGreaterThanOrEqual(3);
-    expect(layoutChanges).toBeLessThanOrEqual(4);
+    expect(layoutChanges).toBeGreaterThanOrEqual(2);
+    expect(layoutChanges).toBeLessThanOrEqual(3);
+    expect(first.sections.some((section) => !first.effects.some((effect) => effect.sectionID === section.id))).toBe(true);
   });
 
   it("prefers a real MusicMap structural landmark over equal-time cutting", () => {
@@ -135,5 +136,25 @@ describe("Local-First Director V3", () => {
     const evidence = compileLocalLineEvidenceV3(lyrics);
     expect(evidence[2]?.triggers).toContain("semantic_contrast");
     expect(evidence[4]?.repetitionOrdinal).toBe(2);
+  });
+
+  it("does not manufacture bridge, silence, or recall events from song progress alone", () => {
+    const plainLyrics: LyricDocumentV0 = {
+      version: "lyric-document-v0",
+      recordingID: "fixture:local-first-plain-progress",
+      durationMs: 160_000,
+      lines: Array.from({ length: 40 }, (_, lineIndex) => ({
+        lineIndex,
+        fromMs: lineIndex * 4_000,
+        toMs: lineIndex * 4_000 + 3_800,
+        text: `ordinary lyric ${lineIndex}`,
+        voiceRole: "lead" as const,
+      })),
+    };
+    const plan = compileLocalDirectorPlanV3(plainLyrics);
+    const clips = signatureChoreographyClipIDsV2.filter((clip) =>
+      plan.effects.some((effect) => effect.id.startsWith(`signature-clip-v2:${clip}:`)));
+    expect(clips).toEqual(["motif-introduce", "final-resolve"]);
+    expect(plan.blocking.transitions.length).toBeLessThanOrEqual(1);
   });
 });

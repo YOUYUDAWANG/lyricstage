@@ -72,7 +72,7 @@ export const signatureChoreographyClipsV2: readonly SignatureChoreographyClipV2[
   {
     id: "bridge-fracture", purpose: "Break an established spatial rule and leave a displaced trace.",
     allowedPurposes: ["turn"], phrasePrimitive: "phrase.breakReform", accentPrimitive: "glyph.offsetSnap",
-    anticipation: "geometry.suspend", event: "geometry.cut", support: ["memory.trail"], consequence: "density.release",
+    anticipation: "geometry.suspend", event: "geometry.suspend", support: ["memory.trail"], consequence: "density.release",
     presentation: "hero", observableFact: "the lyric field remains visibly displaced after the break",
     reducedMotionStrategy: "show the broken alignment as a static before-and-after contrast",
   },
@@ -93,7 +93,7 @@ export const signatureChoreographyClipsV2: readonly SignatureChoreographyClipV2[
   {
     id: "final-resolve", purpose: "Consume the visual promise and settle the final composition.",
     allowedPurposes: ["resolve"], phrasePrimitive: "phrase.handoff", accentPrimitive: "glyph.weightPulse",
-    anticipation: "motif.recall", event: "geometry.converge", support: ["density.release", "cover.island"], consequence: "transition.bloom",
+    anticipation: "motif.recall", event: "geometry.converge", support: ["motif.recall"], consequence: "motif.recall",
     presentation: "hero", observableFact: "separated motif parts visibly meet and leave one resolved remnant",
     reducedMotionStrategy: "show the separated and resolved states through opacity and hierarchy only",
   },
@@ -155,13 +155,13 @@ const effectForPhase = (
   sectionID: card.sceneID,
   fromMs: range[0],
   toMs: range[1],
-  presentation: phase === "event" ? clip.presentation : "section",
+  presentation: phase === "event" ? clip.presentation : "reading",
   primary: {
     primitive: phase === "event" ? clip.event : clip[phase],
-    intensity: phase === "event" ? 0.88 : phase === "anticipation" ? 0.58 : 0.64,
+    intensity: phase === "event" ? 0.76 : phase === "anticipation" ? 0.3 : 0.34,
     direction: card.sceneIndex % 2 === 0 ? 1 : -1,
   },
-  support: phase === "event" ? clip.support.map((primitive) => ({ primitive, intensity: 0.68 })) : [],
+  support: phase === "event" ? clip.support.slice(0, 1).map((primitive) => ({ primitive, intensity: 0.38 })) : [],
   evidence: {
     songMotif: bible.motifActor.relationship,
     sectionTriggers: card.evidence.sectionTriggers,
@@ -245,6 +245,7 @@ export const applySignatureChoreographyV2 = (
   const gestures = [...authoredGestures, ...card.gestures.filter((gesture) => !authoredLines.has(gesture.lineIndex) && !overlapsAuthored(gesture))].slice(0, 6);
   const phases = phaseRanges(card, primaryLine);
   const effects = (Object.entries(phases) as Array<["anticipation" | "event" | "consequence", readonly [number, number] | undefined]>)
+    .filter(([phase]) => phase !== "anticipation")
     .filter((entry): entry is ["anticipation" | "event" | "consequence", readonly [number, number]] => Boolean(entry[1]))
     .map(([phase, range]) => effectForPhase(bible, card, clip, phase, range));
   const { sceneID: _oldSceneID, ...withoutSceneID } = card;
