@@ -1068,7 +1068,8 @@ export const compileDirectorPlanFromRollingV1 = (
     const line = lyrics.lines[cursor]!;
     const card = cardByLine.get(line.lineIndex);
     if (card && line.lineIndex === card.fromLineIndex) {
-      sections.push(sectionForCard(card, sections.length % 12));
+      const actIndex = Math.max(0, bible.acts.findIndex((act) => card.fromLineIndex >= act.fromLineIndex && card.fromLineIndex <= act.toLineIndex));
+      sections.push(sectionForCard(card, actIndex % 12));
       while (cursor < lyrics.lines.length && lyrics.lines[cursor]!.lineIndex <= card.toLineIndex) cursor += 1;
       continue;
     }

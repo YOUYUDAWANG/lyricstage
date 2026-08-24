@@ -7,6 +7,8 @@ import { directedPaletteForIndexV1, prepareDirectedStageV1 } from "./prepareDire
 import { drawDramaticScenesV1 } from "./drawDramatic";
 import {
   clearCanvasBackingStoreV1,
+  directedFieldOpacityV1,
+  duplicateLyricTextPrimitiveV1,
   dissolveEnvelopeAtV1,
   fitAnchoredLineV1,
   readingCompositionForV1,
@@ -167,6 +169,17 @@ describe("PreparedDirectedStageV1", () => {
       ["clearRect", 0, 0, 1943, 1570],
       ["restore"],
     ]);
+  });
+
+  it("keeps the full-stage field dim and rejects duplicate lyric text primitives", () => {
+    expect(directedFieldOpacityV1()).toBe(0.42);
+    expect([
+      "glyph.weightPulse",
+      "glyph.offsetSnap",
+      "token.echo",
+      "phrase.breathe",
+    ].every((primitive) => duplicateLyricTextPrimitiveV1(primitive as never))).toBe(true);
+    expect(duplicateLyricTextPrimitiveV1("token.underlinePath")).toBe(false);
   });
 
   it("prepares deterministic 8-20s dramatic scenes with one recurring motif", () => {

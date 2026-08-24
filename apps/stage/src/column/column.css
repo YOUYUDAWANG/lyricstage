@@ -440,9 +440,7 @@
   filter: none;
   transform: scale3d(1.001, 1.001, 1) translateZ(0);
   letter-spacing: -0.026em;
-  text-shadow:
-    0 1px 0 rgba(0, 0, 0, 0.24),
-    0 0 28px rgba(255, 255, 255, 0.15);
+  text-shadow: none;
 }
 
 .column-stage[data-lightweight="true"] .column-line {
@@ -459,7 +457,7 @@
   .column-line:hover {
     background: transparent;
     color: rgba(255, 255, 255, 0.72);
-    text-shadow: 0 0 22px rgba(255, 255, 255, 0.1);
+    text-shadow: none;
   }
 }
 
@@ -508,8 +506,7 @@
 }
 
 .column-line[data-phase="active"] .column-line-words {
-  /* White glow must not leak from a completed token into the next untimed glyph. */
-  text-shadow: 0 1px 0 rgba(0, 0, 0, 0.24);
+  text-shadow: none;
 }
 
 .column-line:not([data-phase="active"]) .column-word[data-has-timing="true"] {

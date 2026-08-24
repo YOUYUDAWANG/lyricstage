@@ -286,6 +286,21 @@ describe("rolling director core", () => {
     expect(local.source).toBe("local");
   });
 
+  it("keeps rolling scenes in the same dramatic act on one palette", () => {
+    const lyrics = lyricFixtures.longSongStructure;
+    const bible = compileLocalDirectorBibleV1(lyrics);
+    const cards = compileLocalSceneCardsV1(lyrics, bible);
+    const plan = compileDirectorPlanFromRollingV1(lyrics, bible, cards, "ai");
+    bible.acts.forEach((act) => {
+      const palettes = new Set(plan.sections
+        .filter((section) => section.id.startsWith("rolling:")
+          && section.fromLineIndex >= act.fromLineIndex
+          && section.fromLineIndex <= act.toLineIndex)
+        .map((section) => section.paletteIndex));
+      expect(palettes.size).toBeLessThanOrEqual(1);
+    });
+  });
+
   it("creates a deterministic seek checkpoint that can validate a middle card", () => {
     const lyrics = lyricFixtures.longSongStructure;
     const bible = compileLocalDirectorBibleV1(lyrics);
