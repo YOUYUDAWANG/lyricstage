@@ -14,7 +14,7 @@ export interface LyricsLookupTrackV0 {
 }
 
 export interface LyricsCandidateV0 {
-  provider: "lrclib" | "kugou" | "netease" | "tencent" | "local";
+  provider: "applemusic" | "lrclib" | "kugou" | "netease" | "tencent" | "local";
   id: string;
   title: string;
   artist: string;
@@ -48,6 +48,7 @@ export interface LyricsLookupResponseV0 {
 }
 
 export const lyricsProviderLabel = (provider: LyricsCandidateV0["provider"]): string => ({
+  applemusic: "Apple Music",
   lrclib: "LRCLIB",
   kugou: "酷狗",
   netease: "网易云",
@@ -73,7 +74,7 @@ export const isLyricsCandidateV0 = (value: unknown): value is LyricsCandidateV0 
     || parseLyricDocumentV0(candidate.wordTimedDocument).ok;
   return (
     candidate !== undefined &&
-    ["lrclib", "kugou", "netease", "tencent", "local"].includes(candidate.provider ?? "") &&
+    ["applemusic", "lrclib", "kugou", "netease", "tencent", "local"].includes(candidate.provider ?? "") &&
     typeof candidate.id === "string" && candidate.id.length > 0 && candidate.id.length <= 80 &&
     typeof candidate.title === "string" && candidate.title.trim().length > 0 && candidate.title.length <= 500 &&
     typeof candidate.artist === "string" && candidate.artist.length <= 500 &&

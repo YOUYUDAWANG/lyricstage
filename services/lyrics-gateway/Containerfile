@@ -1,0 +1,12 @@
+FROM python:3.12-slim@sha256:0568e6111802e74c03e8dda76565cdf4b88881d77de0d9b769846e9dfcb8d80a
+
+WORKDIR /app
+COPY requirements.txt ./
+RUN pip install --no-cache-dir -r requirements.txt
+COPY lyricstage_lyrics ./lyricstage_lyrics
+
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1
+
+EXPOSE 8788
+CMD ["uvicorn", "lyricstage_lyrics.app:app", "--host", "0.0.0.0", "--port", "8788", "--no-access-log"]

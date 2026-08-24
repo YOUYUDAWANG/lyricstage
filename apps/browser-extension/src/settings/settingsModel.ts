@@ -155,7 +155,7 @@ export const canReuseSavedProviderKey = (
 export const lyricsStatusCopy = (config: LyricsConfigView | undefined): string => {
   if (config?.reason) return config.reason;
   return config?.configured
-    ? "已启用 LDDC；令牌仅保存在本机扩展存储"
+    ? "已启用 Apple Music 优先歌词；令牌仅保存在本机扩展存储"
     : "未配置时仍会搜索 LRCLIB 与酷狗";
 };
 
@@ -180,7 +180,7 @@ export const directorTimingCopy = (config: DirectorConfigView | undefined): stri
 };
 
 export const summarizeLyricsConfig = (config: LyricsConfigView | undefined): string =>
-  config?.configured ? "已启用 LDDC" : "LRCLIB · 酷狗";
+  config?.configured ? "Apple Music 优先" : "LRCLIB · 酷狗";
 
 export const summarizeDirectorConfig = (config: DirectorConfigView | undefined): string =>
   config?.configured ? `已启用 ${config.primary?.model ?? "AI"}` : "本地确定性演出";

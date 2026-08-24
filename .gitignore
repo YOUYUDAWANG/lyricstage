@@ -9,6 +9,8 @@ coverage/
 .wrangler/
 .dev.vars
 *.log
+__pycache__/
+*.py[cod]
 .env
 .env.*
 !.env.example

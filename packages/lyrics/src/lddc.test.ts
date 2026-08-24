@@ -10,6 +10,36 @@ const track: LyricsLookupTrackV0 = {
 };
 
 describe("private LDDC lyrics fallback", () => {
+  it("accepts Apple Music word timing from the private gateway", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({
+      schema: "bilimusic-lddc-lyrics-v1",
+      candidates: [{
+        source: "applemusic",
+        id: "am-1",
+        title: "One",
+        artist: "Artist",
+        durationSeconds: 180,
+        timingKind: "word",
+        lyricLines: [{
+          startMilliseconds: 1000,
+          endMilliseconds: 2400,
+          text: "I'll be there",
+          words: [
+            { startMilliseconds: 1000, endMilliseconds: 1500, text: "I'll" },
+            { startMilliseconds: 1500, endMilliseconds: 1800, text: "be" },
+            { startMilliseconds: 1800, endMilliseconds: 2400, text: "there" },
+          ],
+        }],
+      }],
+    }), { status: 200 })));
+
+    const candidates = await lookupLDDCLyrics(track, { endpoint: "https://lyrics.example/", token: "secret" });
+
+    expect(candidates[0]?.provider).toBe("applemusic");
+    expect(candidates[0]?.timingKind).toBe("word");
+    expect(candidates[0]?.wordTimedDocument?.lines[0]?.words?.map((word) => word.text)).toEqual(["I'll", "be", "there"]);
+  });
+
   it("keeps the bearer out of source data and converts validated lines to LRC", async () => {
     const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response(JSON.stringify({
       schema: "bilimusic-lddc-lyrics-v1",

@@ -580,7 +580,7 @@ export const SettingsApp = () => {
         <div className="settings-scroll">
           {section === "lyrics" && (
             <form className="settings-card" onSubmit={(event) => void onSaveLyrics(event)}>
-              <div className="section-intro"><h2>私有多源歌词</h2><p>接入自己的 LDDC；LRCLIB 与酷狗仍作为公开只读来源。</p></div>
+              <div className="section-intro"><h2>私有高质量歌词</h2><p>Apple Music 逐字歌词优先；LRCLIB 与酷狗仍作为公开只读降级来源。</p></div>
               <ConfigLoadNotice state={lyricsLoad} noun="歌词配置" onRetry={() => void reloadLyricsConfiguration()} />
               <div className="grouped-form">
                 <label className="form-row"><span><strong>后端地址</strong><small>支持本机、局域网或 Tailscale 地址</small></span><input data-lyrics-endpoint="" type="url" value={lyricsEndpoint} disabled={busy === "lyrics" || lyricsUnavailable} placeholder="http://100.x.x.x:8788/" autoComplete="off" onChange={(event) => { setLyricsEndpoint(event.target.value); setLyricsDirty(true); setLyricsOperationError(undefined); }} /></label>
@@ -681,7 +681,7 @@ export const SettingsApp = () => {
             <section className="settings-card">
               <div className="section-intro"><h2>本机边界</h2><p>LyricStage 只取完成同步演出所需的最小数据。</p></div>
               <div className="privacy-list">
-                <article><span>1</span><div><strong>密钥留在本机</strong><p>LDDC Bearer 与供应商 API Key 只写入 <code>chrome.storage.local</code>。</p></div></article>
+                <article><span>1</span><div><strong>密钥留在本机</strong><p>歌词服务 Bearer 与供应商 API Key 只写入 <code>chrome.storage.local</code>。</p></div></article>
                 <article><span>2</span><div><strong>不接管媒体</strong><p>扩展不读取 Cookie、不下载媒体、不持久化 PCM，也不上传原始音频。</p></div></article>
                 <article><span>3</span><div><strong>按需授权域名</strong><p>连接提供商时才请求精确 origin，不会预先取得所有站点访问权。</p></div></article>
                 <article><span>4</span><div><strong>AI 永远可选</strong><p>AI 只辅助清洗元数据和选择候选；未配置或失败时，本地匹配与播放器界面完全可用。</p></div></article>

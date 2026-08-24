@@ -1,0 +1,22 @@
+[Unit]
+Description=LyricStage Apple Music-first lyrics gateway
+After=network-online.target
+Wants=network-online.target
+
+[Container]
+Image=localhost/lyricstage-lyrics:0.1.0
+Pull=never
+ContainerName=lyricstage-lyrics
+PublishPort=127.0.0.1:8093:8788
+EnvironmentFile=/etc/lyricstage-lddc.env
+Environment=APPLE_MUSIC_TRANSLATION_LANGUAGE=zh-Hans-CN
+Environment=APPLE_MUSIC_ROMANIZATION=true
+LogDriver=journald
+
+[Service]
+Restart=always
+TimeoutStartSec=180
+MemoryMax=1G
+
+[Install]
+WantedBy=multi-user.target
