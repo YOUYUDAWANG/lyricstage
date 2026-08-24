@@ -586,10 +586,6 @@ describe("YouTube Music companion isolated content script lifecycle (real DOM sh
       element.getAttribute("data-lyricstage-owned-lyrics-renderer") === "true"
     );
     expect(ownedTab?.textContent).toBe("歌詞");
-    expect(ownedRenderer?.hidden).toBe(true);
-
-    ownedTab?.emit("click");
-    env.clock.advance(50);
     expect(ownedRenderer?.hidden).toBe(false);
     expect(env.currentHost()?.parentElement).toBe(ownedRenderer);
   });

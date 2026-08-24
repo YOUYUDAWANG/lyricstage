@@ -1,6 +1,8 @@
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { extname, join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { transform } from "lightningcss";
+import { rolldown } from "rolldown";
 
 const extensionRoot = fileURLToPath(new URL("../extension-dist/", import.meta.url));
 const publicRoot = fileURLToPath(
@@ -213,7 +215,17 @@ if (!exposedContentModules) {
 for (const filename of ["theme-init.js", "ytm-shell.css", "content-ui-loader.js", "content.js", "manifest.json"]) {
   const source = readFileSync(join(publicRoot, filename));
   const built = readFileSync(join(extensionRoot, filename));
-  if (!source.equals(built)) {
+  let expected = source;
+  if (filename === "ytm-shell.css") {
+    expected = transform({ filename, code: source, minify: true }).code;
+  } else if (filename === "content.js") {
+    const bundle = await rolldown({ input: join(publicRoot, filename) });
+    const generated = await bundle.generate({ format: "iife", minify: true });
+    const chunk = generated.output.find((entry) => entry.type === "chunk");
+    if (!chunk) throw new Error("Unable to verify the minified extension content script.");
+    expected = Buffer.from(chunk.code);
+  }
+  if (!expected.equals(built)) {
     throw new Error(`Extension build output differs from public source: ${filename}`);
   }
 }

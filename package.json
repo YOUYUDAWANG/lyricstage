@@ -1,6 +1,6 @@
 {
   "name": "lyricstage",
-  "version": "0.4.28",
+  "version": "0.4.29",
   "private": true,
   "license": "AGPL-3.0-only",
   "type": "module",
@@ -14,7 +14,7 @@
     "sync:director-contract": "node scripts/sync-director-contract.mjs",
     "build": "npm run generate:contracts && npm run sync:director-contract && tsc -p tsconfig.json && vite build && node scripts/prepare-sites-build.mjs",
     "build:performance": "npm run sync:director-contract && tsc -p tsconfig.json && vite build --config performance.vite.config.ts",
-    "build:extension": "npm run generate:contracts && npm run sync:director-contract && tsc -p tsconfig.json && vite build --config extension.vite.config.ts && vite build --config extension-content.vite.config.ts && npm run verify:extension-csp",
+    "build:extension": "npm run generate:contracts && npm run sync:director-contract && tsc -p tsconfig.json && vite build --config extension.vite.config.ts && vite build --config extension-content.vite.config.ts && node scripts/minify-extension-static-assets.mjs && npm run verify:extension-csp",
     "build:all": "npm run build && npm run build:performance && npm run build:extension",
     "ci": "npm run test:coverage && npm run typecheck && npm run build:all && npm run test:gateway && npm run verify:release-status && npm run verify:bundle-budgets && npm run verify:module-budgets",
     "test": "npm run sync:director-contract && vitest run",

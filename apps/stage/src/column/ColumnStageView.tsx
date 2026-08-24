@@ -277,6 +277,11 @@ export function ColumnStageView({
   const showStateCard = surface !== "singing" && surface !== "paused" && surface !== "prelude";
   const limitedCandidates = alternativeLyricsCandidates(candidates, selectedCandidateKey);
   const selectedProvider = candidates.find((candidate) => `${candidate.provider}:${candidate.id}` === selectedCandidateKey)?.provider;
+  const visibleLyricsStatus = selectedProvider
+    ? `歌词 · ${lyricsProviderLabel(selectedProvider)}${estimatedTimingLabel}${lyricsOffsetLabel}`
+    : hasMatchingLyrics
+      ? `同步歌词${estimatedTimingLabel}${lyricsOffsetLabel}`
+      : "正在匹配歌词";
 
   const selectTool = (selected: ColumnTool) => {
     const next = toggledColumnTool(activeTool, selected);
@@ -297,7 +302,7 @@ export function ColumnStageView({
           <strong title={title || "YouTube Music 歌词"}>{title || "YouTube Music 歌词"}</strong>
           {artist && <small title={artist}>{artist}</small>}
           <small className="column-director-status" aria-live="polite" title={directorStatusReason || directorStatus}>
-            {directorStatus}{selectedProvider ? ` · 歌词 ${lyricsProviderLabel(selectedProvider)}` : ""}{estimatedTimingLabel}{lyricsOffsetLabel}
+            {visibleLyricsStatus}
           </small>
         </div>
         <div ref={toolbarRef} className="column-toolbar" role="toolbar" aria-label="歌词工具栏">

@@ -7,9 +7,10 @@ const manifest = JSON.parse(readFileSync(join(root, "manifest.json"), "utf8"));
 const limits = {
   initialContentScripts: 100_000,
   largestJavaScript: 500_000,
-  // The optional, document-start AM shell is a single 9.5KB static stylesheet.
-  // Keep a narrow 20KB allowance without relaxing either JavaScript budget.
-  totalExtension: 2_520_000,
+  // The optional AM shell now includes a minified light stylesheet, a persistent
+  // collapsible guide, the native media switch, and toolbar panel popovers. Keep
+  // a narrow 50KB envelope without relaxing either JavaScript budget.
+  totalExtension: 2_550_000,
 };
 const files = (directory) => readdirSync(directory, { withFileTypes: true }).flatMap((entry) => {
   const path = join(directory, entry.name);

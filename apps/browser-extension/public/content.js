@@ -5,6 +5,15 @@
   const OWNED_LYRICS_TAB_ATTR = "data-lyricstage-owned-lyrics-tab";
   const OWNED_LYRICS_RENDERER_ATTR = "data-lyricstage-owned-lyrics-renderer";
   const OWNED_LYRICS_ACTIVE_ATTR = "data-lyricstage-owned-lyrics-active";
+  const APPLE_SHELL_GUIDE_ATTR = "data-lyricstage-guide";
+  const APPLE_SHELL_GUIDE_STORAGE_KEY = "lyricstage-guide-collapsed-v1";
+  const APPLE_SHELL_TAB_BAR_ATTR = "data-lyricstage-tab-bar";
+  const APPLE_SHELL_TAB_PROXY_ATTR = "data-lyricstage-tab-proxy";
+  const APPLE_SHELL_TAB_SIGNATURE_ATTR = "data-lyricstage-tab-signature";
+  const APPLE_SHELL_PLAYER_ACTIONS_ATTR = "data-lyricstage-player-actions";
+  const APPLE_SHELL_POPOVER_ATTR = "data-lyricstage-player-popover";
+  const APPLE_SHELL_PLAYER_OPEN_ATTR = "data-lyricstage-player-open";
+  const APPLE_SHELL_MEDIA_TOGGLE_ATTR = "data-lyricstage-native-media-switch";
   const CONTENT_SCRIPT_STOP_EVENT = "lyricstage-content-script-stop-v2";
   const CONTENT_SCRIPT_MARKER_ATTR = "data-lyricstage-content-script";
   const CONTENT_SCRIPT_MARKER = "isolated-v3";
@@ -82,9 +91,21 @@
   const retiredTrackIDs = new Set();
   const savedNativeRenderers = new Map();
   const observedOwnedSurfaceTabs = new WeakSet();
+  const ownedTabProxyTargets = new WeakMap();
+  let ownedLyricsTabBar = null;
   let ownedLyricsTab = null;
   let ownedLyricsRenderer = null;
-  let appleShellGuideInitialized = false;
+  let appleShellGuideObserver = null;
+  let observedAppleShellNavigation = null;
+  let observedAppleShellDrawer = null;
+  const observedAppleShellGuideButtons = new WeakSet();
+  const observedAppleShellMediaToggles = new WeakSet();
+  let appleShellGuidePreferenceRequested = false;
+  let appleShellPlayerActions = null;
+  let appleShellPopoverKind = "";
+  let appleShellMediaToggle = null;
+  let appleShellMediaToggleParent = null;
+  let appleShellMediaToggleNextSibling = null;
 
   const clean = (value) => (typeof value === "string" ? value.trim() : "");
 
@@ -937,6 +958,24 @@
       || label === "評論" || label === "コメント";
   };
 
+  const normalizedTabLabel = (tab) => clean(
+    tab?.getAttribute?.("aria-label")
+    || tab?.querySelector?.("yt-formatted-string")?.textContent
+    || tab?.textContent,
+  ).toLowerCase();
+
+  const looksLikeQueueTab = (tab) => {
+    const label = normalizedTabLabel(tab);
+    return label.includes("next") || label.includes("queue") || label.includes("次の")
+      || label.includes("播放队列") || label.includes("播放佇列");
+  };
+
+  const looksLikeRelatedTab = (tab) => {
+    const label = normalizedTabLabel(tab);
+    return label.includes("related") || label.includes("推荐") || label.includes("推薦")
+      || label.includes("関連");
+  };
+
   const isTabDisabled = (tab) => Boolean(
     tab?.disabled === true
     || tab?.getAttribute?.("aria-disabled") === "true"
@@ -944,18 +983,70 @@
   );
 
   const ensureAppleShellGuide = () => {
-    if (
-      appleShellGuideInitialized
-      || document.documentElement?.getAttribute?.("data-lyricstage-shell") !== "apple"
-      || window.innerWidth < 1100
-    ) return;
+    if (document.documentElement?.getAttribute?.("data-lyricstage-shell") !== "apple") {
+      document.documentElement?.removeAttribute?.(APPLE_SHELL_GUIDE_ATTR);
+      return;
+    }
     const navigation = document.querySelector?.("ytmusic-nav-bar");
     const drawer = document.querySelector?.("tp-yt-app-drawer#guide");
-    const guideButton = navigation?.querySelector?.("#guide-button");
-    if (!navigation || !drawer || !guideButton) return;
-    appleShellGuideInitialized = true;
-    if (navigation.hasAttribute?.("guide-collapsed") && !drawer.hasAttribute?.("opened")) {
-      guideButton.click?.();
+    if (!navigation || !drawer) return;
+    const guideButton = navigation.querySelector?.("#guide-button");
+
+    const syncGuideState = () => {
+      const collapsed = navigation.hasAttribute?.("guide-collapsed") && !drawer.hasAttribute?.("opened");
+      document.documentElement?.setAttribute?.(
+        APPLE_SHELL_GUIDE_ATTR,
+        collapsed ? "collapsed" : "expanded",
+      );
+    };
+
+    if (
+      observedAppleShellNavigation !== navigation
+      || observedAppleShellDrawer !== drawer
+    ) {
+      appleShellGuideObserver?.disconnect?.();
+      appleShellGuideObserver = new MutationObserver(syncGuideState);
+      appleShellGuideObserver.observe(navigation, {
+        attributes: true,
+        attributeFilter: ["guide-collapsed"],
+      });
+      appleShellGuideObserver.observe(drawer, {
+        attributes: true,
+        attributeFilter: ["opened"],
+      });
+      observedAppleShellNavigation = navigation;
+      observedAppleShellDrawer = drawer;
+    }
+    syncGuideState();
+
+    if (guideButton && !observedAppleShellGuideButtons.has(guideButton)) {
+      observedAppleShellGuideButtons.add(guideButton);
+      guideButton.addEventListener?.("click", () => {
+        window.setTimeout?.(() => {
+          syncGuideState();
+          const collapsed = document.documentElement?.getAttribute?.(APPLE_SHELL_GUIDE_ATTR) === "collapsed";
+          try {
+            void chrome.storage?.local?.set?.({ [APPLE_SHELL_GUIDE_STORAGE_KEY]: collapsed });
+          } catch {
+            // Native guide behavior still works when extension storage is unavailable.
+          }
+        }, 360);
+      });
+    }
+
+    if (!appleShellGuidePreferenceRequested) {
+      appleShellGuidePreferenceRequested = true;
+      try {
+        const storedPreference = chrome.storage?.local?.get?.(APPLE_SHELL_GUIDE_STORAGE_KEY);
+        void storedPreference?.then?.((stored) => {
+          const preferred = stored?.[APPLE_SHELL_GUIDE_STORAGE_KEY];
+          if (typeof preferred !== "boolean" || !guideButton?.isConnected) return;
+          const collapsed = navigation.hasAttribute?.("guide-collapsed") && !drawer.hasAttribute?.("opened");
+          if (collapsed !== preferred) guideButton.click?.();
+        });
+      } catch {
+        // Keep the native guide state when storage is unavailable.
+      }
     }
   };
 
@@ -971,11 +1062,26 @@
     }
   };
 
+  const syncOwnedTabBarSelection = (sidePanel) => {
+    if (!ownedLyricsTabBar?.isConnected) return;
+    const lyricsActive = sidePanel?.getAttribute?.(OWNED_LYRICS_ACTIVE_ATTR) === "true";
+    for (const button of Array.from(ownedLyricsTabBar.querySelectorAll?.('[role="tab"]') ?? [])) {
+      const target = ownedTabProxyTargets.get(button);
+      const selected = button === ownedLyricsTab
+        ? lyricsActive
+        : !lyricsActive && isStronglyTabSelected(target);
+      button.setAttribute?.("aria-selected", selected ? "true" : "false");
+      button.tabIndex = selected ? 0 : -1;
+    }
+  };
+
   const removeOwnedLyricsSurface = (sidePanel, nativeLyricsTab) => {
     const wasActive = sidePanel?.getAttribute?.(OWNED_LYRICS_ACTIVE_ATTR) === "true";
     deactivateOwnedLyricsSurface(sidePanel);
-    ownedLyricsTab?.remove?.();
+    ownedLyricsTabBar?.remove?.();
     ownedLyricsRenderer?.remove?.();
+    sidePanel?.removeAttribute?.(APPLE_SHELL_TAB_BAR_ATTR);
+    ownedLyricsTabBar = null;
     ownedLyricsTab = null;
     ownedLyricsRenderer = null;
     nativeLyricsTab?.removeAttribute?.("data-lyricstage-native-lyrics-hidden");
@@ -990,6 +1096,9 @@
       tab.removeAttribute?.("selected");
     }
     sidePanel?.setAttribute?.(OWNED_LYRICS_ACTIVE_ATTR, "true");
+    sidePanel?.removeAttribute?.(APPLE_SHELL_POPOVER_ATTR);
+    document.documentElement?.removeAttribute?.(APPLE_SHELL_POPOVER_ATTR);
+    appleShellPopoverKind = "";
     ownedLyricsTab.setAttribute("aria-selected", "true");
     ownedLyricsTab.setAttribute("selected", "");
     ownedLyricsTab.setAttribute(CONFIRMED_TAB_ATTR, "true");
@@ -997,7 +1106,191 @@
     ownedLyricsRenderer.style.display = "flex";
     lastInteractedTab = ownedLyricsTab;
     resetStageMountRecovery();
+    syncOwnedTabBarSelection(sidePanel);
     queueMutationReconcile({ stage: true });
+  };
+
+  const syncAppleShellPlayerActions = () => {
+    const activePanel = document.querySelector?.(
+      "ytmusic-player-page#player-page #side-panel",
+    )?.getAttribute?.(APPLE_SHELL_POPOVER_ATTR) || "";
+    appleShellPopoverKind = activePanel;
+    const mediaButtons = Array.from(
+      appleShellMediaToggle?.querySelectorAll?.("button") ?? [],
+    );
+    const mediaMode = mediaButtons[1]?.getAttribute?.("aria-pressed") === "true"
+      ? "video"
+      : "song";
+    document.documentElement?.setAttribute?.("data-lyricstage-media-mode", mediaMode);
+    for (const button of Array.from(
+      appleShellPlayerActions?.querySelectorAll?.("button[data-panel]") ?? [],
+    )) {
+      const selected = button.getAttribute?.("data-panel") === activePanel;
+      button.setAttribute?.("aria-expanded", selected ? "true" : "false");
+      button.toggleAttribute?.("data-active", selected);
+    }
+  };
+
+  const restoreAppleShellMediaToggle = () => {
+    if (!appleShellMediaToggle) return;
+    appleShellMediaToggle.removeAttribute?.(APPLE_SHELL_MEDIA_TOGGLE_ATTR);
+    if (appleShellMediaToggleParent?.isConnected) {
+      if (appleShellMediaToggleNextSibling?.parentElement === appleShellMediaToggleParent) {
+        appleShellMediaToggleParent.insertBefore?.(
+          appleShellMediaToggle,
+          appleShellMediaToggleNextSibling,
+        );
+      } else {
+        appleShellMediaToggleParent.append?.(appleShellMediaToggle);
+      }
+    }
+    appleShellMediaToggle = null;
+    appleShellMediaToggleParent = null;
+    appleShellMediaToggleNextSibling = null;
+  };
+
+  const closeAppleShellPopover = (sidePanel, tabList) => {
+    if (!sidePanel) return;
+    if (ownedLyricsTab?.isConnected && ownedLyricsRenderer?.isConnected) {
+      activateOwnedLyricsSurface(sidePanel, tabList);
+    } else {
+      sidePanel.removeAttribute?.(APPLE_SHELL_POPOVER_ATTR);
+      document.documentElement?.removeAttribute?.(APPLE_SHELL_POPOVER_ATTR);
+      appleShellPopoverKind = "";
+      const nativeLyricsTab = Array.from(
+        tabList?.querySelectorAll?.('[role="tab"], tp-yt-paper-tab') ?? [],
+      ).find((tab) => looksLikeLyricsTab(tab) && !isTabDisabled(tab));
+      nativeLyricsTab?.click?.();
+    }
+    syncAppleShellPlayerActions();
+  };
+
+  const ensureAppleShellPlayerActions = (sidePanel, tabList, tabs) => {
+    const navigation = document.querySelector?.("ytmusic-nav-bar");
+    const rightContent = navigation?.querySelector?.("#right-content");
+    const playerPage = sidePanel?.closest?.("ytmusic-player-page#player-page");
+    const playerOpen = Boolean(playerPage?.hasAttribute?.("player-page-open"));
+    const mediaToggle = appleShellMediaToggle?.isConnected
+      ? appleShellMediaToggle
+      : playerPage?.querySelector?.("ytmusic-av-toggle");
+    const mediaButtons = Array.from(mediaToggle?.querySelectorAll?.("button") ?? []).slice(0, 2);
+    document.documentElement?.toggleAttribute?.(APPLE_SHELL_PLAYER_OPEN_ATTR, playerOpen);
+    const queueTab = tabs.find((tab) => looksLikeQueueTab(tab));
+    const relatedTab = tabs.find((tab) => looksLikeRelatedTab(tab));
+    if (
+      !playerOpen
+      || !sidePanel
+      || !rightContent
+      || (!mediaToggle && !queueTab && !relatedTab)
+    ) {
+      restoreAppleShellMediaToggle();
+      appleShellPlayerActions?.remove?.();
+      appleShellPlayerActions = null;
+      return;
+    }
+
+    const signature = `${mediaButtons.map((button) => clean(button.textContent)).join("|")}|${clean(queueTab?.textContent)}|${clean(relatedTab?.textContent)}`;
+    if (
+      appleShellPlayerActions?.isConnected
+      && appleShellPlayerActions.getAttribute?.(APPLE_SHELL_TAB_SIGNATURE_ATTR) !== signature
+    ) {
+      restoreAppleShellMediaToggle();
+      appleShellPlayerActions.remove?.();
+      appleShellPlayerActions = null;
+    }
+    if (appleShellPlayerActions?.isConnected) {
+      syncAppleShellPlayerActions();
+      return;
+    }
+
+    const actions = document.createElement("div");
+    actions.setAttribute(APPLE_SHELL_PLAYER_ACTIONS_ATTR, "true");
+    actions.setAttribute(APPLE_SHELL_TAB_SIGNATURE_ATTR, signature);
+    actions.setAttribute("role", "group");
+    actions.setAttribute("aria-label", "播放器面板");
+    actions.addEventListener("pointerdown", () => {
+      document.activeElement?.blur?.();
+      document.querySelector?.("ytmusic-search-box input")?.blur?.();
+    });
+
+    if (mediaToggle && mediaButtons.length === 2) {
+      appleShellMediaToggle = mediaToggle;
+      appleShellMediaToggleParent = mediaToggle.parentElement;
+      appleShellMediaToggleNextSibling = mediaToggle.nextSibling;
+      mediaToggle.setAttribute?.(APPLE_SHELL_MEDIA_TOGGLE_ATTR, "true");
+      if (!observedAppleShellMediaToggles.has(mediaToggle)) {
+        observedAppleShellMediaToggles.add(mediaToggle);
+        mediaToggle.addEventListener?.("click", () => {
+          window.setTimeout?.(syncAppleShellPlayerActions, 0);
+        });
+      }
+      actions.append(mediaToggle);
+    }
+
+    for (const [kind, label, target] of [
+      ["queue", "播放队列", queueTab],
+      ["related", "相关推荐", relatedTab],
+    ]) {
+      if (!target) continue;
+      const button = document.createElement("button");
+      button.type = "button";
+      button.setAttribute("data-panel", kind);
+      button.setAttribute("aria-haspopup", "dialog");
+      button.setAttribute("aria-expanded", "false");
+      button.title = label;
+      button.innerHTML = kind === "queue"
+        ? '<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><path d="M4 6h11M4 12h8M4 18h6"/><path d="m15 14 5 3-5 3z" fill="currentColor" stroke="none"/></svg><b>播放队列</b>'
+        : '<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round" aria-hidden="true"><path d="m12 3 1.65 4.35L18 9l-4.35 1.65L12 15l-1.65-4.35L6 9l4.35-1.65L12 3Z"/><path d="m18.5 14 .9 2.1 2.1.9-2.1.9-.9 2.1-.9-2.1-2.1-.9 2.1-.9.9-2.1Z"/></svg><b>相关推荐</b>';
+      button.addEventListener("click", () => {
+        if (sidePanel.getAttribute?.(APPLE_SHELL_POPOVER_ATTR) === kind) {
+          closeAppleShellPopover(sidePanel, tabList);
+          return;
+        }
+        appleShellPopoverKind = kind;
+        sidePanel.setAttribute?.(APPLE_SHELL_POPOVER_ATTR, kind);
+        document.documentElement?.setAttribute?.(APPLE_SHELL_POPOVER_ATTR, kind);
+        deactivateOwnedLyricsSurface(sidePanel);
+        lastInteractedTab = target;
+        target.click?.();
+        syncAppleShellPlayerActions();
+        queueMutationReconcile({ stage: true });
+      });
+      actions.append(button);
+    }
+    rightContent.prepend?.(actions);
+    appleShellPlayerActions = actions;
+    syncAppleShellPlayerActions();
+  };
+
+  const closeCurrentAppleShellPopover = () => {
+    const sidePanel = document.querySelector?.("ytmusic-player-page#player-page #side-panel");
+    if (!sidePanel?.hasAttribute?.(APPLE_SHELL_POPOVER_ATTR)) return;
+    const tabList = sidePanel?.querySelector?.(
+      'tp-yt-paper-tabs [role="tablist"], tp-yt-paper-tabs #tabsContent, tp-yt-paper-tabs',
+    );
+    closeAppleShellPopover(sidePanel, tabList);
+  };
+
+  const handleAppleShellDismissPointer = (event) => {
+    const sidePanel = document.querySelector?.("ytmusic-player-page#player-page #side-panel");
+    if (!sidePanel?.hasAttribute?.(APPLE_SHELL_POPOVER_ATTR)) return;
+    const target = event?.target;
+    if (target instanceof Node && (
+      appleShellPlayerActions?.contains?.(target)
+      || sidePanel.contains?.(target)
+    )) return;
+    closeCurrentAppleShellPopover();
+  };
+
+  const handleAppleShellDismissKey = (event) => {
+    if (
+      event?.key !== "Escape"
+      || !document.querySelector?.("ytmusic-player-page#player-page #side-panel")?.hasAttribute?.(APPLE_SHELL_POPOVER_ATTR)
+    ) return;
+    event.preventDefault?.();
+    event.stopPropagation?.();
+    event.stopImmediatePropagation?.();
+    closeCurrentAppleShellPopover();
   };
 
   const ensureOwnedLyricsSurface = (sidePanel, tabList) => {
@@ -1006,6 +1299,20 @@
     for (const tab of tabs) {
       if (looksLikeCommentsTab(tab)) tab.setAttribute?.("data-lyricstage-hidden-tab", "comments");
     }
+    const nativeTabSignature = tabs
+      .filter((tab) => !looksLikeCommentsTab(tab))
+      .map((tab) => clean(tab.textContent) || "tab")
+      .join("|");
+    if (
+      ownedLyricsTabBar?.isConnected
+      && ownedLyricsTabBar.getAttribute?.(APPLE_SHELL_TAB_SIGNATURE_ATTR) !== nativeTabSignature
+    ) {
+      ownedLyricsTabBar.remove?.();
+      ownedLyricsTabBar = null;
+      ownedLyricsTab = null;
+    }
+    ensureAppleShellPlayerActions(sidePanel, tabList, tabs);
+
     const nativeLyricsTab = tabs.find((tab) => !tab.hasAttribute?.(OWNED_LYRICS_TAB_ATTR) && looksLikeLyricsTab(tab));
     if (nativeLyricsTab && !isTabDisabled(nativeLyricsTab)) {
       removeOwnedLyricsSurface(sidePanel, nativeLyricsTab);
@@ -1013,40 +1320,67 @@
     }
 
     nativeLyricsTab?.setAttribute?.("data-lyricstage-native-lyrics-hidden", "true");
-    tabs.filter((tab) => !tab.hasAttribute?.(OWNED_LYRICS_TAB_ATTR)).forEach((tab, index) => {
-      if (tab?.style) tab.style.order = String((index + 1) * 10);
-    });
-    if (!ownedLyricsTab?.isConnected) {
-      const ownedOrder = nativeLyricsTab
-        ? (tabs.indexOf(nativeLyricsTab) + 1) * 10
-        : Math.min(20, (tabs.length + 1) * 10);
-      const tab = document.createElement("button");
-      tab.type = "button";
-      tab.setAttribute("role", "tab");
-      tab.setAttribute(OWNED_LYRICS_TAB_ATTR, "true");
-      tab.setAttribute("aria-selected", "false");
-      tab.textContent = nativeLyricsTab?.textContent?.trim?.() || lyricsTabLabel();
-      tab.style.order = String(Math.max(10, ownedOrder));
-      tab.addEventListener("click", () => activateOwnedLyricsSurface(sidePanel, tabList));
-      const tabParent = nativeLyricsTab?.parentElement || tabList;
-      if (nativeLyricsTab && typeof tabParent?.insertBefore === "function") {
-        tabParent.insertBefore(tab, nativeLyricsTab.nextSibling);
-      } else {
-        tabList.append?.(tab);
+    if (!ownedLyricsTabBar?.isConnected) {
+      const bar = document.createElement("nav");
+      bar.setAttribute("role", "tablist");
+      bar.setAttribute(APPLE_SHELL_TAB_BAR_ATTR, "true");
+      bar.setAttribute(APPLE_SHELL_TAB_SIGNATURE_ATTR, nativeTabSignature);
+      bar.setAttribute("aria-label", "播放器内容");
+
+      const lyricsButton = document.createElement("button");
+      lyricsButton.type = "button";
+      lyricsButton.setAttribute("role", "tab");
+      lyricsButton.setAttribute(OWNED_LYRICS_TAB_ATTR, "true");
+      lyricsButton.setAttribute("aria-selected", "false");
+      lyricsButton.textContent = nativeLyricsTab?.textContent?.trim?.() || lyricsTabLabel();
+      lyricsButton.addEventListener("click", () => activateOwnedLyricsSurface(sidePanel, tabList));
+      ownedLyricsTab = lyricsButton;
+
+      const proxyButtons = [];
+      let lyricsInserted = false;
+      for (const nativeTab of tabs) {
+        if (looksLikeCommentsTab(nativeTab)) continue;
+        if (nativeTab === nativeLyricsTab || looksLikeLyricsTab(nativeTab)) {
+          proxyButtons.push(lyricsButton);
+          lyricsInserted = true;
+          continue;
+        }
+        const proxy = document.createElement("button");
+        proxy.type = "button";
+        proxy.setAttribute("role", "tab");
+        proxy.setAttribute(APPLE_SHELL_TAB_PROXY_ATTR, "native");
+        proxy.setAttribute("aria-selected", "false");
+        proxy.textContent = clean(nativeTab.textContent);
+        ownedTabProxyTargets.set(proxy, nativeTab);
+        proxy.addEventListener("click", () => {
+          deactivateOwnedLyricsSurface(sidePanel);
+          lastInteractedTab = nativeTab;
+          nativeTab.click?.();
+          syncOwnedTabBarSelection(sidePanel);
+          queueMutationReconcile({ stage: true });
+        });
+        proxyButtons.push(proxy);
       }
-      ownedLyricsTab = tab;
-    }
-    if (ownedLyricsTab?.isConnected) {
-      const anchorTab = nativeLyricsTab || tabs[0];
-      const ownedLeft = nativeLyricsTab
-        ? nativeLyricsTab.offsetLeft || 0
-        : (anchorTab?.offsetLeft || 0) + (anchorTab?.offsetWidth || 0);
-      const ownedWidth = nativeLyricsTab?.offsetWidth || 72;
-      ownedLyricsTab.style.setProperty?.("--lyricstage-owned-tab-left", `${ownedLeft}px`);
-      ownedLyricsTab.style.setProperty?.("--lyricstage-owned-tab-width", `${ownedWidth}px`);
-      ownedLyricsTab.style.order = String(nativeLyricsTab
-        ? Math.max(10, (tabs.indexOf(nativeLyricsTab) + 1) * 10)
-        : 20);
+      if (!lyricsInserted) proxyButtons.splice(Math.min(1, proxyButtons.length), 0, lyricsButton);
+      proxyButtons.forEach((button, index) => {
+        button.addEventListener("keydown", (event) => {
+          const key = event?.key;
+          if (!["ArrowLeft", "ArrowRight", "Home", "End"].includes(key)) return;
+          event.preventDefault?.();
+          const nextIndex = key === "Home"
+            ? 0
+            : key === "End"
+              ? proxyButtons.length - 1
+              : (index + (key === "ArrowRight" ? 1 : -1) + proxyButtons.length) % proxyButtons.length;
+          const nextButton = proxyButtons[nextIndex];
+          nextButton?.focus?.();
+          nextButton?.click?.();
+        });
+      });
+      bar.append(...proxyButtons);
+      sidePanel.append?.(bar);
+      sidePanel.setAttribute?.(APPLE_SHELL_TAB_BAR_ATTR, "true");
+      ownedLyricsTabBar = bar;
     }
 
     if (!ownedLyricsRenderer?.isConnected) {
@@ -1059,6 +1393,18 @@
       sidePanel.append?.(renderer);
       ownedLyricsRenderer = renderer;
     }
+
+    if (
+      !sidePanel.hasAttribute?.(APPLE_SHELL_POPOVER_ATTR)
+      && (
+        sidePanel.getAttribute?.(OWNED_LYRICS_ACTIVE_ATTR) !== "true"
+        || ownedLyricsRenderer?.hidden
+      )
+    ) {
+      activateOwnedLyricsSurface(sidePanel, tabList);
+    }
+
+    syncOwnedTabBarSelection(sidePanel);
 
     for (const tab of tabs) {
       if (tab === ownedLyricsTab || observedOwnedSurfaceTabs.has(tab)) continue;
@@ -1211,11 +1557,20 @@
     rootObserver?.disconnect();
     playerObserver?.disconnect();
     stageObserver?.disconnect();
+    appleShellGuideObserver?.disconnect?.();
+    appleShellGuideObserver = null;
+    observedAppleShellNavigation = null;
+    observedAppleShellDrawer = null;
+    document.documentElement.removeAttribute(APPLE_SHELL_GUIDE_ATTR);
     document.documentElement.removeEventListener(CONTENT_SCRIPT_STOP_EVENT, stop);
     if (document.documentElement.getAttribute(CONTENT_SCRIPT_MARKER_ATTR) === CONTENT_SCRIPT_MARKER) {
       document.documentElement.removeAttribute(CONTENT_SCRIPT_MARKER_ATTR);
     }
     document.removeEventListener?.("click", rememberClickedVideo, true);
+    document.removeEventListener?.("pointerdown", handleAppleShellDismissPointer, true);
+    document.removeEventListener?.("click", handleAppleShellDismissPointer, true);
+    document.removeEventListener?.("keydown", handleAppleShellDismissKey, true);
+    window.removeEventListener?.("keydown", handleAppleShellDismissKey, true);
     sponsorBlockControlHost?.remove();
     sponsorBlockTitleCompat?.remove();
     sponsorBlockControlHost = null;
@@ -1232,6 +1587,13 @@
     releaseStageMount();
     const stoppedSidePanel = document.querySelector("ytmusic-player-page#player-page #side-panel");
     removeOwnedLyricsSurface(stoppedSidePanel, null);
+    restoreAppleShellMediaToggle();
+    appleShellPlayerActions?.remove?.();
+    appleShellPlayerActions = null;
+    appleShellPopoverKind = "";
+    document.documentElement.removeAttribute(APPLE_SHELL_POPOVER_ATTR);
+    document.documentElement.removeAttribute(APPLE_SHELL_PLAYER_OPEN_ATTR);
+    document.documentElement.removeAttribute("data-lyricstage-media-mode");
     for (const tab of Array.from(document.querySelectorAll?.('[data-lyricstage-native-lyrics-hidden]') ?? [])) {
       tab.removeAttribute?.("data-lyricstage-native-lyrics-hidden");
     }
@@ -1327,6 +1689,7 @@
       const host = document.createElement("div");
       host.id = STAGE_HOST_ID;
       host.className = "style-scope ytmusic-tab-renderer";
+      host.setAttribute("data-lyricstage-shell-theme", "light");
       host.style.display = "none";
       host.style.flexDirection = "column";
       host.style.width = "100%";
@@ -1885,6 +2248,10 @@
   window.addEventListener("yt-navigate-finish", handleNavigation);
   document.documentElement.addEventListener(CONTENT_SCRIPT_STOP_EVENT, stop);
   document.addEventListener?.("click", rememberClickedVideo, true);
+  document.addEventListener?.("pointerdown", handleAppleShellDismissPointer, true);
+  document.addEventListener?.("click", handleAppleShellDismissPointer, true);
+  document.addEventListener?.("keydown", handleAppleShellDismissKey, true);
+  window.addEventListener?.("keydown", handleAppleShellDismissKey, true);
   chrome.runtime.onMessage.addListener(onRuntimeMessage);
   updateStageMount();
   observeMedia();
