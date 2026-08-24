@@ -442,6 +442,8 @@
     const direct = [...(document.querySelectorAll?.("ytmusic-player-queue-item") ?? [])];
     if (direct.length) return direct;
     const sidePanel = document.querySelector?.("ytmusic-player-page#player-page #side-panel, #side-panel");
+    const responsive = [...(sidePanel?.querySelectorAll?.("ytmusic-responsive-list-item-renderer") ?? [])];
+    if (responsive.length) return responsive;
     const renderers = [...(sidePanel?.querySelectorAll?.("ytmusic-tab-renderer") ?? [])];
     const queueRenderer = renderers.find((renderer) =>
       renderer.getAttribute?.("page-type") !== LYRICS_PAGE_TYPE

@@ -283,6 +283,7 @@ describe("YouTube Music companion isolated content script lifecycle (real DOM sh
       return null;
     });
     sidePanel.querySelectorAll.mockImplementation((selector: string) => {
+      if (selector.includes("ytmusic-responsive-list-item-renderer")) return [];
       if (selector.includes("ytmusic-tab-renderer")) return [currentRenderer];
       if (selector.includes("#lyricstage-enhanced-lyrics")) {
         return currentRenderer.children.filter((child) =>
