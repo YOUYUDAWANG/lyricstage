@@ -59,6 +59,13 @@
   -webkit-backdrop-filter: saturate(1.35) blur(24px);
 }
 
+:root[data-lyricstage-shell="apple"] ytmusic-nav-bar,
+:root[data-lyricstage-shell="apple"] ytmusic-player-bar {
+  background: #f7f7fa !important;
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+}
+
 :root[data-lyricstage-shell="apple"] ytmusic-nav-bar {
   top: 8px !important;
   right: 8px !important;
@@ -443,9 +450,34 @@
 
 :root[data-lyricstage-shell="apple"] ytmusic-browse-response ytmusic-chip-cloud-chip-renderer,
 :root[data-lyricstage-shell="apple"] ytmusic-browse-response yt-chip-cloud-chip-renderer {
+  height: 36px !important;
+  min-height: 36px !important;
+  margin: 6px 8px 6px 0 !important;
+  padding: 0 !important;
   color: var(--ls-shell-label) !important;
-  background: rgba(255, 255, 255, 0.58) !important;
+  background: transparent !important;
+  box-shadow: none !important;
+}
+
+:root[data-lyricstage-shell="apple"] ytmusic-browse-response ytmusic-chip-cloud-chip-renderer .gradient-box,
+:root[data-lyricstage-shell="apple"] ytmusic-browse-response yt-chip-cloud-chip-renderer .gradient-box {
+  height: 36px !important;
+  background: transparent !important;
+}
+
+:root[data-lyricstage-shell="apple"] ytmusic-browse-response ytmusic-chip-cloud-chip-renderer a[role="tab"],
+:root[data-lyricstage-shell="apple"] ytmusic-browse-response yt-chip-cloud-chip-renderer a[role="tab"] {
+  height: 36px !important;
+  border-radius: 10px !important;
+  color: var(--ls-shell-label) !important;
+  background: rgba(255, 255, 255, 0.66) !important;
   box-shadow: inset 0 0 0 1px rgba(60, 60, 67, 0.08) !important;
+}
+
+:root[data-lyricstage-shell="apple"] ytmusic-browse-response ytmusic-chip-cloud-chip-renderer a[role="tab"][aria-selected="true"],
+:root[data-lyricstage-shell="apple"] ytmusic-browse-response yt-chip-cloud-chip-renderer a[role="tab"][aria-selected="true"] {
+  background: #fff !important;
+  box-shadow: 0 2px 8px rgba(65, 67, 76, 0.12), inset 0 0 0 1px rgba(60, 60, 67, 0.08) !important;
 }
 
 :root[data-lyricstage-shell="apple"] ytmusic-browse-response #content-wrapper > ytmusic-section-list-renderer,
