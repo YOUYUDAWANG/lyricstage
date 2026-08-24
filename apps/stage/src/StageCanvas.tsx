@@ -33,6 +33,7 @@ import { lyricsTimeForPlaybackMs } from "./playback/lyricsTimeOffset";
 import { canvasBackingStoreForV1 } from "./canvasBackingStore";
 import { rollingPreparedRendererIdentityV1 } from "./playback/rollingPerformanceDirector";
 import { artworkCandidates, artworkShapeForAspectV1, type ArtworkShapeV1 } from "./artworkCandidates";
+import { LyricScroller } from "./lyrics/LyricScroller";
 import {
   applyStageFrameDOMV1,
   createStageFrameBuffersV1,
@@ -172,6 +173,7 @@ export function StageCanvas({
   const [artworkCandidateIndex, setArtworkCandidateIndex] = useState(0);
   const [artworkAspect, setArtworkAspect] = useState(1);
   const [queueOpen, setQueueOpen] = useState(false);
+  const [scrubbing, setScrubbing] = useState(false);
   const selectedQueueTrackID = queue?.items[queue.currentIndex]?.trackID;
   useEffect(() => setQueueOpen(false), [selectedQueueTrackID]);
   displayTimeRef.current = displayTimeMs;
@@ -319,6 +321,7 @@ export function StageCanvas({
           reduceMotion,
           showGuides,
           palette: paletteForPlanTime(initialPlan, initialTimeMs),
+          drawLyrics: false,
         });
       }
     };
@@ -449,6 +452,7 @@ export function StageCanvas({
         reduceMotion: stageFrame.reduceMotion,
         showGuides: stageFrame.showGuides,
         palette: stageFrame.palette,
+        drawLyrics: false,
       });
       environmentRef.current?.renderFrame(stageFrame);
       samplerRef.current.push(duration);
@@ -503,11 +507,13 @@ export function StageCanvas({
 
   const commitScrub = (timeMs: number) => {
     scrubbingRef.current = false;
+    setScrubbing(false);
     void onSeek?.(Math.min(Math.max(0, durationMs), Math.max(0, timeMs)));
   };
 
   const cancelScrub = () => {
     scrubbingRef.current = false;
+    setScrubbing(false);
     renderFrameRef.current?.();
   };
 
@@ -595,9 +601,13 @@ export function StageCanvas({
               aria-label="播放进度"
               aria-valuetext={`${formatPlaybackTime(displayTimeMs)} / ${formatPlaybackTime(durationMs)}`}
               disabled={!controls?.seek || !onSeek}
-              onPointerDown={() => { scrubbingRef.current = true; }}
+              onPointerDown={() => {
+                scrubbingRef.current = true;
+                setScrubbing(true);
+              }}
               onInput={(event) => {
                 scrubbingRef.current = true;
+                setScrubbing(true);
                 previewScrub(event.currentTarget.valueAsNumber);
               }}
               onPointerUp={(event) => commitScrub(event.currentTarget.valueAsNumber)}
@@ -609,6 +619,7 @@ export function StageCanvas({
                   event.currentTarget.blur();
                 } else if (seekKeys.has(event.key)) {
                   scrubbingRef.current = true;
+                  setScrubbing(true);
                 }
               }}
               onKeyUp={(event) => {
@@ -691,8 +702,17 @@ export function StageCanvas({
           <canvas
             ref={canvasRef}
             className="stage-canvas"
-            role="img"
-            aria-label="当前歌词演出画面"
+            aria-hidden="true"
+          />
+          <LyricScroller
+            lyrics={lyrics}
+            lyricTimeMs={lyricsTimeForPlaybackMs(displayTimeMs, lyricsOffsetMs, durationMs)}
+            lyricsOffsetMs={lyricsOffsetMs}
+            durationMs={durationMs}
+            density="fullscreen"
+            reduceMotion={reduceMotion || lightweight}
+            followSuspended={scrubbing}
+            onSeek={(timeMs) => onSeek?.(timeMs)}
           />
         </div>
       </div>

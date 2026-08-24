@@ -1,6 +1,8 @@
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import App from "./App";
+import "./column/column.css";
+import "./lyrics/LyricScroller.css";
 import "./styles.css";
 
 const showcase = new URLSearchParams(globalThis.location?.search ?? "").get("showcase");

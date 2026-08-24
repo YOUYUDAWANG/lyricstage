@@ -5,7 +5,6 @@ import {
   eventPathStartsInEditableControl,
   lineMaskProgress,
   linePhase,
-  lyricLineTabIndex,
   mapVoiceClass,
   resolveColumnSurfaceState,
   toggledColumnTool,
@@ -32,12 +31,6 @@ describe("columnModel", () => {
     expect(eventPathStartsInEditableControl([{ tagName: "DIV", isContentEditable: true }])).toBe(true);
     expect(eventPathStartsInEditableControl([{ tagName: "DIV", getAttribute: (name: string) => name === "role" ? "textbox" : null }])).toBe(true);
     expect(eventPathStartsInEditableControl([{ tagName: "BUTTON" }])).toBe(false);
-  });
-
-  it("keeps only the active lyric line in the sequential tab order", () => {
-    expect(lyricLineTabIndex(4, 4, 0)).toBe(0);
-    expect(lyricLineTabIndex(3, 4, 0)).toBe(-1);
-    expect(lyricLineTabIndex(0, -1, 0)).toBe(0);
   });
 
   it("maps lifecycle states without collapsing to a blank surface", () => {

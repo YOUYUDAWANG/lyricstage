@@ -88,6 +88,8 @@ export interface DrawDirectedStageOptionsV1 {
   reduceMotion: boolean;
   showGuides?: boolean;
   palette?: DirectedStagePaletteV1;
+  /** Keep the environment canvas while a DOM lyric surface owns readable text. */
+  drawLyrics?: boolean;
 }
 
 export type DirectedTextMeasurerV1 = TextMeasurerV0;

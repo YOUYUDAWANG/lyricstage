@@ -1,35 +1,25 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import type { LyricDocumentV0 } from "@lyricstage/contracts";
 import { lyricsProviderLabel, type LyricsCandidateV0 } from "@lyricstage/lyrics";
-import { prepareTimeline } from "@lyricstage/core";
 import {
-  activeLineIndicesAt,
   columnToolAfterLyricsSearch,
   eventPathStartsInEditableControl,
   formatClock,
-  linePhase,
-  lyricLineTabIndex,
-  mapVoiceClass,
   resolveColumnSurfaceState,
   toggledColumnTool,
   type AutomaticLyricsStatus,
   type ColumnTool,
   type ColumnSurfaceState,
 } from "./columnModel";
-import {
-  activeScrollKey,
-  lyricScrollDurationMsV1,
-  lyricScrollProgressV1,
-  shouldScrollForActiveChange,
-} from "./embeddedFullscreen";
-import { alignTimedLineSegments, alternativeLyricsCandidates, wordProgressFromTiming } from "./timedLineText";
+import { alignTimedLineSegments, alternativeLyricsCandidates } from "./timedLineText";
 import {
   clampLyricsOffsetMs,
   formatLyricsOffset,
   LYRICS_OFFSET_STEP_MS,
   lyricsTimeForPlaybackMs,
-  playbackTimeForLyricsMs,
 } from "../playback/lyricsTimeOffset";
+import { LyricScroller } from "../lyrics/LyricScroller";
+import { activeLyricLineIndices } from "../lyrics/lyricFollowModel";
 
 export interface ColumnStageViewProps {
   bridgeAvailable: boolean;
@@ -129,14 +119,10 @@ export function ColumnStageView({
   onReconnect,
   onReloadSource,
 }: ColumnStageViewProps) {
-  const streamRef = useRef<HTMLDivElement>(null);
-  const activeRef = useRef<HTMLDivElement>(null);
   const toolbarRef = useRef<HTMLDivElement>(null);
   const moreButtonRef = useRef<HTMLButtonElement>(null);
   const toolsMenuRef = useRef<HTMLDivElement>(null);
   const toolPanelRef = useRef<HTMLElement>(null);
-  const lastActiveKeyRef = useRef<string>("");
-  const scrollAnimationRef = useRef<number | null>(null);
   const previousAutomaticStatusRef = useRef(automaticStatus);
   const enterFullscreenRef = useRef(onEnterFullscreen);
   enterFullscreenRef.current = onEnterFullscreen;
@@ -227,29 +213,6 @@ export function ColumnStageView({
     lyrics: hasMatchingLyrics ? lyrics : null,
   });
 
-  const timeline = useMemo(
-    () =>
-      hasMatchingLyrics
-        ? prepareTimeline({
-            version: "performance-plan-v0",
-            recordingID: lyrics.recordingID,
-            lyricsIdentity: lyrics.recordingID,
-            planIdentity: `column:${lyrics.recordingID}`,
-            durationMs: lyrics.durationMs,
-            scenes: lyrics.lines.map((line) => ({
-              lineIndex: line.lineIndex,
-              fromMs: line.fromMs,
-              toMs: line.toMs,
-              family: "fallback" as const,
-              intensity: 0.4,
-              repetitionIndex: 0,
-              repetitionCount: 1,
-            })),
-          })
-        : null,
-    [hasMatchingLyrics, lyrics],
-  );
-
   const lineSegments = useMemo(
     () => new Map(lyrics.lines.map((line) => [line.lineIndex, alignTimedLineSegments(line)])),
     [lyrics],
@@ -264,56 +227,10 @@ export function ColumnStageView({
     ? ""
     : " · 轻量逐字";
 
-  const activeIndices = useMemo(() => {
-    if (!timeline) return new Set<number>();
-    return new Set(activeLineIndicesAt(timeline, lyricTimeMs));
-  }, [timeline, lyricTimeMs]);
-
-  const activeKey = useMemo(() => activeScrollKey(activeIndices), [activeIndices]);
   const primaryActiveIndex = useMemo(
-    () => (activeIndices.size > 0 ? Math.min(...activeIndices) : -1),
-    [activeIndices],
+    () => hasMatchingLyrics ? activeLyricLineIndices(lyrics.lines, lyricTimeMs)[0] ?? -1 : -1,
+    [hasMatchingLyrics, lyricTimeMs, lyrics.lines],
   );
-
-  useLayoutEffect(() => {
-    if (!shouldScrollForActiveChange(lastActiveKeyRef.current, activeKey, frozen)) return;
-    lastActiveKeyRef.current = activeKey;
-    const stream = streamRef.current;
-    const active = activeRef.current;
-    if (!stream || !active) return;
-    const streamRect = stream.getBoundingClientRect();
-    const activeRect = active.getBoundingClientRect();
-    const target =
-      stream.scrollTop +
-      (activeRect.top - streamRect.top) -
-      streamRect.height * 0.3 +
-      activeRect.height / 2;
-    const targetTop = Math.max(0, target);
-    if (scrollAnimationRef.current !== null) cancelAnimationFrame(scrollAnimationRef.current);
-    if (lightweight) {
-      stream.scrollTo({ top: targetTop, behavior: "auto" });
-      scrollAnimationRef.current = null;
-      return;
-    }
-    const startTop = stream.scrollTop;
-    const startedAt = performance.now();
-    const step = (now: number) => {
-      const elapsed = now - startedAt;
-      stream.scrollTop = startTop + (targetTop - startTop) * lyricScrollProgressV1(elapsed);
-      if (elapsed < lyricScrollDurationMsV1) scrollAnimationRef.current = requestAnimationFrame(step);
-      else scrollAnimationRef.current = null;
-    };
-    scrollAnimationRef.current = requestAnimationFrame(step);
-    return () => {
-      if (scrollAnimationRef.current !== null) cancelAnimationFrame(scrollAnimationRef.current);
-      scrollAnimationRef.current = null;
-    };
-  }, [activeKey, frozen, lightweight]);
-
-  const interruptAutomaticScroll = () => {
-    if (scrollAnimationRef.current !== null) cancelAnimationFrame(scrollAnimationRef.current);
-    scrollAnimationRef.current = null;
-  };
 
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
@@ -540,76 +457,18 @@ export function ColumnStageView({
         </div>
       )}
 
-      <div className="column-stream" ref={streamRef} onWheel={interruptAutomaticScroll} onPointerDown={interruptAutomaticScroll}>
+      <div className="column-stream" data-shared-scroller={showStream || undefined}>
         {showStream ? (
-          lyrics.lines.map((line) => {
-            const phase = linePhase(line, lyricTimeMs, activeIndices);
-            const voice = mapVoiceClass(line.voiceRole);
-            const segments = lineSegments.get(line.lineIndex) ?? [{ kind: "plain" as const, text: line.text }];
-            const distance =
-              primaryActiveIndex < 0
-                ? Number.POSITIVE_INFINITY
-                : Math.abs(line.lineIndex - primaryActiveIndex);
-            const proximity = phase === "active" ? "active" : distance <= 1 ? "near" : distance <= 2 ? "middle" : "far";
-            return (
-              <div
-                key={line.lineIndex}
-                ref={phase === "active" ? activeRef : undefined}
-                className="column-line"
-                role="button"
-                tabIndex={lyricLineTabIndex(line.lineIndex, primaryActiveIndex, lyrics.lines[0]?.lineIndex ?? line.lineIndex)}
-                aria-label={`${line.text}，跳转到 ${formatClock(playbackTimeForLyricsMs(line.fromMs, lyricsOffsetMs, durationMs))}`}
-                title={`跳转到 ${formatClock(playbackTimeForLyricsMs(line.fromMs, lyricsOffsetMs, durationMs))}`}
-                data-phase={phase}
-                data-voice={voice}
-                data-proximity={proximity}
-                onClick={() => onSeekLine(playbackTimeForLyricsMs(line.fromMs, lyricsOffsetMs, durationMs))}
-                onKeyDown={(event) => {
-                  if (event.key === "ArrowDown" || event.key === "ArrowUp") {
-                    event.preventDefault();
-                    const lines = Array.from(streamRef.current?.querySelectorAll<HTMLElement>(".column-line") ?? []);
-                    const current = lines.indexOf(event.currentTarget);
-                    const next = event.key === "ArrowDown" ? current + 1 : current - 1;
-                    lines[Math.min(lines.length - 1, Math.max(0, next))]?.focus({ preventScroll: false });
-                    return;
-                  }
-                  if (event.key !== "Enter" && event.key !== " ") return;
-                  event.preventDefault();
-                  onSeekLine(playbackTimeForLyricsMs(line.fromMs, lyricsOffsetMs, durationMs));
-                }}
-              >
-                <span className="column-line-words">
-                  {segments.map((segment, index) => {
-                    if (segment.kind === "word") {
-                      const progress = phase === "active"
-                        ? wordProgressFromTiming(lyricTimeMs, segment.fromMs, segment.toMs)
-                        : phase === "past" ? 1 : 0;
-                      return (
-                        <span
-                          key={`${line.lineIndex}:word:${segment.wordIndex}:${index}`}
-                          className="column-word"
-                          data-has-timing="true"
-                          data-timing-kind={segment.timingKind}
-                          style={{ ["--word-progress" as string]: `${progress * 100}%` }}
-                        >
-                          {segment.text}
-                        </span>
-                      );
-                    }
-                    return (
-                      <span
-                        key={`${line.lineIndex}:gap:${index}`}
-                        className="column-word"
-                        data-has-timing="false"
-                      >
-                        {segment.text}
-                      </span>
-                    );
-                  })}
-                </span>
-              </div>
-            );
-          })
+          <LyricScroller
+            lyrics={lyrics}
+            lyricTimeMs={lyricTimeMs}
+            lyricsOffsetMs={lyricsOffsetMs}
+            durationMs={durationMs}
+            density="column"
+            reduceMotion={lightweight}
+            followSuspended={disconnected}
+            onSeek={onSeekLine}
+          />
         ) : (
           <div className="column-stream-spacer" aria-hidden="true" />
         )}

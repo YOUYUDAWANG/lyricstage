@@ -1073,6 +1073,7 @@ export const drawDirectedStageV1 = (
   const palette = options.palette ?? directedPaletteAtV1(stage, options.timeMs);
   const active = activeLinesAt(stage, options.timeMs);
   const presentation = stagePresentationAtV1(stage.plan.effects, options.timeMs, stage.lyrics);
+  const drawLyrics = options.drawLyrics !== false;
   clearCanvasBackingStoreV1(context);
   context.save();
   context.globalAlpha = directedFieldOpacityV1();
@@ -1080,15 +1081,17 @@ export const drawDirectedStageV1 = (
   drawEffectField(context, stage, options.timeMs, options.reduceMotion, palette);
   context.restore();
   drawDramaticScenesV1(context, stage, options.timeMs, options.reduceMotion, palette, "scenic");
-  drawLyricGestures(context, stage, options.timeMs, options.reduceMotion, palette, presentation, "scenic");
-  if (presentation === "hero") {
-    drawHero(context, stage, active, options.timeMs, palette, options.reduceMotion);
-  } else if (presentation === "duet") {
-    drawPrimary(context, stage, active, options.timeMs, palette, options.reduceMotion);
-  } else {
-    drawReading(context, stage, active, options.timeMs, palette, options.reduceMotion);
+  if (drawLyrics) {
+    drawLyricGestures(context, stage, options.timeMs, options.reduceMotion, palette, presentation, "scenic");
+    if (presentation === "hero") {
+      drawHero(context, stage, active, options.timeMs, palette, options.reduceMotion);
+    } else if (presentation === "duet") {
+      drawPrimary(context, stage, active, options.timeMs, palette, options.reduceMotion);
+    } else {
+      drawReading(context, stage, active, options.timeMs, palette, options.reduceMotion);
+    }
+    drawLyricGestures(context, stage, options.timeMs, options.reduceMotion, palette, presentation, "accent");
   }
-  drawLyricGestures(context, stage, options.timeMs, options.reduceMotion, palette, presentation, "accent");
   drawDramaticScenesV1(context, stage, options.timeMs, options.reduceMotion, palette, "accent");
   drawSilenceGuide(context, stage, options.timeMs, options.reduceMotion, palette);
   if (options.showGuides) drawGuides(context, stage, active, palette);

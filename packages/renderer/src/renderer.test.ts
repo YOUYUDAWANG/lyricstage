@@ -8,6 +8,7 @@ import { drawDramaticScenesV1 } from "./drawDramatic";
 import {
   clearCanvasBackingStoreV1,
   directedFieldOpacityV1,
+  drawDirectedStageV1,
   duplicateLyricTextPrimitiveV1,
   editorialFieldBoundsV1,
   dissolveEnvelopeAtV1,
@@ -35,6 +36,12 @@ const recordingContext = (): { context: CanvasRenderingContext2D; operations: un
   const context = new Proxy(values, {
     get(target, property) {
       if (property in target) return target[property];
+      if (property === "createLinearGradient" || property === "createRadialGradient") {
+        return (...args: unknown[]) => {
+          operations.push([String(property), ...args]);
+          return { addColorStop: (...stops: unknown[]) => operations.push(["addColorStop", ...stops]) };
+        };
+      }
       return (...args: unknown[]) => operations.push([String(property), ...args]);
     },
     set(target, property, value) {
@@ -183,6 +190,25 @@ describe("PreparedDirectedStageV1", () => {
       "phrase.breathe",
     ].every((primitive) => duplicateLyricTextPrimitiveV1(primitive as never))).toBe(true);
     expect(duplicateLyricTextPrimitiveV1("token.underlinePath")).toBe(false);
+  });
+
+  it("can preserve the visual field without duplicating DOM-owned lyric text", () => {
+    const lyrics = lyricFixtures.repeatedHook;
+    const plan = compileLocalDirectorPlanV1(lyrics);
+    const stage = prepareDirectedStageV1(
+      lyrics,
+      plan,
+      { width: 1280, height: 720, rendererVersion: "test-dom-lyrics" },
+      measure,
+    );
+    const { context, operations } = recordingContext();
+    drawDirectedStageV1(context, stage, {
+      timeMs: lyrics.lines[0]!.fromMs + 200,
+      reduceMotion: false,
+      drawLyrics: false,
+    });
+    expect(operations.some(([operation]) => operation === "clearRect")).toBe(true);
+    expect(operations.some(([operation]) => operation === "fillText" || operation === "strokeText")).toBe(false);
   });
 
   it("keeps the editorial wash inside the lyric field with transparent edge space", () => {

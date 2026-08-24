@@ -1329,6 +1329,12 @@ h1 {
   display: block;
   width: 100%;
   height: 100%;
+  pointer-events: none;
+}
+
+.stage-lyric-viewport > .lyric-scroller {
+  position: relative;
+  z-index: 2;
 }
 
 .performance-environment {

@@ -75,12 +75,6 @@ export const eventPathStartsInEditableControl = (path: readonly unknown[]): bool
     || role === "combobox";
 };
 
-export const lyricLineTabIndex = (
-  lineIndex: number,
-  activeLineIndex: number,
-  firstLineIndex: number,
-): 0 | -1 => lineIndex === (activeLineIndex >= 0 ? activeLineIndex : firstLineIndex) ? 0 : -1;
-
 export const mapVoiceClass = (role: VoiceRole | undefined): ColumnVoiceClass => {
   switch (role) {
     case "duetA":
