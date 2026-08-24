@@ -6,7 +6,6 @@ import {
   useLayoutEffect,
   useMemo,
   useRef,
-  useState,
   type CSSProperties,
   type PointerEvent as ReactPointerEvent,
 } from "react";
@@ -52,6 +51,7 @@ type SyllableRuntime = {
 const HIGHLIGHT = 1;
 const FINISHED = 2;
 const PRE_HIGHLIGHT = 4;
+export const youLyBrowseReturnDelayMs = 5_000;
 
 const YouLyWord = memo(function YouLyWord({ syllable }: { syllable: YouLySyllableModel }) {
   const chars = syllable.growable ? segmentDisplayGraphemes(syllable.text) : [];
@@ -105,10 +105,10 @@ const YouLyColumnScrollerImpl = forwardRef<YouLyColumnScrollerHandle, YouLyColum
     const lastTimeRef = useRef(0);
     const pointerStartRef = useRef<{ x: number; y: number } | null>(null);
     const scrollTimeoutRef = useRef<number | null>(null);
+    const browsingReturnTimeoutRef = useRef<number | null>(null);
     const visibilityObserverRef = useRef<IntersectionObserver | null>(null);
     const visibleKeysRef = useRef(new Set<string>());
     const browsingRef = useRef(false);
-    const [browsing, setBrowsing] = useState(false);
 
     const resetSyllable = useCallback((runtime: SyllableRuntime) => {
       runtime.element.classList.remove("highlight", "finished", "pre-highlight", "cleanup");
@@ -395,13 +395,27 @@ const YouLyColumnScrollerImpl = forwardRef<YouLyColumnScrollerHandle, YouLyColum
       return () => {
         visibilityObserverRef.current?.disconnect();
         if (scrollTimeoutRef.current !== null) window.clearTimeout(scrollTimeoutRef.current);
+        if (browsingReturnTimeoutRef.current !== null) window.clearTimeout(browsingReturnTimeoutRef.current);
       };
     }, [models, onReady, sample]);
 
+    const returnToCurrent = () => {
+      if (browsingReturnTimeoutRef.current !== null) {
+        window.clearTimeout(browsingReturnTimeoutRef.current);
+        browsingReturnTimeoutRef.current = null;
+      }
+      containerRef.current?.classList.remove("not-focused", "user-scrolling");
+      browsingRef.current = false;
+      window.requestAnimationFrame(() => sample(lastTimeRef.current, true));
+    };
+    const scheduleReturnToCurrent = () => {
+      if (browsingReturnTimeoutRef.current !== null) window.clearTimeout(browsingReturnTimeoutRef.current);
+      browsingReturnTimeoutRef.current = window.setTimeout(returnToCurrent, youLyBrowseReturnDelayMs);
+    };
     const enterBrowsing = () => {
       containerRef.current?.classList.add("not-focused", "user-scrolling");
       browsingRef.current = true;
-      setBrowsing(true);
+      scheduleReturnToCurrent();
     };
     const pointerMove = (event: ReactPointerEvent) => {
       const start = pointerStartRef.current;
@@ -409,20 +423,14 @@ const YouLyColumnScrollerImpl = forwardRef<YouLyColumnScrollerHandle, YouLyColum
       pointerStartRef.current = null;
       enterBrowsing();
     };
-    const returnToCurrent = () => {
-      containerRef.current?.classList.remove("not-focused", "user-scrolling");
-      browsingRef.current = false;
-      setBrowsing(false);
-      window.requestAnimationFrame(() => sample(lastTimeRef.current, true));
-    };
-
     return (
-      <div className="youly-column-shell" data-browsing={browsing || undefined}>
+      <div className="youly-column-shell">
         <div
           ref={viewportRef}
           className="youly-column-viewport"
           aria-label="歌词"
           onWheel={enterBrowsing}
+          onScroll={() => { if (browsingRef.current) scheduleReturnToCurrent(); }}
           onPointerDown={(event) => { pointerStartRef.current = { x: event.clientX, y: event.clientY }; }}
           onPointerMove={pointerMove}
           onPointerUp={() => { pointerStartRef.current = null; }}
@@ -463,7 +471,6 @@ const YouLyColumnScrollerImpl = forwardRef<YouLyColumnScrollerHandle, YouLyColum
             <div className="youly-column-end-space" aria-hidden="true" />
           </div>
         </div>
-        {browsing ? <button className="youly-return-current" type="button" onClick={returnToCurrent}>↓ 回到当前歌词</button> : null}
       </div>
     );
   },

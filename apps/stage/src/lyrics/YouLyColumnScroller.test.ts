@@ -2,7 +2,7 @@ import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 import type { LyricDocumentV0 } from "@lyricstage/contracts";
-import { YouLyColumnScroller } from "./YouLyColumnScroller";
+import { YouLyColumnScroller, youLyBrowseReturnDelayMs } from "./YouLyColumnScroller";
 
 const lyrics: LyricDocumentV0 = {
   version: "lyric-document-v0",
@@ -45,5 +45,18 @@ describe("YouLyColumnScroller", () => {
     }));
     expect(html).toContain("lyrics-gap");
     expect(html).toContain("aria-label=\"间奏\"");
+  });
+
+  it("returns to the current lyric five seconds after manual browsing without a button", () => {
+    const html = renderToStaticMarkup(createElement(YouLyColumnScroller, {
+      lyrics,
+      lyricsOffsetMs: 0,
+      durationMs: lyrics.durationMs,
+      reduceMotion: false,
+      onSeek: () => undefined,
+    }));
+    expect(youLyBrowseReturnDelayMs).toBe(5_000);
+    expect(html).not.toContain("回到当前歌词");
+    expect(html).not.toContain("youly-return-current");
   });
 });
