@@ -415,19 +415,28 @@
   };
 
   const queueItemSnapshot = (item) => {
+    const itemData = item?.data?.playlistPanelVideoRenderer ?? item?.data ?? null;
+    const runsText = (value) => clean(value?.runs?.map?.((run) => run?.text || "")?.join?.(""));
     const link = item?.querySelector?.('a[href*="watch?"][href*="v="]');
-    const trackID = videoIDFromHref(link?.getAttribute?.("href") || link?.href);
+    const trackID = videoIDFromHref(link?.getAttribute?.("href") || link?.href)
+      || clean(itemData?.videoId);
     const title = clean(
       item?.querySelector?.(".song-title, #song-title, yt-formatted-string.song-title")?.textContent
       || item?.querySelector?.(".title-column yt-formatted-string, yt-formatted-string.title")?.textContent
       || link?.getAttribute?.("title")
-      || link?.textContent,
+      || link?.textContent
+      || runsText(itemData?.title),
     );
     if (!trackID || !title) return null;
     const artist = clean(
       item?.querySelector?.(".byline, #byline, .secondary-flex-columns yt-formatted-string")?.textContent,
+    ) || runsText(itemData?.longBylineText) || runsText(itemData?.shortBylineText);
+    const thumbnails = itemData?.thumbnail?.thumbnails;
+    const artworkURL = clean(
+      item?.querySelector?.("img")?.currentSrc
+      || item?.querySelector?.("img")?.src
+      || (Array.isArray(thumbnails) ? thumbnails.at(-1)?.url : ""),
     );
-    const artworkURL = clean(item?.querySelector?.("img")?.currentSrc || item?.querySelector?.("img")?.src);
     return {
       trackID,
       title,
@@ -460,7 +469,14 @@
     if (items.length) {
       cachedQueueHrefs = elements.map((item) => clean(
         item?.querySelector?.('a[href*="watch?"][href*="v="]')?.getAttribute?.("href"),
-      ));
+      ) || (() => {
+        const itemData = item?.data?.playlistPanelVideoRenderer ?? item?.data;
+        const videoID = clean(itemData?.videoId);
+        const listID = new URL(location.href).searchParams.get("list");
+        return videoID
+          ? `/watch?v=${encodeURIComponent(videoID)}${listID ? `&list=${encodeURIComponent(listID)}` : ""}`
+          : "";
+      })());
       if (!items.some((item) => item.selected)) {
         const fallback = items.find((item) => item.trackID === currentTrackID);
         if (fallback) fallback.selected = true;
@@ -1343,7 +1359,9 @@
       const requestedTrackID = clean(message.queueTrackID);
       const queueIndex = Number.isSafeInteger(message.queueIndex) ? message.queueIndex : -1;
       const item = queueItemElements()[queueIndex];
-      const target = item?.querySelector?.('a[href*="watch?"][href*="v="]') ?? item;
+      const target = item?.querySelector?.('a[href*="watch?"][href*="v="]')
+        ?? item?.querySelector?.("ytmusic-play-button-renderer, button")
+        ?? item;
       const cachedItem = cachedQueue?.items?.[queueIndex];
       const cachedHref = cachedQueueHrefs[queueIndex];
       if (
