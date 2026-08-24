@@ -56,7 +56,7 @@ export const fallbackProtocolOptions: ReadonlyArray<{ value: DirectorProtocol; l
 
 export const settingsSections = [
   { id: "lyrics", label: "歌词源" },
-  { id: "director", label: "AI 导演" },
+  { id: "director", label: "AI 歌词匹配" },
   { id: "performance", label: "演出" },
   { id: "privacy", label: "隐私" },
 ] as const;
@@ -162,13 +162,13 @@ export const lyricsStatusCopy = (config: LyricsConfigView | undefined): string =
 export const directorStatusCopy = (config: DirectorConfigView | undefined): string => {
   if (config?.reason) return config.reason;
   return config?.configured
-    ? `已启用 ${config.primary?.model ?? "AI"}；模型输出会先通过本地导演合同`
-    : "未配置；旧服务令牌不会迁移为供应商 API Key，本地演出仍可使用";
+    ? `已启用 ${config.primary?.model ?? "AI"}；仅辅助清洗元数据与选择歌词候选`
+    : "未配置；仍会使用本地清洗、LRCLIB 与酷狗自动匹配";
 };
 
 export const directorTimingCopy = (config: DirectorConfigView | undefined): string => {
   const timing = config?.lastTiming;
-  if (!timing) return "尚无导演生成记录";
+  if (!timing) return "尚无 AI 辅助记录";
   if (timing.cache === "hit") return `最近一次：缓存命中 · ${timing.totalMs}ms`;
   const provider = timing.attempts.at(-1);
   const providerLabel = provider ? `${provider.protocol} / ${provider.model}` : "未发起模型请求";

@@ -141,7 +141,7 @@ const ConfigLoadNotice = ({
 
 const sectionDescription = (section: SettingsSection): string => {
   if (section === "lyrics") return "配置可选的私有歌词服务；公开只读来源始终保留。";
-  if (section === "director") return "连接模型提供商，验证账户，再选择用于整曲演出的模型。";
+  if (section === "director") return "连接可选模型，只在本地匹配不确定时辅助清洗标题、歌手与歌词候选。";
   if (section === "performance") return "调整歌词栏和全屏舞台的本机演出偏好。";
   return "查看 LyricStage 如何处理密钥、媒体和站点权限。";
 };
@@ -478,7 +478,7 @@ export const SettingsApp = () => {
   };
 
   const onClearDirector = async () => {
-    if (!window.confirm("删除 AI 导演配置和本机保存的提供商 Key？删除后仍会继续使用本地确定性演出。")) return;
+    if (!window.confirm("删除 AI 歌词匹配配置和本机保存的提供商 Key？删除后仍会继续使用本地清洗与公开歌词源。")) return;
     setBusy("director");
     setDirectorOperationError(undefined);
     try {
@@ -597,10 +597,10 @@ export const SettingsApp = () => {
           {section === "director" && (
             <>
             <form className="settings-card director-card" onSubmit={(event) => void onSaveDirector(event)}>
-              <ConfigLoadNotice state={directorLoad} noun="AI 导演配置" onRetry={() => void reloadDirectorConfiguration()} />
+              <ConfigLoadNotice state={directorLoad} noun="AI 歌词匹配配置" onRetry={() => void reloadDirectorConfiguration()} />
               <ProviderFields draft={primary} discovery={primaryDiscovery} hasApiKey={canReuseSavedProviderKey(director.primary, primary)} disabled={busy === "director" || directorUnavailable} onChange={(next) => { setPrimary(next); setDirectorDirty(true); setDirectorOperationError(undefined); }} onDiscoveryReset={() => { setPrimaryDiscovery(emptyDiscovery()); void releaseTransientDirectorPermissions(retainedPermissionEndpointsRef.current); }} onDiscover={() => void onDiscover("primary")} />
               <label className="settings-toggle fallback-toggle">
-                <span><strong>备用提供商</strong><small>主模型失败时自动切换，然后再回到本地确定性演出。</small></span>
+                <span><strong>备用提供商</strong><small>主模型失败时自动切换，然后回到本地清洗与公开歌词源。</small></span>
                 <input data-director-fallback-enabled="" type="checkbox" checked={fallbackEnabled} disabled={busy === "director" || directorUnavailable} onChange={(event) => {
                   setFallbackEnabled(event.target.checked);
                   setDirectorDirty(true);
@@ -611,7 +611,7 @@ export const SettingsApp = () => {
               {fallbackEnabled && <ProviderFields draft={fallback} discovery={fallbackDiscovery} hasApiKey={canReuseSavedProviderKey(director.fallback, fallback)} fallback disabled={busy === "director" || directorUnavailable} onChange={(next) => { setFallback(next); setDirectorDirty(true); setDirectorOperationError(undefined); }} onDiscoveryReset={() => { setFallbackDiscovery(emptyDiscovery()); void releaseTransientDirectorPermissions(retainedPermissionEndpointsRef.current); }} onDiscover={() => void onDiscover("fallback")} />}
               {directorDirty && directorValidation && <p className="validation-message" role="status">{directorValidation}</p>}
               {directorOperationError && <p className="operation-error" role="alert">{directorOperationError}</p>}
-              <div className="privacy-banner"><span aria-hidden="true">i</span><p>请求直接发往所选 API。Key 只保存在本机，模型列表与导演计划都不会包含 Key。</p></div>
+              <div className="privacy-banner"><span aria-hidden="true">i</span><p>请求直接发往所选 API。Key 只保存在本机；只发送歌曲元数据与候选摘要，不发送歌词正文、时间轴或音频。</p></div>
               <footer className="settings-card-footer">
                 <div className="settings-status-stack"><small className="settings-status" data-director-config-status="">{directorDirty ? "有未保存修改" : directorStatusCopy(director)}</small><small className="settings-status" data-director-last-timing="">{directorTimingCopy(director)}</small></div>
                 <div className="settings-actions"><button type="button" className="danger" data-clear-director-config="" disabled={busy === "director" || directorUnavailable || !director.configured} onClick={() => void onClearDirector()}>删除配置与 Key</button>{directorDirty && <button type="button" disabled={busy === "director"} onClick={resetDirectorDraft}>取消修改</button>}<button className="primary" type="submit" data-save-director-config="" disabled={busy === "director" || directorUnavailable || !directorDirty || Boolean(directorValidation)}>{busy === "director" ? "正在保存…" : "保存并启用"}</button></div>
@@ -674,12 +674,6 @@ export const SettingsApp = () => {
                 <label className="settings-switch"><span><strong>个人 VJ 模式</strong><small>增强全屏环境运动；系统“减少动态效果”仍拥有最终优先级。</small></span><input type="checkbox" checked={preferences.vjMode} disabled={busy === "performance"} onChange={(event) => void onTogglePreference({ vjMode: event.target.checked })} /></label>
               </div>
               <small className="inline-status" aria-live="polite">{preferenceStatus}</small>
-              <details className="developer-disclosure embedded-disclosure">
-                <summary className="developer-summary"><span><strong>开发者与诊断</strong><small>实验性导演运行模式</small></span></summary>
-                <div className="developer-body">
-                  <label className="settings-switch"><span><strong>AI 导演增强</strong><small>本地导演始终生成多场景、逐句表演与招牌编舞；AI 仅改进语义选择。Off 保留完整本地演出，Shadow 只缓存 AI，On 渲染 AI 增强。</small></span><select data-rolling-director-v1="" value={preferences.rollingDirectorV1} disabled={busy === "performance"} onChange={(event) => void onTogglePreference({ rollingDirectorV1: event.target.value as ExtensionPreferencesV0["rollingDirectorV1"] })}><option value="off">Off · local first</option><option value="shadow">Shadow · audit only</option><option value="on">On · AI enhanced</option></select></label>
-                </div>
-              </details>
             </section>
           )}
 
@@ -690,7 +684,7 @@ export const SettingsApp = () => {
                 <article><span>1</span><div><strong>密钥留在本机</strong><p>LDDC Bearer 与供应商 API Key 只写入 <code>chrome.storage.local</code>。</p></div></article>
                 <article><span>2</span><div><strong>不接管媒体</strong><p>扩展不读取 Cookie、不下载媒体、不持久化 PCM，也不上传原始音频。</p></div></article>
                 <article><span>3</span><div><strong>按需授权域名</strong><p>连接提供商时才请求精确 origin，不会预先取得所有站点访问权。</p></div></article>
-                <article><span>4</span><div><strong>AI 永远可选</strong><p>未配置或请求失败时，本地导演仍会编译完整确定性演出。</p></div></article>
+                <article><span>4</span><div><strong>AI 永远可选</strong><p>AI 只辅助清洗元数据和选择候选；未配置或失败时，本地匹配与播放器界面完全可用。</p></div></article>
               </div>
             </section>
           )}
