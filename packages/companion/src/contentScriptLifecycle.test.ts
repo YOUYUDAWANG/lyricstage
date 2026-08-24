@@ -158,6 +158,8 @@ describe("YouTube Music companion isolated content script lifecycle (real DOM sh
   const createEnvironment = (overrides: {
     rendererPageType?: string;
     lyricsSelected?: boolean;
+    lyricsDisabled?: boolean;
+    omitLyricsTab?: boolean;
     invalidateRuntime?: boolean;
     contentUIMarker?: boolean;
     playerBarTimeText?: string;
@@ -255,6 +257,7 @@ describe("YouTube Music companion isolated content script lifecycle (real DOM sh
     const nativeLyricsTab = new FakeElement();
     nativeLyricsTab.setAttribute("role", "tab");
     nativeLyricsTab.textContent = "歌詞";
+    if (overrides.lyricsDisabled) nativeLyricsTab.setAttribute("aria-disabled", "true");
 
     if (overrides.lyricsSelected ?? true) {
       nativeLyricsTab.setAttribute("aria-selected", "true");
@@ -269,7 +272,7 @@ describe("YouTube Music companion isolated content script lifecycle (real DOM sh
     nativeRelatedTab.setAttribute("aria-selected", overrides.lyricsSelected ?? true ? "false" : "true");
     nativeRelatedTab.toggleAttribute("selected", !(overrides.lyricsSelected ?? true));
 
-    tabOrder = [nativeLyricsTab, nativeRelatedTab];
+    tabOrder = overrides.omitLyricsTab ? [nativeRelatedTab] : [nativeLyricsTab, nativeRelatedTab];
     tabList.append(...tabOrder);
     tabList.querySelectorAll.mockImplementation((selector: string) => {
       if (selector.includes("tab")) return tabOrder;
@@ -279,6 +282,11 @@ describe("YouTube Music companion isolated content script lifecycle (real DOM sh
     sidePanel.append(tabList, currentRenderer);
     sidePanel.querySelector.mockImplementation((selector: string) => {
       if (selector.includes("tp-yt-paper-tabs")) return tabList;
+      if (selector.includes("data-lyricstage-owned-lyrics-renderer")) {
+        return sidePanel.children.find((child) =>
+          child.getAttribute("data-lyricstage-owned-lyrics-renderer") === "true"
+        ) ?? null;
+      }
       if (selector.includes("ytmusic-tab-renderer")) return currentRenderer;
       return null;
     });
@@ -567,6 +575,36 @@ describe("YouTube Music companion isolated content script lifecycle (real DOM sh
     host?.emit(readyEvent ?? "");
     return host;
   };
+
+  it("creates and mounts into an owned lyrics surface when the native Lyrics tab is disabled", () => {
+    const env = createEnvironment({ lyricsDisabled: true, lyricsSelected: false });
+    vm.runInContext(contentScriptSource, env.context);
+    const ownedTab = env.createdElements.find((element) =>
+      element.getAttribute("data-lyricstage-owned-lyrics-tab") === "true"
+    );
+    const ownedRenderer = env.createdElements.find((element) =>
+      element.getAttribute("data-lyricstage-owned-lyrics-renderer") === "true"
+    );
+    expect(ownedTab?.textContent).toBe("歌詞");
+    expect(ownedRenderer?.hidden).toBe(true);
+
+    ownedTab?.emit("click");
+    env.clock.advance(50);
+    expect(ownedRenderer?.hidden).toBe(false);
+    expect(env.currentHost()?.parentElement).toBe(ownedRenderer);
+  });
+
+  it("creates a localized lyrics surface when YouTube Music omits the native tab", () => {
+    const env = createEnvironment({ omitLyricsTab: true, lyricsSelected: false, rendererPageType: "MUSIC_PAGE_TYPE_TRACK_RELATED" });
+    vm.runInContext(contentScriptSource, env.context);
+    const ownedTab = env.createdElements.find((element) =>
+      element.getAttribute("data-lyricstage-owned-lyrics-tab") === "true"
+    );
+    expect(ownedTab?.textContent).toBe("Lyrics");
+    ownedTab?.emit("click");
+    env.clock.advance(50);
+    expect(env.currentHost()?.parentElement?.getAttribute("data-lyricstage-owned-lyrics-renderer")).toBe("true");
+  });
 
   const makeError = (
     env: ReturnType<typeof createEnvironment>,
@@ -1791,7 +1829,13 @@ describe("YouTube Music companion isolated content script lifecycle (real DOM sh
     expect(manifestSource.includes("page-bridge.js")).toBe(false);
     expect(manifestSource.includes('"world": "MAIN"')).toBe(false);
     expect(manifestSource.includes('"world":"MAIN"')).toBe(false);
-    expect(manifest.content_scripts?.[0]?.js).toEqual(["content-ui-loader.js", "content.js"]);
+    expect(manifest.content_scripts).toMatchObject([
+      { css: ["ytm-shell.css"], js: ["theme-init.js"], run_at: "document_start" },
+      { js: ["content-ui-loader.js", "content.js"], run_at: "document_idle" },
+    ]);
+    expect(contentScriptSource).toContain('const OWNED_LYRICS_TAB_ATTR = "data-lyricstage-owned-lyrics-tab"');
+    expect(contentScriptSource).toContain('const OWNED_LYRICS_RENDERER_ATTR = "data-lyricstage-owned-lyrics-renderer"');
+    expect(contentScriptSource).toContain("ensureOwnedLyricsSurface(sidePanel, tabList)");
     expect(manifest.web_accessible_resources).toEqual([{
       resources: ["assets/content-ui.js", "assets/content-*.js", "assets/content-*.css"],
       matches: ["https://music.youtube.com/*"],

@@ -1,0 +1,280 @@
+:root[data-lyricstage-shell="apple"] {
+  --ls-shell-bg: #0f0f10;
+  --ls-shell-surface: rgba(38, 38, 41, 0.72);
+  --ls-shell-surface-strong: rgba(48, 48, 52, 0.9);
+  --ls-shell-separator: rgba(255, 255, 255, 0.1);
+  --ls-shell-label: rgba(255, 255, 255, 0.94);
+  --ls-shell-secondary: rgba(255, 255, 255, 0.6);
+  --ls-shell-accent: #fa2d48;
+  --ls-shell-ease-out: cubic-bezier(0.23, 1, 0.32, 1);
+  --ls-shell-ease-in-out: cubic-bezier(0.77, 0, 0.175, 1);
+  --ls-shell-sidebar-width: 244px;
+  color-scheme: dark;
+  background: var(--ls-shell-bg);
+}
+
+:root[data-lyricstage-shell="apple"] body,
+:root[data-lyricstage-shell="apple"] ytmusic-app {
+  color: var(--ls-shell-label) !important;
+  background: var(--ls-shell-bg) !important;
+  font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Helvetica Neue", sans-serif !important;
+  font-optical-sizing: auto;
+}
+
+:root[data-lyricstage-shell="apple"] ytmusic-nav-bar,
+:root[data-lyricstage-shell="apple"] ytmusic-guide-renderer,
+:root[data-lyricstage-shell="apple"] ytmusic-player-bar,
+:root[data-lyricstage-shell="apple"] ytmusic-player-page#player-page #side-panel {
+  border: 1px solid var(--ls-shell-separator) !important;
+  background: var(--ls-shell-surface) !important;
+  box-shadow: 0 12px 34px rgba(0, 0, 0, 0.26) !important;
+  backdrop-filter: saturate(1.8) blur(18px);
+  -webkit-backdrop-filter: saturate(1.8) blur(18px);
+}
+
+:root[data-lyricstage-shell="apple"] ytmusic-nav-bar {
+  top: 8px !important;
+  right: 8px !important;
+  left: calc(var(--ls-shell-sidebar-width) + 16px) !important;
+  width: auto !important;
+  height: 56px !important;
+  min-height: 56px !important;
+  border-radius: 18px !important;
+}
+
+:root[data-lyricstage-shell="apple"] ytmusic-guide-renderer {
+  position: fixed !important;
+  top: 8px !important;
+  bottom: 80px !important;
+  left: 8px !important;
+  width: var(--ls-shell-sidebar-width) !important;
+  height: auto !important;
+  transform: none !important;
+  border-radius: 20px !important;
+  overflow: hidden !important;
+}
+
+:root[data-lyricstage-shell="apple"] tp-yt-app-drawer#guide,
+:root[data-lyricstage-shell="apple"] tp-yt-app-drawer#guide #contentContainer,
+:root[data-lyricstage-shell="apple"] tp-yt-app-drawer#guide #guide-wrapper,
+:root[data-lyricstage-shell="apple"] tp-yt-app-drawer#guide #guide-content {
+  width: calc(var(--ls-shell-sidebar-width) + 16px) !important;
+  transform: none !important;
+}
+
+:root[data-lyricstage-shell="apple"] ytmusic-guide-renderer #guide-content,
+:root[data-lyricstage-shell="apple"] ytmusic-guide-renderer #guide-wrapper {
+  width: 100% !important;
+  background: transparent !important;
+}
+
+:root[data-lyricstage-shell="apple"] ytmusic-app-layout > #content {
+  margin-left: calc(var(--ls-shell-sidebar-width) + 8px) !important;
+  padding-top: 8px !important;
+}
+
+:root[data-lyricstage-shell="apple"] ytmusic-player-bar {
+  right: 12px !important;
+  bottom: 8px !important;
+  left: 12px !important;
+  width: auto !important;
+  height: 56px !important;
+  min-height: 56px !important;
+  border-radius: 999px !important;
+  overflow: hidden !important;
+}
+
+:root[data-lyricstage-shell="apple"] ytmusic-player-bar #left-controls,
+:root[data-lyricstage-shell="apple"] ytmusic-player-bar #middle-controls,
+:root[data-lyricstage-shell="apple"] ytmusic-player-bar #right-controls {
+  height: 56px !important;
+}
+
+:root[data-lyricstage-shell="apple"] ytmusic-player-bar .thumbnail-image-wrapper,
+:root[data-lyricstage-shell="apple"] ytmusic-player-bar img {
+  border-radius: 8px !important;
+}
+
+:root[data-lyricstage-shell="apple"] ytmusic-player-page#player-page {
+  right: 8px !important;
+  left: calc(var(--ls-shell-sidebar-width) + 16px) !important;
+  width: auto !important;
+  padding: 76px 16px 76px !important;
+  background: transparent !important;
+}
+
+:root[data-lyricstage-shell="apple"] ytmusic-player-page#player-page #player,
+:root[data-lyricstage-shell="apple"] ytmusic-player-page#player-page #song-image,
+:root[data-lyricstage-shell="apple"] ytmusic-player-page#player-page video {
+  border-radius: 18px !important;
+  overflow: hidden !important;
+}
+
+:root[data-lyricstage-shell="apple"] ytmusic-player-page#player-page #side-panel {
+  position: relative !important;
+  width: 360px !important;
+  min-width: 340px !important;
+  flex: 0 0 360px !important;
+  border-radius: 20px !important;
+  overflow: hidden !important;
+}
+
+:root[data-lyricstage-shell="apple"] ytmusic-player-page#player-page tp-yt-paper-tabs {
+  min-height: 48px !important;
+  border-bottom: 1px solid var(--ls-shell-separator) !important;
+}
+
+:root[data-lyricstage-shell="apple"] [data-lyricstage-native-lyrics-hidden="true"] {
+  visibility: hidden !important;
+  pointer-events: none !important;
+}
+
+:root[data-lyricstage-shell="apple"] [data-lyricstage-owned-lyrics-tab="true"] {
+  position: absolute;
+  z-index: 2;
+  top: 0;
+  left: var(--lyricstage-owned-tab-left, 0);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  align-self: stretch;
+  width: var(--lyricstage-owned-tab-width, 72px);
+  min-width: 0;
+  border: 0;
+  border-radius: 0;
+  padding: 0 16px;
+  color: var(--ls-shell-secondary);
+  background: transparent;
+  font: inherit;
+  font-size: 14px;
+  font-weight: 580;
+  cursor: pointer;
+  transition: color 140ms ease, opacity 140ms ease;
+}
+
+:root[data-lyricstage-shell="apple"] [data-lyricstage-owned-lyrics-tab="true"]::after {
+  content: "";
+  position: absolute;
+  right: 16px;
+  bottom: 0;
+  left: 16px;
+  height: 2px;
+  border-radius: 2px;
+  background: currentColor;
+  opacity: 0;
+  transform: scaleX(0.82);
+  transition: opacity 160ms var(--ls-shell-ease-out), transform 160ms var(--ls-shell-ease-out);
+}
+
+:root[data-lyricstage-shell="apple"] [data-lyricstage-owned-lyrics-tab="true"][aria-selected="true"] {
+  color: var(--ls-shell-label);
+}
+
+:root[data-lyricstage-shell="apple"] [data-lyricstage-owned-lyrics-tab="true"][aria-selected="true"]::after {
+  opacity: 1;
+  transform: scaleX(1);
+}
+
+:root[data-lyricstage-shell="apple"] [data-lyricstage-owned-lyrics-tab="true"]:active {
+  opacity: 0.7;
+}
+
+:root[data-lyricstage-shell="apple"] [data-lyricstage-owned-lyrics-renderer="true"] {
+  position: absolute;
+  inset: 49px 0 0;
+  min-width: 0;
+  min-height: 0;
+  flex-direction: column;
+  overflow: hidden;
+  background: transparent;
+}
+
+:root[data-lyricstage-shell="apple"] #side-panel[data-lyricstage-owned-lyrics-active="true"] > ytmusic-tab-renderer {
+  visibility: hidden !important;
+}
+
+:root[data-lyricstage-shell="apple"] ytmusic-responsive-list-item-renderer,
+:root[data-lyricstage-shell="apple"] ytmusic-two-row-item-renderer,
+:root[data-lyricstage-shell="apple"] ytmusic-grid-renderer ytmusic-item-section-renderer {
+  border-radius: 12px;
+}
+
+:root[data-lyricstage-shell="apple"] yt-button-shape button,
+:root[data-lyricstage-shell="apple"] tp-yt-paper-icon-button,
+:root[data-lyricstage-shell="apple"] ytmusic-menu-renderer button {
+  transition: opacity 120ms ease, transform 120ms var(--ls-shell-ease-out) !important;
+}
+
+@media (hover: hover) and (pointer: fine) {
+  :root[data-lyricstage-shell="apple"] [data-lyricstage-owned-lyrics-tab="true"]:hover {
+    color: var(--ls-shell-label);
+  }
+}
+
+@media (max-width: 1099px) {
+  :root[data-lyricstage-shell="apple"] { --ls-shell-sidebar-width: 72px; }
+  :root[data-lyricstage-shell="apple"] ytmusic-guide-renderer { border-radius: 18px !important; }
+  :root[data-lyricstage-shell="apple"] ytmusic-player-page#player-page #side-panel {
+    width: min(38vw, 340px) !important;
+    min-width: 280px !important;
+    flex-basis: min(38vw, 340px) !important;
+  }
+}
+
+@media (max-width: 819px) {
+  :root[data-lyricstage-shell="apple"] ytmusic-nav-bar {
+    top: 0 !important;
+    right: 0 !important;
+    left: 0 !important;
+    height: 64px !important;
+    border-width: 0 0 1px !important;
+    border-radius: 0 !important;
+  }
+  :root[data-lyricstage-shell="apple"] ytmusic-guide-renderer { display: none !important; }
+  :root[data-lyricstage-shell="apple"] tp-yt-app-drawer#guide { display: none !important; }
+  :root[data-lyricstage-shell="apple"] ytmusic-app-layout > #content {
+    margin-left: 0 !important;
+    padding-top: 0 !important;
+  }
+  :root[data-lyricstage-shell="apple"] ytmusic-player-bar {
+    right: 6px !important;
+    bottom: 6px !important;
+    left: 6px !important;
+  }
+  :root[data-lyricstage-shell="apple"] ytmusic-player-page#player-page {
+    right: 0 !important;
+    left: 0 !important;
+    width: 100% !important;
+    padding: 68px 8px 70px !important;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  :root[data-lyricstage-shell="apple"] *,
+  :root[data-lyricstage-shell="apple"] *::before,
+  :root[data-lyricstage-shell="apple"] *::after {
+    scroll-behavior: auto !important;
+    animation-duration: 1ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 1ms !important;
+  }
+}
+
+@media (prefers-reduced-transparency: reduce) {
+  :root[data-lyricstage-shell="apple"] ytmusic-nav-bar,
+  :root[data-lyricstage-shell="apple"] ytmusic-guide-renderer,
+  :root[data-lyricstage-shell="apple"] ytmusic-player-bar,
+  :root[data-lyricstage-shell="apple"] ytmusic-player-page#player-page #side-panel {
+    background: #242427 !important;
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
+  }
+}
+
+@media (prefers-contrast: more) {
+  :root[data-lyricstage-shell="apple"] {
+    --ls-shell-surface: rgba(24, 24, 26, 0.98);
+    --ls-shell-separator: rgba(255, 255, 255, 0.34);
+    --ls-shell-secondary: rgba(255, 255, 255, 0.78);
+  }
+}

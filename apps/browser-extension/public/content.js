@@ -2,6 +2,9 @@
   const protocolVersion = "youtube-music-companion-v0";
   const LYRICS_PAGE_TYPE = "MUSIC_PAGE_TYPE_TRACK_LYRICS";
   const CONFIRMED_TAB_ATTR = "data-lyricstage-confirmed-lyrics-tab";
+  const OWNED_LYRICS_TAB_ATTR = "data-lyricstage-owned-lyrics-tab";
+  const OWNED_LYRICS_RENDERER_ATTR = "data-lyricstage-owned-lyrics-renderer";
+  const OWNED_LYRICS_ACTIVE_ATTR = "data-lyricstage-owned-lyrics-active";
   const CONTENT_SCRIPT_STOP_EVENT = "lyricstage-content-script-stop-v2";
   const CONTENT_SCRIPT_MARKER_ATTR = "data-lyricstage-content-script";
   const CONTENT_SCRIPT_MARKER = "isolated-v3";
@@ -78,6 +81,9 @@
   let lastSnapshotSentAtUnixMs = Number.NEGATIVE_INFINITY;
   const retiredTrackIDs = new Set();
   const savedNativeRenderers = new Map();
+  const observedOwnedSurfaceTabs = new WeakSet();
+  let ownedLyricsTab = null;
+  let ownedLyricsRenderer = null;
 
   const clean = (value) => (typeof value === "string" ? value.trim() : "");
 
@@ -904,8 +910,146 @@
     }
   };
 
+  const lyricsTabLabel = () => {
+    const language = clean(document.documentElement?.lang || navigator.language).toLowerCase();
+    if (language.startsWith("ja")) return "歌詞";
+    if (language.startsWith("zh")) return "歌词";
+    return "Lyrics";
+  };
+
+  const looksLikeLyricsTab = (tab) => {
+    const label = clean(
+      tab?.getAttribute?.("aria-label")
+      || tab?.querySelector?.("yt-formatted-string")?.textContent
+      || tab?.textContent,
+    ).toLowerCase();
+    return label === "lyrics" || label === "lyric" || label === "歌词" || label === "歌詞";
+  };
+
+  const isTabDisabled = (tab) => Boolean(
+    tab?.disabled === true
+    || tab?.getAttribute?.("aria-disabled") === "true"
+    || tab?.hasAttribute?.("disabled")
+  );
+
+  const deactivateOwnedLyricsSurface = (sidePanel) => {
+    sidePanel?.removeAttribute?.(OWNED_LYRICS_ACTIVE_ATTR);
+    if (ownedLyricsTab?.isConnected) {
+      ownedLyricsTab.setAttribute("aria-selected", "false");
+      ownedLyricsTab.removeAttribute("selected");
+    }
+    if (ownedLyricsRenderer?.isConnected) {
+      ownedLyricsRenderer.hidden = true;
+      ownedLyricsRenderer.style.display = "none";
+    }
+  };
+
+  const removeOwnedLyricsSurface = (sidePanel, nativeLyricsTab) => {
+    const wasActive = sidePanel?.getAttribute?.(OWNED_LYRICS_ACTIVE_ATTR) === "true";
+    deactivateOwnedLyricsSurface(sidePanel);
+    ownedLyricsTab?.remove?.();
+    ownedLyricsRenderer?.remove?.();
+    ownedLyricsTab = null;
+    ownedLyricsRenderer = null;
+    nativeLyricsTab?.removeAttribute?.("data-lyricstage-native-lyrics-hidden");
+    if (wasActive && nativeLyricsTab && !isTabDisabled(nativeLyricsTab)) nativeLyricsTab.click?.();
+  };
+
+  const activateOwnedLyricsSurface = (sidePanel, tabList) => {
+    if (!ownedLyricsTab?.isConnected || !ownedLyricsRenderer?.isConnected) return;
+    for (const tab of Array.from(tabList?.querySelectorAll?.('[role="tab"], tp-yt-paper-tab') ?? [])) {
+      if (tab === ownedLyricsTab) continue;
+      tab.setAttribute?.("aria-selected", "false");
+      tab.removeAttribute?.("selected");
+    }
+    sidePanel?.setAttribute?.(OWNED_LYRICS_ACTIVE_ATTR, "true");
+    ownedLyricsTab.setAttribute("aria-selected", "true");
+    ownedLyricsTab.setAttribute("selected", "");
+    ownedLyricsTab.setAttribute(CONFIRMED_TAB_ATTR, "true");
+    ownedLyricsRenderer.hidden = false;
+    ownedLyricsRenderer.style.display = "flex";
+    lastInteractedTab = ownedLyricsTab;
+    resetStageMountRecovery();
+    queueMutationReconcile({ stage: true });
+  };
+
+  const ensureOwnedLyricsSurface = (sidePanel, tabList) => {
+    if (!sidePanel || !tabList) return;
+    const tabs = Array.from(tabList.querySelectorAll?.('[role="tab"], tp-yt-paper-tab') ?? []);
+    const nativeLyricsTab = tabs.find((tab) => !tab.hasAttribute?.(OWNED_LYRICS_TAB_ATTR) && looksLikeLyricsTab(tab));
+    if (nativeLyricsTab && !isTabDisabled(nativeLyricsTab)) {
+      removeOwnedLyricsSurface(sidePanel, nativeLyricsTab);
+      return;
+    }
+
+    nativeLyricsTab?.setAttribute?.("data-lyricstage-native-lyrics-hidden", "true");
+    tabs.filter((tab) => !tab.hasAttribute?.(OWNED_LYRICS_TAB_ATTR)).forEach((tab, index) => {
+      if (tab?.style) tab.style.order = String((index + 1) * 10);
+    });
+    if (!ownedLyricsTab?.isConnected) {
+      const ownedOrder = nativeLyricsTab
+        ? (tabs.indexOf(nativeLyricsTab) + 1) * 10
+        : Math.min(20, (tabs.length + 1) * 10);
+      const tab = document.createElement("button");
+      tab.type = "button";
+      tab.setAttribute("role", "tab");
+      tab.setAttribute(OWNED_LYRICS_TAB_ATTR, "true");
+      tab.setAttribute("aria-selected", "false");
+      tab.textContent = nativeLyricsTab?.textContent?.trim?.() || lyricsTabLabel();
+      tab.style.order = String(Math.max(10, ownedOrder));
+      tab.addEventListener("click", () => activateOwnedLyricsSurface(sidePanel, tabList));
+      const tabParent = nativeLyricsTab?.parentElement || tabList;
+      if (nativeLyricsTab && typeof tabParent?.insertBefore === "function") {
+        tabParent.insertBefore(tab, nativeLyricsTab.nextSibling);
+      } else {
+        tabList.append?.(tab);
+      }
+      ownedLyricsTab = tab;
+    }
+    if (ownedLyricsTab?.isConnected) {
+      const anchorTab = nativeLyricsTab || tabs[0];
+      const ownedLeft = nativeLyricsTab
+        ? nativeLyricsTab.offsetLeft || 0
+        : (anchorTab?.offsetLeft || 0) + (anchorTab?.offsetWidth || 0);
+      const ownedWidth = nativeLyricsTab?.offsetWidth || 72;
+      ownedLyricsTab.style.setProperty?.("--lyricstage-owned-tab-left", `${ownedLeft}px`);
+      ownedLyricsTab.style.setProperty?.("--lyricstage-owned-tab-width", `${ownedWidth}px`);
+      ownedLyricsTab.style.order = String(nativeLyricsTab
+        ? Math.max(10, (tabs.indexOf(nativeLyricsTab) + 1) * 10)
+        : 20);
+    }
+
+    if (!ownedLyricsRenderer?.isConnected) {
+      const renderer = document.createElement("section");
+      renderer.setAttribute("role", "tabpanel");
+      renderer.setAttribute(OWNED_LYRICS_RENDERER_ATTR, "true");
+      renderer.setAttribute("aria-label", lyricsTabLabel());
+      renderer.hidden = true;
+      renderer.style.display = "none";
+      sidePanel.append?.(renderer);
+      ownedLyricsRenderer = renderer;
+    }
+
+    for (const tab of tabs) {
+      if (tab === ownedLyricsTab || observedOwnedSurfaceTabs.has(tab)) continue;
+      observedOwnedSurfaceTabs.add(tab);
+      tab.addEventListener?.("click", () => {
+        if (tab === ownedLyricsTab) return;
+        deactivateOwnedLyricsSurface(sidePanel);
+        releaseStageMount();
+      }, { capture: true });
+    }
+  };
+
   const getActiveRenderer = (sidePanel) => {
     if (!sidePanel) return null;
+    const ownedRenderer = sidePanel.querySelector?.(`[${OWNED_LYRICS_RENDERER_ATTR}="true"]`);
+    if (
+      ownedRenderer
+      && sidePanel.getAttribute?.(OWNED_LYRICS_ACTIVE_ATTR) === "true"
+      && !ownedRenderer.hidden
+      && ownedRenderer.style?.display !== "none"
+    ) return ownedRenderer;
     const renderers = Array.from(
       sidePanel.querySelectorAll?.("ytmusic-tab-renderer#tab-renderer, ytmusic-tab-renderer") ?? [],
     );
@@ -919,7 +1063,8 @@
 
   const isLyricsRenderer = (renderer) => {
     if (!renderer || !renderer.isConnected) return false;
-    return renderer.getAttribute?.("page-type") === LYRICS_PAGE_TYPE;
+    return renderer.getAttribute?.("page-type") === LYRICS_PAGE_TYPE
+      || renderer.getAttribute?.(OWNED_LYRICS_RENDERER_ATTR) === "true";
   };
 
   const clearStageReadyProbe = () => {
@@ -1055,6 +1200,11 @@
       // Extension context invalidated
     }
     releaseStageMount();
+    const stoppedSidePanel = document.querySelector("ytmusic-player-page#player-page #side-panel");
+    removeOwnedLyricsSurface(stoppedSidePanel, null);
+    for (const tab of Array.from(document.querySelectorAll?.('[data-lyricstage-native-lyrics-hidden]') ?? [])) {
+      tab.removeAttribute?.("data-lyricstage-native-lyrics-hidden");
+    }
     lastInteractedTab = null;
     stageMountState = "idle";
     stageMountFailure = "";
@@ -1080,6 +1230,7 @@
     const tabList =
       sidePanel?.querySelector?.('tp-yt-paper-tabs [role="tablist"], tp-yt-paper-tabs #tabsContent, tp-yt-paper-tabs') ||
       document.querySelector("tp-yt-paper-tabs");
+    ensureOwnedLyricsSurface(sidePanel, tabList);
     const activeRenderer = getActiveRenderer(sidePanel);
     observeTabInteractions(tabList);
     const selectedTab = getSelectedTab(tabList);
@@ -1272,6 +1423,8 @@
     if (!tabList) return null;
     const direct = tabList.querySelector?.(`[${CONFIRMED_TAB_ATTR}="true"]`);
     if (direct) return direct;
+    const owned = tabList.querySelector?.(`[${OWNED_LYRICS_TAB_ATTR}="true"]`);
+    if (owned) return owned;
     const tabs = Array.from(
       tabList.querySelectorAll?.('[role="tab"], tp-yt-paper-tab') ?? tabList.children ?? [],
     );

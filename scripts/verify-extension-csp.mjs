@@ -135,13 +135,25 @@ const settingsSource = settingsResources
   .map((resource) => readFileSync(join(extensionRoot, resource), "utf8"))
   .concat(settingsHTML)
   .join("\n");
-const contentScripts = manifest.content_scripts?.[0]?.js ?? [];
+const contentScriptEntry = (manifest.content_scripts ?? []).find((entry) =>
+  (entry.js ?? []).includes("content.js")
+);
+const contentScripts = contentScriptEntry?.js ?? [];
 if (
   contentScripts.length !== 2 ||
   contentScripts[0] !== "content-ui-loader.js" ||
   contentScripts[1] !== "content.js"
 ) {
   throw new Error("Extension must load the content UI module loader before content.js.");
+}
+const themeEntry = (manifest.content_scripts ?? []).find((entry) =>
+  (entry.js ?? []).includes("theme-init.js")
+);
+if (
+  themeEntry?.run_at !== "document_start"
+  || !(themeEntry.css ?? []).includes("ytm-shell.css")
+) {
+  throw new Error("Extension must initialize the optional Apple Music shell at document_start.");
 }
 const contentUILoaderPath = join(extensionRoot, "content-ui-loader.js");
 const contentUIPath = join(extensionRoot, "assets/content-ui.js");
@@ -198,7 +210,7 @@ if (!exposedContentModules) {
   throw new Error("Embedded Column ES modules are not narrowly exposed to YouTube Music.");
 }
 
-for (const filename of ["content-ui-loader.js", "content.js", "manifest.json"]) {
+for (const filename of ["theme-init.js", "ytm-shell.css", "content-ui-loader.js", "content.js", "manifest.json"]) {
   const source = readFileSync(join(publicRoot, filename));
   const built = readFileSync(join(extensionRoot, filename));
   if (!source.equals(built)) {

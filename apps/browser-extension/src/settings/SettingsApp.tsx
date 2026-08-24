@@ -40,6 +40,7 @@ import {
   type SettingsSection,
 } from "./settingsModel";
 import { directorReviewAggregateV1, type DirectorReviewStateV1 } from "./directorReviewModel";
+import { readYtmShellEnabled, saveYtmShellEnabled } from "./ytmShellPreference";
 
 interface ConnectionStatus {
   connected: boolean;
@@ -304,6 +305,7 @@ export const SettingsApp = () => {
   const [directorDirty, setDirectorDirty] = useState(false);
   const [preferences, setPreferences] = useState<ExtensionPreferencesV0>({ lightweight: false, vjMode: false, rollingDirectorV1: "off" });
   const [preferenceStatus, setPreferenceStatus] = useState("修改后立即保存在本机");
+  const [ytmShellEnabled, setYtmShellEnabled] = useState(true);
   const [busy, setBusy] = useState<"lyrics" | "director" | "performance" | undefined>();
   const available = runtimeAvailable();
   const retainedPermissionEndpointsRef = useRef<Array<string | undefined>>([]);
@@ -384,6 +386,7 @@ export const SettingsApp = () => {
     void reloadDirectorConfiguration();
     void loadDirectorCacheSummariesV1().then((next) => { if (!cancelled) setDirectorReview(next); });
     void readExtensionPreferences().then((next) => { if (!cancelled) setPreferences(next); });
+    void readYtmShellEnabled().then((next) => { if (!cancelled) setYtmShellEnabled(next); });
     void refreshConnection();
     const timer = window.setInterval(() => void refreshConnection(), 2000);
     return () => {
@@ -505,6 +508,22 @@ export const SettingsApp = () => {
       setPreferenceStatus("已保存");
     } catch {
       setPreferences(previous);
+      setPreferenceStatus("保存失败，已恢复原设置");
+    } finally {
+      setBusy(undefined);
+    }
+  };
+
+  const onToggleYtmShell = async (enabled: boolean) => {
+    const previous = ytmShellEnabled;
+    setYtmShellEnabled(enabled);
+    setBusy("performance");
+    setPreferenceStatus("正在保存…");
+    try {
+      await saveYtmShellEnabled(enabled);
+      setPreferenceStatus(enabled ? "已启用 Apple Music 风格" : "已恢复原生 YouTube Music");
+    } catch {
+      setYtmShellEnabled(previous);
       setPreferenceStatus("保存失败，已恢复原设置");
     } finally {
       setBusy(undefined);
@@ -670,6 +689,7 @@ export const SettingsApp = () => {
             <section className="settings-card">
               <div className="section-intro"><h2>演出偏好</h2><p>与 YouTube Music 歌词栏共用，并在修改后立即保存。</p></div>
               <div className="grouped-list">
+                <label className="settings-switch"><span><strong>Apple Music 风格</strong><small>默认启用；只改变 YouTube Music 的视觉外壳，不接管播放与媒体数据。</small></span><input data-ytm-shell-toggle="" type="checkbox" checked={ytmShellEnabled} disabled={busy === "performance"} onChange={(event) => void onToggleYtmShell(event.target.checked)} /></label>
                 <label className="settings-switch"><span><strong>轻量模式</strong><small>减少模糊和动态效果，适合低性能设备或安静阅读。</small></span><input type="checkbox" checked={preferences.lightweight} disabled={busy === "performance"} onChange={(event) => void onTogglePreference({ lightweight: event.target.checked })} /></label>
                 <label className="settings-switch"><span><strong>个人 VJ 模式</strong><small>增强全屏环境运动；系统“减少动态效果”仍拥有最终优先级。</small></span><input type="checkbox" checked={preferences.vjMode} disabled={busy === "performance"} onChange={(event) => void onTogglePreference({ vjMode: event.target.checked })} /></label>
               </div>

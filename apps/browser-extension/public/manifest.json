@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "LyricStage for YouTube Music",
-  "version": "0.4.25",
+  "version": "0.4.26",
   "description": "让 LyricStage 歌词舞台在 YouTube Music 内跟随歌曲和播放时间。",
   "minimum_chrome_version": "116",
   "permissions": ["storage", "activeTab", "tabCapture", "offscreen"],
@@ -30,6 +30,12 @@
     "open_in_tab": true
   },
   "content_scripts": [
+    {
+      "matches": ["https://music.youtube.com/*"],
+      "css": ["ytm-shell.css"],
+      "js": ["theme-init.js"],
+      "run_at": "document_start"
+    },
     {
       "matches": ["https://music.youtube.com/*"],
       "js": ["content-ui-loader.js", "content.js"],
