@@ -74,9 +74,7 @@ interface StageCanvasProps {
   onTransport?: (action: YouTubeMusicTransportActionV0) => void | Promise<void>;
   onLike?: (liked: boolean) => void | Promise<void>;
   onQueueSelect?: (trackID: string, queueIndex: number) => void | Promise<void>;
-  onVolume?: (volume?: number, muted?: boolean) => void | Promise<void>;
   onPlaybackMode?: (mode: "shuffle" | "repeat", value: boolean | "off" | "all" | "one") => void | Promise<void>;
-  onExit?: () => void;
 }
 
 const formatPlaybackTime = (timeMs: number): string => {
@@ -109,10 +107,9 @@ function TransportIcon({ kind }: { kind: "previous" | "next" | "play" | "pause" 
   return <svg viewBox="0 0 24 24" aria-hidden="true"><path d={path} /></svg>;
 }
 
-function PlayerActionIcon({ kind }: { kind: "like" | "queue" | "shuffle" | "repeat" | "volume" }) {
+function PlayerActionIcon({ kind }: { kind: "like" | "queue" | "shuffle" | "repeat" }) {
   if (kind === "shuffle") return <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M16 3h5v5h-2V6.4l-3.8 3.8-1.4-1.4L17.6 5H16V3ZM3 6h4.6l9.8 9.8H21v2h-4.4L6.8 8H3V6Zm7.8 6.6 1.4 1.4-5.4 5.4H3v-2h3l4.8-4.8ZM19 16.6l-2.2-2.2 1.4-1.4 1.8 1.8V13h2v5h-5v-2h2v.6Z" /></svg>;
   if (kind === "repeat") return <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 7h10V4l4 4-4 4V9H7a3 3 0 0 0-3 3H2a5 5 0 0 1 5-5Zm10 10H7v3l-4-4 4-4v3h10a3 3 0 0 0 3-3h2a5 5 0 0 1-5 5Z" /></svg>;
-  if (kind === "volume") return <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 9v6h4l5 4V5L8 9H4Zm11.5-.5a5 5 0 0 1 0 7l1.4 1.4a7 7 0 0 0 0-9.8l-1.4 1.4Z" /></svg>;
   return kind === "like" ? (
     <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 20.4 10.55 19.1C5.4 14.54 2 11.45 2 7.65 2 4.56 4.42 2.2 7.5 2.2c1.74 0 3.41.81 4.5 2.08A6.02 6.02 0 0 1 16.5 2.2C19.58 2.2 22 4.56 22 7.65c0 3.8-3.4 6.89-8.55 11.46L12 20.4Z" /></svg>
   ) : (
@@ -152,9 +149,7 @@ export function StageCanvas({
   onTransport,
   onLike,
   onQueueSelect,
-  onVolume,
   onPlaybackMode,
-  onExit,
 }: StageCanvasProps) {
   const entryDirectorPlan = localDirectorPlan;
   const hostRef = useRef<HTMLDivElement>(null);
@@ -558,12 +553,6 @@ export function StageCanvas({
       )}
       <div className="stage-world-motif" aria-hidden="true" />
       <PerformanceEnvironment ref={environmentRef} />
-      {onExit ? (
-        <button type="button" className="stage-exit-button" onClick={onExit} aria-label="退出全屏舞台">
-          <span aria-hidden="true">×</span>
-          <span>退出全屏</span>
-        </button>
-      ) : null}
       <div className="stage-now-playing-layout">
         <aside className="stage-now-playing-info" aria-label="正在播放">
           <div className="stage-artwork-stage">
@@ -694,15 +683,6 @@ export function StageCanvas({
                   <PlayerActionIcon kind="queue" />
                 </button>
               )}
-            </div>
-          )}
-          {controls?.volume && onVolume && (
-            <div className="stage-volume-group">
-              <button type="button" aria-label={playbackDetails?.muted ? "取消静音" : "静音"}
-                onClick={() => void onVolume(undefined, !playbackDetails?.muted)}><PlayerActionIcon kind="volume" /></button>
-              <input type="range" min={0} max={1} step={0.01}
-                value={playbackDetails?.volume ?? 1} aria-label="音量"
-                onChange={(event) => void onVolume(event.currentTarget.valueAsNumber, false)} />
             </div>
           )}
         </aside>

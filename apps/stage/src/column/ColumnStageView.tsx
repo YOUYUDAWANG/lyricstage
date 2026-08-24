@@ -16,7 +16,12 @@ import {
   type ColumnTool,
   type ColumnSurfaceState,
 } from "./columnModel";
-import { activeScrollKey, shouldScrollForActiveChange } from "./embeddedFullscreen";
+import {
+  activeScrollKey,
+  lyricScrollDurationMsV1,
+  lyricScrollProgressV1,
+  shouldScrollForActiveChange,
+} from "./embeddedFullscreen";
 import { alignTimedLineSegments, alternativeLyricsCandidates, wordProgressFromTiming } from "./timedLineText";
 import {
   clampLyricsOffsetMs,
@@ -131,6 +136,7 @@ export function ColumnStageView({
   const toolsMenuRef = useRef<HTMLDivElement>(null);
   const toolPanelRef = useRef<HTMLElement>(null);
   const lastActiveKeyRef = useRef<string>("");
+  const scrollAnimationRef = useRef<number | null>(null);
   const previousAutomaticStatusRef = useRef(automaticStatus);
   const enterFullscreenRef = useRef(onEnterFullscreen);
   enterFullscreenRef.current = onEnterFullscreen;
@@ -282,8 +288,32 @@ export function ColumnStageView({
       (activeRect.top - streamRect.top) -
       streamRect.height * 0.3 +
       activeRect.height / 2;
-    stream.scrollTo({ top: Math.max(0, target), behavior: lightweight ? "auto" : "smooth" });
+    const targetTop = Math.max(0, target);
+    if (scrollAnimationRef.current !== null) cancelAnimationFrame(scrollAnimationRef.current);
+    if (lightweight) {
+      stream.scrollTo({ top: targetTop, behavior: "auto" });
+      scrollAnimationRef.current = null;
+      return;
+    }
+    const startTop = stream.scrollTop;
+    const startedAt = performance.now();
+    const step = (now: number) => {
+      const elapsed = now - startedAt;
+      stream.scrollTop = startTop + (targetTop - startTop) * lyricScrollProgressV1(elapsed);
+      if (elapsed < lyricScrollDurationMsV1) scrollAnimationRef.current = requestAnimationFrame(step);
+      else scrollAnimationRef.current = null;
+    };
+    scrollAnimationRef.current = requestAnimationFrame(step);
+    return () => {
+      if (scrollAnimationRef.current !== null) cancelAnimationFrame(scrollAnimationRef.current);
+      scrollAnimationRef.current = null;
+    };
   }, [activeKey, frozen, lightweight]);
+
+  const interruptAutomaticScroll = () => {
+    if (scrollAnimationRef.current !== null) cancelAnimationFrame(scrollAnimationRef.current);
+    scrollAnimationRef.current = null;
+  };
 
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
@@ -510,7 +540,7 @@ export function ColumnStageView({
         </div>
       )}
 
-      <div className="column-stream" ref={streamRef}>
+      <div className="column-stream" ref={streamRef} onWheel={interruptAutomaticScroll} onPointerDown={interruptAutomaticScroll}>
         {showStream ? (
           lyrics.lines.map((line) => {
             const phase = linePhase(line, lyricTimeMs, activeIndices);

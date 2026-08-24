@@ -13,6 +13,7 @@ import {
   dissolveEnvelopeAtV1,
   fitAnchoredLineV1,
   lyricTransitionDurationMsV1,
+  readingStackTransitionDurationMsV1,
   readingCompositionForV1,
   readingContextLinesV1,
   readingStackStateAtV1,
@@ -308,7 +309,7 @@ describe("PreparedDirectedStageV1", () => {
     expect(composition.currentX).toBeCloseTo(viewport.width * 0.91);
   });
 
-  it("moves the reading stack along one stable leading axis and settles within 180ms", () => {
+  it("moves the reading stack along one stable leading axis with a calm 720ms handoff", () => {
     const lyrics = lyricFixtures.repeatedHook;
     const plan = compileLocalDirectorPlanV1(lyrics);
     const viewport = { width: 1920, height: 1080, rendererVersion: "test-reading-stack" };
@@ -316,16 +317,18 @@ describe("PreparedDirectedStageV1", () => {
     const current = stage.lines[1]!;
     const composition = readingCompositionForV1(current, viewport);
     const entering = readingStackStateAtV1(current, composition, current.fromMs, true, false);
-    const almostSettled = readingStackStateAtV1(current, composition, current.fromMs + 179, true, false);
-    const settled = readingStackStateAtV1(current, composition, current.fromMs + lyricTransitionDurationMsV1, true, false);
+    const early = readingStackStateAtV1(current, composition, current.fromMs + lyricTransitionDurationMsV1, true, false);
+    const almostSettled = readingStackStateAtV1(current, composition, current.fromMs + 719, true, false);
+    const settled = readingStackStateAtV1(current, composition, current.fromMs + readingStackTransitionDurationMsV1, true, false);
     const reduced = readingStackStateAtV1(current, composition, current.fromMs, true, true);
     expect(composition.previousX).toBe(composition.axisX);
     expect(composition.currentX).toBe(composition.axisX);
     expect(composition.nextX).toBe(composition.axisX);
     expect(entering.previousY).toBeCloseTo(composition.currentY);
     expect(entering.currentY).toBeCloseTo(composition.nextY);
-    expect(lyricTransitionDurationMsV1).toBe(180);
-    expect(entering.currentOpacity).toBeCloseTo(0.72);
+    expect(readingStackTransitionDurationMsV1).toBe(720);
+    expect(entering.currentOpacity).toBeCloseTo(0.74);
+    expect(early.currentY).toBeGreaterThan(composition.currentY);
     expect(almostSettled.currentOpacity).toBeLessThan(1);
     expect(settled.previousY).toBeCloseTo(composition.previousY);
     expect(settled.currentY).toBeCloseTo(composition.currentY);

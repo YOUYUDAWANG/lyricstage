@@ -21,6 +21,11 @@ import { drawDramaticScenesV1 } from "./drawDramatic";
 const clamp01 = (value: number): number => Math.min(1, Math.max(0, value));
 const easeOutCubic = (value: number): number => 1 - (1 - value) ** 3;
 export const lyricTransitionDurationMsV1 = 180;
+export const readingStackTransitionDurationMsV1 = 720;
+
+const easeInOutCubic = (value: number): number => value < 0.5
+  ? 4 * value ** 3
+  : 1 - ((-2 * value + 2) ** 3) / 2;
 
 const withAlpha = (hex: string, alpha: number): string => {
   if (/^#[\da-f]{6}$/i.test(hex)) {
@@ -682,19 +687,19 @@ export const readingStackStateAtV1 = (
   hasPrevious: boolean,
   reduceMotion: boolean,
 ): ReadingStackStateV1 => {
-  const raw = reduceMotion || !hasPrevious ? 1 : clamp01((timeMs - current.fromMs) / lyricTransitionDurationMsV1);
-  const progress = easeOutCubic(raw);
+  const raw = reduceMotion || !hasPrevious ? 1 : clamp01((timeMs - current.fromMs) / readingStackTransitionDurationMsV1);
+  const progress = easeInOutCubic(raw);
   const mix = (from: number, to: number) => from + (to - from) * progress;
   return {
     previousY: mix(composition.currentY, composition.previousY),
     currentY: mix(composition.nextY, composition.currentY),
     nextY: mix(composition.nextY + (composition.nextY - composition.currentY) * 0.22, composition.nextY),
-    previousScale: mix(1.02, 0.48),
-    currentScale: mix(0.96, 1.02),
-    nextScale: 0.54,
-    previousOpacity: mix(0.78, 0.23),
-    currentOpacity: mix(0.72, 1),
-    nextOpacity: mix(0.08, 0.35),
+    previousScale: mix(1, 0.82),
+    currentScale: mix(0.96, 1),
+    nextScale: 0.86,
+    previousOpacity: mix(0.82, 0.26),
+    currentOpacity: mix(0.74, 1),
+    nextOpacity: mix(0.16, 0.38),
   };
 };
 

@@ -32,3 +32,12 @@ export const shouldScrollForActiveChange = (
   nextKey: string,
   frozen: boolean,
 ): boolean => !frozen && nextKey !== "" && nextKey !== previousKey;
+
+export const lyricScrollDurationMsV1 = 720;
+
+export const lyricScrollProgressV1 = (elapsedMs: number): number => {
+  const progress = Math.min(1, Math.max(0, elapsedMs / lyricScrollDurationMsV1));
+  return progress < 0.5
+    ? 4 * progress ** 3
+    : 1 - ((-2 * progress + 2) ** 3) / 2;
+};

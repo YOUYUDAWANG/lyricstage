@@ -4,6 +4,8 @@ import {
   canEnterEmbeddedFullscreen,
   embeddedFullscreenSurface,
   fullscreenOwnershipConfirmed,
+  lyricScrollDurationMsV1,
+  lyricScrollProgressV1,
   shouldScrollForActiveChange,
 } from "./embeddedFullscreen";
 
@@ -33,5 +35,14 @@ describe("embeddedFullscreen gates", () => {
     expect(shouldScrollForActiveChange("1", "2", false)).toBe(true);
     expect(shouldScrollForActiveChange("1", "2", true)).toBe(false);
     expect(shouldScrollForActiveChange("", "2", false)).toBe(true);
+  });
+
+  it("uses a calm, monotonic and fully settled lyric handoff", () => {
+    expect(lyricScrollDurationMsV1).toBe(720);
+    expect(lyricScrollProgressV1(0)).toBe(0);
+    expect(lyricScrollProgressV1(180)).toBeGreaterThan(0);
+    expect(lyricScrollProgressV1(180)).toBeLessThan(0.1);
+    expect(lyricScrollProgressV1(360)).toBe(0.5);
+    expect(lyricScrollProgressV1(720)).toBe(1);
   });
 });

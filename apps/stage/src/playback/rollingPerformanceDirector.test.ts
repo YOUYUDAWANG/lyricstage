@@ -263,6 +263,8 @@ describe("rolling Performance Director", () => {
     expect(stageSource).toContain('data-shell-layout="apple-player"');
     expect(stageSource).not.toContain("queueRollingDirectorPlanV1");
     expect(stageSource).not.toContain("queueDirectorPlanV1");
+    expect(stageSource).not.toContain("stage-exit-button");
+    expect(stageSource).not.toContain("stage-volume-group");
     expect(stageSource).toContain("applyStageFrameDOMV1(stageFrame");
     expect(stageSource).not.toContain("setLayoutTransitionPhase");
     const appSource = readFileSync(new URL("../App.tsx", import.meta.url), "utf8");

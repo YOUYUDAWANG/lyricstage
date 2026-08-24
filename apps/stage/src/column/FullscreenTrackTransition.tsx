@@ -9,7 +9,6 @@ export interface FullscreenTrackTransitionProps {
   status: string;
   timeMs: number;
   durationMs: number;
-  onExit: () => void;
 }
 
 const progressPercent = (timeMs: number, durationMs: number): number => {
@@ -25,7 +24,6 @@ export const FullscreenTrackTransition = ({
   status,
   timeMs,
   durationMs,
-  onExit,
 }: FullscreenTrackTransitionProps) => {
   const coverInitial = Array.from(title.trim())[0] || "音";
   const candidates = useMemo(() => artworkCandidates(artworkURL), [artworkURL]);
@@ -82,11 +80,6 @@ export const FullscreenTrackTransition = ({
           <small>歌词准备完成后会在这里继续</small>
         </div>
       </div>
-      {active ? (
-        <button type="button" className="fullscreen-exit" onClick={onExit}>
-          退出全屏
-        </button>
-      ) : null}
     </div>
   );
 };

@@ -534,52 +534,6 @@ h1 {
   overflow: hidden;
 }
 
-.stage-exit-button {
-  position: absolute;
-  z-index: 7;
-  top: max(16px, env(safe-area-inset-top));
-  right: max(16px, env(safe-area-inset-right));
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  gap: 7px;
-  min-height: 42px;
-  border: 1px solid rgba(255, 255, 255, 0.34);
-  border-radius: 999px;
-  padding: 0 14px 0 11px;
-  color: rgba(255, 255, 255, 0.94);
-  background: rgba(8, 10, 14, 0.72);
-  box-shadow: 0 8px 28px rgba(0, 0, 0, 0.28);
-  backdrop-filter: blur(12px) saturate(1.08);
-  cursor: pointer;
-  font-size: 12px;
-  font-weight: 660;
-  letter-spacing: 0.01em;
-  line-height: 1;
-  transition:
-    transform 120ms cubic-bezier(0.23, 1, 0.32, 1),
-    border-color 160ms ease,
-    background-color 160ms ease;
-}
-
-.stage-exit-button > span:first-child {
-  font-size: 19px;
-  font-weight: 400;
-  line-height: 0.8;
-}
-
-.stage-exit-button:active {
-  transform: scale(0.97);
-}
-
-.stage-exit-button:focus-visible {
-  outline: 3px solid #ffffff;
-  outline-offset: 3px;
-  box-shadow:
-    0 0 0 2px rgba(0, 0, 0, 0.78),
-    0 8px 28px rgba(0, 0, 0, 0.28);
-}
-
 .fullscreen-interaction-notice {
   position: absolute;
   z-index: 8;
@@ -1454,10 +1408,6 @@ h1 {
     margin-top: 0;
   }
 
-  .stage-canvas-host:has(> .stage-exit-button) .stage-track-meta {
-    padding-right: 48px;
-  }
-
   .stage-canvas-host[data-presentation][data-director-source] .stage-progress-group {
     grid-area: progress;
     width: 100%;
@@ -1488,18 +1438,6 @@ h1 {
   .stage-time-row { display: none; }
   .stage-transport { gap: 4px; }
 
-  .stage-exit-button {
-    top: max(10px, env(safe-area-inset-top));
-    right: max(10px, env(safe-area-inset-right));
-    width: 40px;
-    min-height: 40px;
-    padding: 0;
-  }
-
-  .stage-exit-button > span:last-child {
-    display: none;
-  }
-
   .fullscreen-interaction-notice {
     right: max(12px, env(safe-area-inset-right));
     bottom: max(12px, env(safe-area-inset-bottom));
@@ -1510,11 +1448,6 @@ h1 {
 @media (hover: hover) and (pointer: fine) {
   .lyrics-candidate-list button:hover {
     border-color: #6ce5ff;
-  }
-
-  .stage-exit-button:hover {
-    border-color: rgba(255, 255, 255, 0.58);
-    background: rgba(18, 20, 26, 0.82);
   }
 
   .stage-progress:hover::-webkit-slider-thumb {
@@ -1705,13 +1638,9 @@ h1 {
     transition: none;
   }
 
-  .stage-exit-button {
-    transition: none;
-  }
 }
 
 @media (prefers-reduced-transparency: reduce) {
-  .stage-exit-button,
   .fullscreen-interaction-notice {
     background: #111319;
     backdrop-filter: none;
@@ -1719,7 +1648,6 @@ h1 {
 }
 
 @media (prefers-contrast: more) {
-  .stage-exit-button,
   .fullscreen-interaction-notice {
     border-color: #ffffff;
     color: #ffffff;
@@ -1834,25 +1762,6 @@ h1 {
 .stage-canvas-host[data-shell-layout="apple-player"] .stage-transport button:active {
   transform: scale(0.94);
 }
-
-.stage-volume-group {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  margin-top: 14px;
-}
-.stage-volume-group button {
-  display: grid;
-  place-items: center;
-  width: 30px;
-  height: 30px;
-  padding: 0;
-  border: 0;
-  color: inherit;
-  background: transparent;
-}
-.stage-volume-group button svg { width: 18px; height: 18px; fill: currentColor; }
-.stage-volume-group input { width: min(180px, 42%); accent-color: currentColor; }
 
 .stage-canvas-host[data-shell-layout="apple-player"] .stage-lyric-viewport {
   position: relative;

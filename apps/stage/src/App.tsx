@@ -39,7 +39,7 @@ import {
   selectYouTubeMusicQueueItem,
   seekYouTubeMusic,
   setYouTubeMusicLiked,
-  setYouTubeMusicPlaybackMode, setYouTubeMusicVolume,
+  setYouTubeMusicPlaybackMode,
   startYouTubeMusicAudioAnalysis,
   stopYouTubeMusicAudioAnalysis,
   useYouTubeMusicBridge,
@@ -1162,11 +1162,10 @@ export default function App({ embedded = embeddedStageFromLocation, onEmbeddedRe
     if (action === "play" || action === "pause") await togglePlayback();
   };
 
-  const { setStageLiked, selectStageQueueItem, setStageVolume, setStagePlaybackMode } = createYouTubeMusicPlayerActions({
+  const { setStageLiked, selectStageQueueItem, setStagePlaybackMode } = createYouTubeMusicPlayerActions({
     expectedTrackID: source === "youtubeMusic" ? youtubeMusic.snapshot?.track.trackID : undefined,
     setLiked: setYouTubeMusicLiked,
     selectQueueItem: selectYouTubeMusicQueueItem,
-    setVolume: setYouTubeMusicVolume,
     setMode: setYouTubeMusicPlaybackMode,
     notify: (notice) => { setMessage(notice); interaction.show(notice); },
   });
@@ -1421,7 +1420,6 @@ export default function App({ embedded = embeddedStageFromLocation, onEmbeddedRe
               status={fullscreenTransitionStatus}
               timeMs={displayTimeMs}
               durationMs={durationMs}
-              onExit={() => void exitEmbeddedFullscreen()}
             />
           ) : null}
           {fullscreenSurface === "stage" ? (
@@ -1459,8 +1457,7 @@ export default function App({ embedded = embeddedStageFromLocation, onEmbeddedRe
                   onTransport={controlStageTransport}
                   onLike={setStageLiked}
                   onQueueSelect={selectStageQueueItem}
-                  onVolume={setStageVolume} onPlaybackMode={setStagePlaybackMode}
-                  onExit={() => void exitEmbeddedFullscreen()}
+                  onPlaybackMode={setStagePlaybackMode}
                 />
               </Suspense>
             </div>
@@ -1673,7 +1670,7 @@ export default function App({ embedded = embeddedStageFromLocation, onEmbeddedRe
               onTransport={controlStageTransport}
               onLike={setStageLiked}
               onQueueSelect={selectStageQueueItem}
-              onVolume={setStageVolume} onPlaybackMode={setStagePlaybackMode}
+              onPlaybackMode={setStagePlaybackMode}
             />
           </Suspense>
           <div className="stage-header">
