@@ -39,7 +39,7 @@ const timestamp = (milliseconds: number): string => {
 };
 
 const provider = (value: unknown): LyricsCandidateV0["provider"] | undefined =>
-  value === "applemusic" || value === "kugou" || value === "netease" || value === "tencent" ? value : undefined;
+  value === "applemusic" || value === "lrcmux" || value === "kugou" || value === "netease" || value === "tencent" ? value : undefined;
 
 const parseWords = (
   value: unknown,

@@ -52,4 +52,21 @@ describe("AI lyrics lookup assist", () => {
     expect(sanitizeAILyricsLookupAssistResultV1(request, { ...base, confidence: 0.4 })).toBeUndefined();
     expect(sanitizeAILyricsLookupAssistResultV1(request, base)?.preferredCandidate).toBeUndefined();
   });
+
+  it("keeps a cleaned cover identity for manual review when the original is unresolved", () => {
+    const local = buildLyricsLookupIdentity(track);
+    const request = buildAILyricsLookupAssistRequestV1(track, local, []);
+    const result = sanitizeAILyricsLookupAssistResultV1(request, {
+      version: aiLyricsLookupAssistVersion,
+      trackID: track.trackID,
+      canonicalTitle: "泥中に咲く",
+      titleAliases: [],
+      recordingArtists: ["星乃めあ"],
+      originalArtists: [],
+      isCover: true,
+      preferredCandidate: null,
+      confidence: 0.86,
+    });
+    expect(result).toMatchObject({ canonicalTitle: "泥中に咲く", originalArtists: [], isCover: true });
+  });
 });

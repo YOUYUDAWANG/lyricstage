@@ -56,13 +56,14 @@ export const requestManualLyrics = async (
   track: LyricsLookupTrackV0,
   title: string,
   artist: string,
+  originalArtist = "",
 ): Promise<LyricsLookupResponseV0> => {
   const runtime = extensionRuntime();
   if (!runtime) throw new Error("手动歌词搜索只在伴生扩展中可用");
   const response = await runtime.sendMessage({
     type: "youtube-music-search-lyrics",
     track,
-    query: { title, artist },
+    query: { title, artist, originalArtist },
   });
   if (!isLyricsLookupResponseV0(response) || response.trackID !== track.trackID) {
     throw new Error("歌词服务返回格式异常");

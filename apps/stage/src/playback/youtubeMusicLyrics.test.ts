@@ -70,7 +70,7 @@ describe("YouTube Music lyrics identity", () => {
     expect(sendMessage).toHaveBeenCalledWith({
       type: "youtube-music-search-lyrics",
       track,
-      query: { title: "死別", artist: "シャノン" },
+      query: { title: "死別", artist: "シャノン", originalArtist: "" },
     });
   });
 });

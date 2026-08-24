@@ -4,7 +4,7 @@ After=network-online.target
 Wants=network-online.target
 
 [Container]
-Image=localhost/lyricstage-lyrics:0.1.2
+Image=localhost/lyricstage-lyrics:0.2.0
 Pull=never
 ContainerName=lyricstage-lyrics
 PublishPort=127.0.0.1:8093:8788

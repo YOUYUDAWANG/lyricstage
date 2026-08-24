@@ -1,4 +1,4 @@
-import type { LyricsCandidateV0, LyricsLookupTrackV0 } from "./types";
+import type { LyricsCandidateV0, LyricsLookupTrackV0, LyricsSearchIdentityV0 } from "./types";
 
 export interface LyricsLookupIdentityV0 {
   canonicalTitle: string;
@@ -289,6 +289,22 @@ export const buildLyricsLookupIdentity = (track: LyricsLookupTrackV0): LyricsLoo
     isCover,
   };
 };
+
+export const publicLyricsSearchIdentity = (
+  track: LyricsLookupTrackV0,
+  identity: LyricsLookupIdentityV0,
+  method: LyricsSearchIdentityV0["method"] = "local",
+  confidence = 0.8,
+): LyricsSearchIdentityV0 => ({
+  canonicalTitle: identity.canonicalTitle,
+  recordingArtists: identity.isCover
+    ? unique(identity.coverPerformers.length > 0 ? identity.coverPerformers : [track.artist])
+    : unique(identity.originalArtists.length > 0 ? identity.originalArtists : [track.artist]),
+  originalArtists: identity.originalArtists,
+  isCover: identity.isCover,
+  method,
+  confidence: Math.max(0, Math.min(1, confidence)),
+});
 
 export const titleMatchesIdentity = (
   identity: LyricsLookupIdentityV0,

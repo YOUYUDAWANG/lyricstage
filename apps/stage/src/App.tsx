@@ -90,6 +90,7 @@ import {
   requestAutomaticLyrics,
   requestManualLyrics,
 } from "./playback/youtubeMusicLyrics";
+import { columnLyricsSearchIdentity, normalizeManualLyricsFields, type AutomaticLyricsState } from "./playback/automaticLyricsState";
 
 const loadStageCanvasModule = () => import("./StageCanvas");
 const StageCanvas = lazy(() => loadStageCanvasModule().then((module) => ({ default: module.StageCanvas })));
@@ -145,15 +146,6 @@ interface AppProps {
 }
 
 type PlaybackSource = "youtubeMusic" | "local";
-type AutomaticLyricsState = {
-  status: "idle" | "searching" | "matched" | "candidates" | "miss" | "error" | "manual";
-  source?: LyricsLookupResponseV0["source"];
-  trackID?: string;
-  trackIdentity?: string;
-  candidates: LyricsCandidateV0[];
-  selectedCandidateKey?: string;
-};
-
 const lyricsCandidateKey = (candidate: LyricsCandidateV0) => `${candidate.provider}:${candidate.id}`;
 
 const formatTime = (milliseconds: number): string => {
@@ -816,6 +808,7 @@ export default function App({ embedded = embeddedStageFromLocation, onEmbeddedRe
             trackIdentity,
             candidates: response.candidates,
             selectedCandidateKey: lyricsCandidateKey(response.match),
+            resolvedIdentity: response.resolvedIdentity,
           });
           setMessage(
             response.matchKind === "originalFallback"
@@ -834,6 +827,7 @@ export default function App({ embedded = embeddedStageFromLocation, onEmbeddedRe
           trackID: track.trackID,
           trackIdentity,
           candidates: response.candidates,
+          resolvedIdentity: response.resolvedIdentity,
         });
         setMessage(response.assistance === "ai" ? "本地规则与 AI 已完成清洗，但候选仍无法安全自动确认；请选择版本。" : "找到了歌词候选，但歌手或时长不足以自动确认。请选择版本或手动搜索。");
         return;
@@ -845,6 +839,7 @@ export default function App({ embedded = embeddedStageFromLocation, onEmbeddedRe
           trackID: track.trackID,
           trackIdentity,
           candidates: [],
+          resolvedIdentity: response.resolvedIdentity,
         });
         setMessage(response.assistance === "ai" ? "本地规则与 AI 已尝试清洗，多源歌词库仍没有同步歌词。" : "多源歌词库暂时没有匹配结果，可修改歌名或歌手后手动搜索。");
         return;
@@ -855,6 +850,7 @@ export default function App({ embedded = embeddedStageFromLocation, onEmbeddedRe
         trackID: track.trackID,
         trackIdentity,
         candidates: [],
+        resolvedIdentity: response.resolvedIdentity,
       });
       setMessage(response.message || "自动歌词搜索失败，可使用手动搜索重试。");
     }).catch((error) => {
@@ -994,6 +990,7 @@ export default function App({ embedded = embeddedStageFromLocation, onEmbeddedRe
       trackIdentity,
       candidates: retainCandidatesAfterChoice(previous.candidates, candidate),
       selectedCandidateKey: lyricsCandidateKey(candidate),
+      ...(previous.resolvedIdentity ? { resolvedIdentity: previous.resolvedIdentity } : {}),
     }));
     setShowVersionPicker(false);
     setMessage("已采用所选歌词版本，正在写入本地缓存。");
@@ -1008,7 +1005,7 @@ export default function App({ embedded = embeddedStageFromLocation, onEmbeddedRe
     });
   };
 
-  const searchLyricsManually = async (title: string, artist: string) => {
+  const searchLyricsManually = async (title: string, artist: string, originalArtist: string) => {
     const snapshot = youtubeMusic.snapshot;
     if (!snapshot) {
       setMessage("当前没有可搜索的 YouTube Music 曲目。");
@@ -1020,8 +1017,7 @@ export default function App({ embedded = embeddedStageFromLocation, onEmbeddedRe
       return;
     }
     const trackIdentity = lyricsTrackIdentity(track);
-    const cleanTitle = title.normalize("NFKC").trim();
-    const cleanArtist = artist.normalize("NFKC").trim();
+    const { title: cleanTitle, artist: cleanArtist, originalArtist: cleanOriginalArtist } = normalizeManualLyricsFields(title, artist, originalArtist);
     if (!cleanTitle) {
       setMessage("请输入歌名；歌手可以留空。");
       return;
@@ -1038,7 +1034,7 @@ export default function App({ embedded = embeddedStageFromLocation, onEmbeddedRe
     });
     setMessage(`正在手动搜索“${cleanTitle}”${cleanArtist ? ` / ${cleanArtist}` : ""}……`);
     try {
-      const response = await requestManualLyrics(track, cleanTitle, cleanArtist);
+      const response = await requestManualLyrics(track, cleanTitle, cleanArtist, cleanOriginalArtist);
       if (generation !== lyricsLookupGenerationRef.current || currentYouTubeIdentityRef.current !== trackIdentity) return;
       if (response.status === "candidates") {
         setAutomaticLyrics({
@@ -1047,6 +1043,7 @@ export default function App({ embedded = embeddedStageFromLocation, onEmbeddedRe
           trackID: track.trackID,
           trackIdentity,
           candidates: response.candidates,
+          resolvedIdentity: response.resolvedIdentity,
         });
         setMessage(response.message || `手动搜索返回 ${response.candidates.length} 个候选，请选择版本。`);
       } else if (response.status === "miss") {
@@ -1056,6 +1053,7 @@ export default function App({ embedded = embeddedStageFromLocation, onEmbeddedRe
           trackID: track.trackID,
           trackIdentity,
           candidates: [],
+          resolvedIdentity: response.resolvedIdentity,
         });
         setMessage(response.message || "手动搜索没有找到同步歌词，可修改条件后重试。");
       } else {
@@ -1065,6 +1063,7 @@ export default function App({ embedded = embeddedStageFromLocation, onEmbeddedRe
           trackID: track.trackID,
           trackIdentity,
           candidates: [],
+          resolvedIdentity: response.resolvedIdentity,
         });
         setMessage(response.message || "手动歌词搜索失败。");
       }
@@ -1341,6 +1340,7 @@ export default function App({ embedded = embeddedStageFromLocation, onEmbeddedRe
     : youtubeMusic.snapshot?.playback.currentTimeMs ?? displayTimeMs;
   const columnTitle = youtubeMusic.snapshot?.track.title || lastTrackRef.current.title || "LyricStage";
   const columnArtist = youtubeMusic.snapshot?.track.artist || lastTrackRef.current.artist || "YouTube Music";
+  const columnSearchIdentity = columnLyricsSearchIdentity(youtubeMusic.snapshot, automaticLyrics.resolvedIdentity);
   const activeRollingCard = rollingDirectorState.cards.find((card) =>
     stageLyricTimeMs >= card.fromMs && stageLyricTimeMs < card.toMs);
   const columnDirectorSource = rollingDirectorRoute.renderRolling
@@ -1377,6 +1377,7 @@ export default function App({ embedded = embeddedStageFromLocation, onEmbeddedRe
             disconnected={devColumnPreview ? false : disconnected}
             title={columnTitle}
             artist={columnArtist}
+            searchIdentity={columnSearchIdentity}
             directorStatus={directorStatusLabel(directorLookupState, columnDirectorSource, columnHasQueuedDirectorPlan)}
             directorStatusReason={directorStatusDetail(directorLookupState)}
             automaticStatus={devColumnPreview ? "matched" : automaticLyrics.status}
@@ -1404,7 +1405,7 @@ export default function App({ embedded = embeddedStageFromLocation, onEmbeddedRe
             onShowVersions={() => setShowVersionPicker((value) => !value)}
             showVersionPicker={showVersionPicker}
             manualSearchPending={manualSearchPending}
-            onManualSearch={(title, artist) => void searchLyricsManually(title, artist)}
+            onManualSearch={(title, artist, originalArtist) => void searchLyricsManually(title, artist, originalArtist)}
             />
           </Suspense>
         )}

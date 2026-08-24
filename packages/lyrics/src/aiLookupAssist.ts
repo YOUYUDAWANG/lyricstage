@@ -73,7 +73,6 @@ export const sanitizeAILyricsLookupAssistResultV1 = (
   if (!canonicalTitle || !Number.isFinite(confidence) || confidence < 0.72 || confidence > 1) return undefined;
   if (request.track.artist.trim() && recordingArtists.length > 0
     && !artistMatchesAny(recordingArtists, request.track.artist)) return undefined;
-  if (isCover && originalArtists.length === 0) return undefined;
   const preferred = value.preferredCandidate as Record<string, unknown> | undefined;
   const preferredCandidate = preferred
     ? request.candidates.find((candidate) =>
@@ -118,4 +117,3 @@ export const mergeAILyricsLookupAssistIdentityV1 = (
     isCover,
   };
 };
-

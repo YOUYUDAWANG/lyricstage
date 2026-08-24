@@ -4,6 +4,7 @@ import {
   identityCandidateScore,
   isRelevantIdentityCandidate,
   isSafeIdentityMatch,
+  publicLyricsSearchIdentity,
   preferredOriginalFallbackCandidate,
   type LyricsLookupIdentityV0,
 } from "./identity";
@@ -154,6 +155,7 @@ const responseFromCandidates = (
     trackID: track.trackID,
     status: match ? "match" : candidates.length > 0 ? "candidates" : "miss",
     source: "network",
+    resolvedIdentity: publicLyricsSearchIdentity(track, identity),
     ...(match ? { match } : {}),
     ...(originalFallbackMatch
       ? { matchKind: "originalFallback" as const }

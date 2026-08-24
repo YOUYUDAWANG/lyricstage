@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import type { LyricDocumentV0 } from "@lyricstage/contracts";
-import { lyricsProviderLabel, type LyricsCandidateV0 } from "@lyricstage/lyrics";
+import { lyricsProviderLabel, type LyricsCandidateV0, type LyricsSearchIdentityV0 } from "@lyricstage/lyrics";
 import {
   columnToolAfterLyricsSearch,
   eventPathStartsInEditableControl,
@@ -28,6 +28,7 @@ export interface ColumnStageViewProps {
   disconnected: boolean;
   title: string;
   artist: string;
+  searchIdentity?: LyricsSearchIdentityV0;
   directorStatus: string;
   directorStatusReason?: string;
   automaticStatus: AutomaticLyricsStatus;
@@ -44,7 +45,7 @@ export interface ColumnStageViewProps {
   onShowVersions: () => void;
   showVersionPicker: boolean;
   manualSearchPending: boolean;
-  onManualSearch: (title: string, artist: string) => void;
+  onManualSearch: (title: string, artist: string, originalArtist: string) => void;
   canEnterFullscreen: boolean;
   lightweight: boolean;
   lyricsOffsetMs: number;
@@ -92,6 +93,7 @@ export function ColumnStageView({
   disconnected,
   title,
   artist,
+  searchIdentity,
   directorStatus,
   directorStatusReason,
   automaticStatus,
@@ -132,8 +134,12 @@ export function ColumnStageView({
   enterFullscreenRef.current = onEnterFullscreen;
   const [activeTool, setActiveTool] = useState<ColumnTool | null>(null);
   const [showToolsMenu, setShowToolsMenu] = useState(false);
-  const [manualTitle, setManualTitle] = useState(title);
-  const [manualArtist, setManualArtist] = useState(artist);
+  const searchTitle = searchIdentity?.canonicalTitle || title;
+  const searchArtist = searchIdentity?.recordingArtists[0] || artist;
+  const searchOriginalArtist = searchIdentity?.originalArtists[0] || "";
+  const [manualTitle, setManualTitle] = useState(searchTitle);
+  const [manualArtist, setManualArtist] = useState(searchArtist);
+  const [manualOriginalArtist, setManualOriginalArtist] = useState(searchOriginalArtist);
   const frozen = disconnected || playbackState === "paused" || playbackState === "ended";
   const lyricTimeMs = lyricsTimeForPlaybackMs(timeMs, lyricsOffsetMs, durationMs);
   lyricTimeRef.current = lyricTimeMs;
@@ -151,10 +157,11 @@ export function ColumnStageView({
   }, []);
 
   useEffect(() => {
-    setManualTitle(title);
-    setManualArtist(artist);
+    setManualTitle(searchTitle);
+    setManualArtist(searchArtist);
+    setManualOriginalArtist(searchOriginalArtist);
     setShowToolsMenu(false);
-  }, [title, artist]);
+  }, [searchTitle, searchArtist, searchOriginalArtist]);
 
   useEffect(() => {
     if (activeTool === "versions" && !showVersionPicker) setActiveTool(null);
@@ -401,7 +408,7 @@ export function ColumnStageView({
               data-testid="column-manual-search"
               onSubmit={(event) => {
                 event.preventDefault();
-                onManualSearch(manualTitle, manualArtist);
+                onManualSearch(manualTitle, manualArtist, manualOriginalArtist);
               }}
             >
               <label>
@@ -416,7 +423,7 @@ export function ColumnStageView({
                 />
               </label>
               <label>
-                <span>歌手</span>
+                <span>{searchIdentity?.isCover ? "翻唱者" : "歌手"}</span>
                 <input
                   type="search"
                   value={manualArtist}
@@ -425,6 +432,18 @@ export function ColumnStageView({
                   onChange={(event) => setManualArtist(event.target.value)}
                 />
               </label>
+              {(searchIdentity?.isCover || manualOriginalArtist) && (
+                <label>
+                  <span>原唱</span>
+                  <input
+                    type="search"
+                    value={manualOriginalArtist}
+                    maxLength={500}
+                    placeholder="不确定时可留空"
+                    onChange={(event) => setManualOriginalArtist(event.target.value)}
+                  />
+                </label>
+              )}
               <div className="column-manual-search-actions">
                 <button type="submit" disabled={manualSearchPending || !manualTitle.trim()}>
                   {manualSearchPending ? "搜索中…" : "搜索"}

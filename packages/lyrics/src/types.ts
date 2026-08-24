@@ -14,7 +14,7 @@ export interface LyricsLookupTrackV0 {
 }
 
 export interface LyricsCandidateV0 {
-  provider: "applemusic" | "lrclib" | "kugou" | "netease" | "tencent" | "local";
+  provider: "applemusic" | "lrcmux" | "lrclib" | "kugou" | "netease" | "tencent" | "local";
   id: string;
   title: string;
   artist: string;
@@ -27,6 +27,15 @@ export interface LyricsCandidateV0 {
   nonMusicSegmentsMs?: Array<[number, number]>;
 }
 
+export interface LyricsSearchIdentityV0 {
+  canonicalTitle: string;
+  recordingArtists: string[];
+  originalArtists: string[];
+  isCover: boolean;
+  method: "local" | "ai" | "manual";
+  confidence: number;
+}
+
 export interface LyricsLookupResponseV0 {
   type: "lyrics-lookup-result";
   version: typeof lyricsLookupVersion;
@@ -36,6 +45,7 @@ export interface LyricsLookupResponseV0 {
   match?: LyricsCandidateV0;
   matchKind?: "sameRecording" | "originalFallback";
   assistance?: "ai" | "aiUnavailable";
+  resolvedIdentity?: LyricsSearchIdentityV0;
   identityResolution?: {
     method: "gemma4GoogleSearch";
     canonicalTitle: string;
@@ -49,6 +59,7 @@ export interface LyricsLookupResponseV0 {
 
 export const lyricsProviderLabel = (provider: LyricsCandidateV0["provider"]): string => ({
   applemusic: "Apple Music",
+  lrcmux: "lrcmux",
   lrclib: "LRCLIB",
   kugou: "酷狗",
   netease: "网易云",
@@ -74,7 +85,7 @@ export const isLyricsCandidateV0 = (value: unknown): value is LyricsCandidateV0 
     || parseLyricDocumentV0(candidate.wordTimedDocument).ok;
   return (
     candidate !== undefined &&
-    ["applemusic", "lrclib", "kugou", "netease", "tencent", "local"].includes(candidate.provider ?? "") &&
+    ["applemusic", "lrcmux", "lrclib", "kugou", "netease", "tencent", "local"].includes(candidate.provider ?? "") &&
     typeof candidate.id === "string" && candidate.id.length > 0 && candidate.id.length <= 80 &&
     typeof candidate.title === "string" && candidate.title.trim().length > 0 && candidate.title.length <= 500 &&
     typeof candidate.artist === "string" && candidate.artist.length <= 500 &&
@@ -116,6 +127,23 @@ export const isLyricsLookupResponseV0 = (value: unknown): value is LyricsLookupR
     (response.match === undefined || isLyricsCandidateV0(response.match)) &&
     (response.matchKind === undefined || response.matchKind === "sameRecording" || response.matchKind === "originalFallback") &&
     (response.assistance === undefined || response.assistance === "ai" || response.assistance === "aiUnavailable") &&
+    (
+      response.resolvedIdentity === undefined ||
+      (
+        typeof response.resolvedIdentity.canonicalTitle === "string" &&
+        response.resolvedIdentity.canonicalTitle.length > 0 && response.resolvedIdentity.canonicalTitle.length <= 500 &&
+        Array.isArray(response.resolvedIdentity.recordingArtists) &&
+        response.resolvedIdentity.recordingArtists.length <= 8 &&
+        response.resolvedIdentity.recordingArtists.every((artist) => typeof artist === "string" && artist.length <= 500) &&
+        Array.isArray(response.resolvedIdentity.originalArtists) &&
+        response.resolvedIdentity.originalArtists.length <= 8 &&
+        response.resolvedIdentity.originalArtists.every((artist) => typeof artist === "string" && artist.length <= 500) &&
+        typeof response.resolvedIdentity.isCover === "boolean" &&
+        ["local", "ai", "manual"].includes(response.resolvedIdentity.method) &&
+        typeof response.resolvedIdentity.confidence === "number" && Number.isFinite(response.resolvedIdentity.confidence) &&
+        response.resolvedIdentity.confidence >= 0 && response.resolvedIdentity.confidence <= 1
+      )
+    ) &&
     (
       response.identityResolution === undefined ||
       (

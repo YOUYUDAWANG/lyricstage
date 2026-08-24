@@ -1,10 +1,9 @@
 import {
   buildAILyricsLookupAssistRequestV1,
   isSafeIdentityMatch,
-  lookupLayeredLyrics,
   mergeAILyricsLookupAssistIdentityV1,
   preferredOriginalFallbackCandidate,
-  type LDDCLyricsConfigurationV0,
+  publicLyricsSearchIdentity,
   type LyricsLookupIdentityV0,
   type LyricsLookupResponseV0,
   type LyricsLookupTrackV0,
@@ -19,7 +18,6 @@ interface AutomaticLyricsAssistInput {
   track: LyricsLookupTrackV0;
   identity: LyricsLookupIdentityV0;
   initial: LyricsLookupResponseV0;
-  lddc?: LDDCLyricsConfigurationV0;
   configuration?: DirectorBYOKConfigurationV1;
   fetchImplementation?: typeof fetch;
 }
@@ -28,7 +26,6 @@ export const assistAutomaticLyrics = async ({
   track,
   identity,
   initial,
-  lddc,
   configuration,
   fetchImplementation = fetch,
 }: AutomaticLyricsAssistInput): Promise<{
@@ -42,10 +39,18 @@ export const assistAutomaticLyrics = async ({
       configuration, request, aiLyricsLookupAssistProfileV1, fetchImplementation, 12_000, 1,
     );
     const assistedIdentity = mergeAILyricsLookupAssistIdentityV1(track, identity, execution.response);
-    let result = await lookupLayeredLyrics(track, { lddc, identity: assistedIdentity });
+    let result: LyricsLookupResponseV0 = {
+      ...initial,
+      resolvedIdentity: publicLyricsSearchIdentity(
+        track,
+        assistedIdentity,
+        "ai",
+        execution.response.confidence,
+      ),
+    };
     const requested = execution.response.preferredCandidate;
-    if (result.status !== "match" && requested && execution.response.confidence >= 0.82) {
-      const preferred = [...result.candidates, ...initial.candidates].find((candidate) =>
+    if (requested && execution.response.confidence >= 0.82) {
+      const preferred = initial.candidates.find((candidate) =>
         candidate.provider === requested.provider && candidate.id === requested.id);
       const original = preferredOriginalFallbackCandidate(track, assistedIdentity, preferred ? [preferred] : []);
       if (preferred && (isSafeIdentityMatch(track, assistedIdentity, preferred) || original === preferred)) {
@@ -54,7 +59,7 @@ export const assistAutomaticLyrics = async ({
           status: "match",
           match: preferred,
           matchKind: original ? "originalFallback" : "sameRecording",
-          candidates: [preferred, ...result.candidates.filter((candidate) =>
+          candidates: [preferred, ...initial.candidates.filter((candidate) =>
             candidate.provider !== preferred.provider || candidate.id !== preferred.id)].slice(0, 5),
         };
       }
@@ -64,4 +69,3 @@ export const assistAutomaticLyrics = async ({
     return { result: initial, assistance: "aiUnavailable" };
   }
 };
-

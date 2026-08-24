@@ -11,6 +11,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from . import SCHEMA
 from .apple_music import AppleMusicError, AppleMusicProvider
+from .lrcmux import LrcMuxProvider
 
 
 logging.basicConfig(level=os.environ.get("LOG_LEVEL", "INFO"))
@@ -46,6 +47,11 @@ def provider() -> AppleMusicProvider:
     )
 
 
+@lru_cache(maxsize=1)
+def lrcmux_provider() -> LrcMuxProvider:
+    return LrcMuxProvider(os.environ.get("LRCMUX_BASE_URL", "https://api.lrcmux.dev"))
+
+
 def authorize(authorization: str | None = Header(default=None)) -> None:
     expected = os.environ.get("LYRICS_GATEWAY_TOKEN") or os.environ.get("LDDC_BACKEND_TOKEN", "")
     supplied = authorization.removeprefix("Bearer ").strip() if authorization else ""
@@ -63,19 +69,29 @@ def health() -> dict[str, str | bool]:
         "status": "ok",
         "appleMusicConfigured": bool(os.environ.get("APPLE_MUSIC_MEDIA_USER_TOKEN", "").strip()),
         "primaryProvider": "applemusic",
+        "fallbackProvider": "lrcmux",
     }
 
 
 @app.post("/v1/lyrics/resolve", response_model=ResolveResponse, response_model_by_alias=True)
 def resolve(request: ResolveRequest, _: None = Depends(authorize)) -> ResolveResponse:
+    match = None
     try:
         match = provider().lookup(request.title.strip(), [artist.strip() for artist in request.artists], request.duration_milliseconds)
     except AppleMusicError as error:
         logger.warning("Apple Music lookup unavailable: %s", error)
-        return ResolveResponse(requestID=request.request_id, candidates=[])
+        pass
     except Exception:
         logger.exception("Apple Music lookup failed")
-        return ResolveResponse(requestID=request.request_id, candidates=[])
+    if match is None:
+        try:
+            match = lrcmux_provider().lookup(
+                request.title.strip(),
+                [artist.strip() for artist in request.artists],
+                request.duration_milliseconds,
+            )
+        except Exception:
+            logger.exception("lrcmux lookup failed")
     if match is None:
         return ResolveResponse(requestID=request.request_id, candidates=[])
     lines = [
@@ -91,8 +107,8 @@ def resolve(request: ResolveRequest, _: None = Depends(authorize)) -> ResolveRes
         requestID=request.request_id,
         candidates=[
             {
-                "source": "applemusic",
-                "id": match.song_id,
+                "source": "applemusic" if hasattr(match, "song_id") else "lrcmux",
+                "id": match.song_id if hasattr(match, "song_id") else match.match_id,
                 "title": match.title,
                 "artist": match.artist,
                 "album": match.album,

@@ -433,7 +433,6 @@ const resolveAutomaticLyrics = async (track: LyricsLookupTrackV0): Promise<Lyric
         track: lookupTrack,
         identity: localIdentity,
         initial,
-        lddc,
         configuration: await directorConfiguration(),
       });
       const found = assisted.result;
@@ -466,16 +465,14 @@ const resolveAutomaticLyrics = async (track: LyricsLookupTrackV0): Promise<Lyric
 };
 
 const resolveManualLyrics = async (
-  track: LyricsLookupTrackV0,
-  titleValue: unknown,
-  artistValue: unknown,
+  track: LyricsLookupTrackV0, titleValue: unknown, artistValue: unknown, originalArtistValue: unknown,
 ): Promise<LyricsLookupResponseV0> => {
-  const query = sanitizeManualLyricsSearchQuery(titleValue, artistValue);
+  const query = sanitizeManualLyricsSearchQuery(titleValue, artistValue, originalArtistValue);
   if (!query) {
     return lyricsErrorResponse(track.trackID, new Error("请输入有效的歌名；歌手可以留空"));
   }
-  const { title, artist } = query;
-  const taskKey = JSON.stringify([lyricsFingerprint(track), title, artist]);
+  const { title, artist, originalArtist } = query;
+  const taskKey = JSON.stringify([lyricsFingerprint(track), title, artist, originalArtist]);
   const existing = manualLyricsLookupTasks.get(taskKey);
   if (existing) return existing;
   const task: Promise<LyricsLookupResponseV0> = (async () => {
@@ -484,7 +481,7 @@ const resolveManualLyrics = async (
       const lookupTrack = nonMusicSegmentsMs.length > 0
         ? { ...track, durationMs: effectiveMusicDurationMs(track.durationMs, nonMusicSegmentsMs) }
         : track;
-      const identity = manualLyricsLookupIdentity(query);
+      const identity = manualLyricsLookupIdentity(query, buildLyricsLookupIdentity(lookupTrack));
       const found = await lookupLayeredLyrics(lookupTrack, {
         lddc: await privateLyricsConfiguration(),
         identity,
@@ -498,6 +495,7 @@ const resolveManualLyrics = async (
         trackID: track.trackID,
         status: candidates.length > 0 ? "candidates" : "miss",
         source: "network",
+        ...(found.resolvedIdentity ? { resolvedIdentity: { ...found.resolvedIdentity, method: "manual" as const } } : {}),
         candidates,
         message: candidates.length > 0
           ? `手动搜索“${title}”${artist ? ` / ${artist}` : ""}返回 ${candidates.length} 个候选，请选择版本。`
@@ -505,7 +503,7 @@ const resolveManualLyrics = async (
       };
       rememberIssuedLyricsResponse(track, response);
       if (candidates.length > 0) {
-        const manualCacheKey = `manual:${track.trackID}:${stableHash32({ title, artist })}`;
+        const manualCacheKey = `manual:${track.trackID}:${stableHash32({ title, artist, originalArtist })}`;
         await saveLyricsCache(
           track,
           response,
@@ -2563,10 +2561,10 @@ chromeAPI.runtime.onMessage.addListener((message, sender, sendResponse) => {
       return;
     }
     const query = request.query && typeof request.query === "object"
-      ? request.query as { title?: unknown; artist?: unknown }
+      ? request.query as { title?: unknown; artist?: unknown; originalArtist?: unknown }
       : {};
     const track = request.track;
-    void resolveManualLyrics(track, query.title, query.artist).then(
+    void resolveManualLyrics(track, query.title, query.artist, query.originalArtist).then(
       sendResponse,
       (error) => sendResponse(lyricsErrorResponse(track.trackID, error)),
     );

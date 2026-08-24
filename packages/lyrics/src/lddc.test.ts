@@ -10,6 +10,25 @@ const track: LyricsLookupTrackV0 = {
 };
 
 describe("private LDDC lyrics fallback", () => {
+  it("accepts lrcmux as the private gateway fallback", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({
+      schema: "bilimusic-lddc-lyrics-v1",
+      candidates: [{
+        source: "lrcmux",
+        id: "kugou:mux-1",
+        title: "One",
+        artist: "Artist",
+        durationSeconds: 180,
+        timingKind: "line",
+        lyricLines: [{ startMilliseconds: 1000, endMilliseconds: 2400, text: "One line", words: [] }],
+      }],
+    }), { status: 200 })));
+
+    const candidates = await lookupLDDCLyrics(track, { endpoint: "https://lyrics.example/", token: "secret" });
+
+    expect(candidates[0]).toMatchObject({ provider: "lrcmux", timingKind: "line" });
+  });
+
   it("accepts Apple Music word timing from the private gateway", async () => {
     vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({
       schema: "bilimusic-lddc-lyrics-v1",

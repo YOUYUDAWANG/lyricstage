@@ -28,6 +28,23 @@ const candidate = (artist: string, overrides: Partial<LyricsCandidateV0> = {}): 
 });
 
 describe("YouTube Music lyric identity", () => {
+  it("separates a cover performer while keeping unresolved upload wording explicit", () => {
+    expect(buildLyricsLookupIdentity(track(
+      "水星記 Mercury Records / 東 雪蓮 (cover)",
+      "東 雪蓮",
+    ))).toEqual({
+      canonicalTitle: "水星記 Mercury Records",
+      titles: [
+        "水星記 Mercury Records",
+        "水星記 Mercury Records / 東 雪蓮",
+        "水星記 Mercury Records / 東 雪蓮 (cover)",
+      ],
+      originalArtists: [],
+      coverPerformers: ["東 雪蓮"],
+      isCover: true,
+    });
+  });
+
   it("removes packaging while retaining original-script and translated aliases", () => {
     const identity = buildLyricsLookupIdentity(track("【歌ってみた】《夏夜のマジック/夏夜的魔法》 Official MV"));
     expect(identity.canonicalTitle).toBe("夏夜のマジック");
