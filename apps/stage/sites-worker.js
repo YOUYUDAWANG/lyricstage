@@ -1,0 +1,83 @@
+const SHOWCASE_BVID = "BV1hSZFBwE6g";
+const BILIBILI_HEADERS = {
+  "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 Chrome/124.0 Safari/537.36",
+  Referer: "https://www.bilibili.com",
+};
+
+const bilibiliJSON = async (url) => {
+  const response = await fetch(url, { headers: BILIBILI_HEADERS });
+  if (!response.ok) throw new Error("bilibili-http");
+  const payload = await response.json();
+  if (payload?.code !== 0) throw new Error("bilibili-api");
+  return payload.data;
+};
+
+export const audioCandidates = (playInfo) => {
+  const dash = playInfo?.dash;
+  const candidates = [...(dash?.audio ?? [])];
+  if (dash?.flac?.audio) candidates.push(dash.flac.audio);
+  candidates.sort((left, right) => (right.id ?? 0) - (left.id ?? 0));
+  const urls = [];
+  for (const candidate of candidates) {
+    for (const url of [candidate.baseUrl, candidate.base_url, ...(candidate.backupUrl ?? candidate.backup_url ?? [])]) {
+      if (typeof url === "string" && url.startsWith("https://") && !urls.includes(url)) urls.push(url);
+    }
+  }
+  return urls.slice(0, 4);
+};
+
+const proxyShowcaseAudio = async (request) => {
+  const info = await bilibiliJSON(`https://api.bilibili.com/x/web-interface/view?bvid=${SHOWCASE_BVID}`);
+  const cid = info?.pages?.[0]?.cid;
+  if (!Number.isFinite(cid)) throw new Error("bilibili-page");
+  const playInfo = await bilibiliJSON(
+    `https://api.bilibili.com/x/player/playurl?bvid=${SHOWCASE_BVID}&cid=${cid}&fnval=16&fourk=1`,
+  );
+  const range = request.headers.get("Range");
+  const headers = {
+    ...BILIBILI_HEADERS,
+    Origin: "https://www.bilibili.com",
+    ...(range ? { Range: range } : {}),
+  };
+  for (const url of audioCandidates(playInfo)) {
+    const upstream = await fetch(url, { headers });
+    if (!upstream.ok && upstream.status !== 206) continue;
+    const responseHeaders = new Headers({
+      "Accept-Ranges": upstream.headers.get("Accept-Ranges") ?? "bytes",
+      "Cache-Control": "private, max-age=300",
+      "Content-Type": "audio/mp4",
+    });
+    for (const name of ["Content-Length", "Content-Range", "ETag", "Last-Modified"]) {
+      const value = upstream.headers.get(name);
+      if (value) responseHeaders.set(name, value);
+    }
+    return new Response(request.method === "HEAD" ? null : upstream.body, {
+      status: upstream.status,
+      headers: responseHeaders,
+    });
+  }
+  throw new Error("bilibili-cdn");
+};
+
+export default {
+  async fetch(request, env) {
+    const url = new URL(request.url);
+    if (url.pathname === "/api/showcase/you-and-aizu/audio") {
+      if (request.method !== "GET" && request.method !== "HEAD") {
+        return new Response("Method Not Allowed", { status: 405, headers: { Allow: "GET, HEAD" } });
+      }
+      try {
+        return await proxyShowcaseAudio(request);
+      } catch {
+        return new Response("Showcase audio is temporarily unavailable", {
+          status: 502,
+          headers: { "Cache-Control": "no-store", "Content-Type": "text/plain; charset=utf-8" },
+        });
+      }
+    }
+    if (!env?.ASSETS?.fetch) {
+      return new Response("LyricStage assets are unavailable", { status: 503 });
+    }
+    return env.ASSETS.fetch(request);
+  },
+};

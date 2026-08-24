@@ -1,4 +1,4 @@
-import { copyFile, mkdir, rm, writeFile } from "node:fs/promises";
+import { copyFile, mkdir, rm } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 
 const root = new URL("../", import.meta.url);
@@ -12,15 +12,7 @@ await Promise.all([
   mkdir(metadataDirectory, { recursive: true }),
 ]);
 
-await writeFile(new URL("index.js", serverDirectory), `export default {
-  async fetch(request, env) {
-    if (!env?.ASSETS?.fetch) {
-      return new Response("LyricStage assets are unavailable", { status: 503 });
-    }
-    return env.ASSETS.fetch(request);
-  },
-};
-`, "utf8");
+await copyFile(new URL("../apps/stage/sites-worker.js", import.meta.url), new URL("index.js", serverDirectory));
 
 await copyFile(new URL("../.openai/hosting.json", import.meta.url), new URL("hosting.json", metadataDirectory));
 await rm(nestedPluginOutput, { recursive: true, force: true });
