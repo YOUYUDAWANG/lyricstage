@@ -419,6 +419,7 @@
     const trackID = videoIDFromHref(link?.getAttribute?.("href") || link?.href);
     const title = clean(
       item?.querySelector?.(".song-title, #song-title, yt-formatted-string.song-title")?.textContent
+      || item?.querySelector?.(".title-column yt-formatted-string, yt-formatted-string.title")?.textContent
       || link?.getAttribute?.("title")
       || link?.textContent,
     );
@@ -437,8 +438,22 @@
     };
   };
 
+  const queueItemElements = () => {
+    const direct = [...(document.querySelectorAll?.("ytmusic-player-queue-item") ?? [])];
+    if (direct.length) return direct;
+    const sidePanel = document.querySelector?.("ytmusic-player-page#player-page #side-panel, #side-panel");
+    const renderers = [...(sidePanel?.querySelectorAll?.("ytmusic-tab-renderer") ?? [])];
+    const queueRenderer = renderers.find((renderer) =>
+      renderer.getAttribute?.("page-type") !== LYRICS_PAGE_TYPE
+      && renderer.querySelector?.('a[href*="watch?"][href*="v="]')
+    );
+    return [...(queueRenderer?.querySelectorAll?.(
+      "ytmusic-player-queue-item, ytmusic-responsive-list-item-renderer",
+    ) ?? [])];
+  };
+
   const queueSnapshot = (currentTrackID) => {
-    const elements = [...(document.querySelectorAll?.("ytmusic-player-queue-item") ?? [])].slice(0, 100);
+    const elements = queueItemElements().slice(0, 100);
     const items = elements.map((item) => queueItemSnapshot(item)).filter(Boolean);
     if (items.length) {
       cachedQueueHrefs = elements.map((item) => clean(
@@ -1325,7 +1340,7 @@
       if (!commandMatchesCurrentTrack(message, playerBar, sendResponse)) return;
       const requestedTrackID = clean(message.queueTrackID);
       const queueIndex = Number.isSafeInteger(message.queueIndex) ? message.queueIndex : -1;
-      const item = [...(document.querySelectorAll?.("ytmusic-player-queue-item") ?? [])][queueIndex];
+      const item = queueItemElements()[queueIndex];
       const target = item?.querySelector?.('a[href*="watch?"][href*="v="]') ?? item;
       const cachedItem = cachedQueue?.items?.[queueIndex];
       const cachedHref = cachedQueueHrefs[queueIndex];
