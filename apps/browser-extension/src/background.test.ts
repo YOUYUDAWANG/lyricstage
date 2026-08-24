@@ -362,6 +362,66 @@ describe("YouTube Music background routing", () => {
       .toMatchObject({ status: "match", source: "network", match: { id: "11" } });
   });
 
+  it("uses BYOK metadata assistance before asking the user to search lyrics manually", async () => {
+    const track = {
+      provider: "youtubeMusic" as const,
+      trackID: "lyrics-ai-assisted",
+      title: "【歌ってみた】泥中に咲く / covered by 星乃めあ",
+      artist: "星乃めあ",
+      durationMs: 290_000,
+    };
+    storage.set("lyricstage-director-byok-v1", {
+      version: "lyricstage-director-byok-v1",
+      primary: {
+        protocol: "openai-compatible",
+        endpoint: "https://provider.test/v1",
+        model: "fixture-model",
+        apiKey: "fixture-key",
+      },
+    });
+    vi.stubGlobal("fetch", vi.fn(async (input: string | URL | Request) => {
+      const url = new URL(String(input));
+      if (url.hostname === "sponsor.ajay.app") return new Response("", { status: 404 });
+      if (url.hostname === "lrclib.net" && url.pathname === "/api/get") {
+        return new Response("", { status: 404 });
+      }
+      if (url.hostname === "lrclib.net" && url.pathname === "/api/search") {
+        return new Response(JSON.stringify([{
+          id: 41,
+          trackName: "泥中に咲く",
+          artistName: "ウォルピスカーター",
+          duration: 290,
+          syncedLyrics: "[00:01.00]assisted",
+        }]), { status: 200 });
+      }
+      if (url.hostname === "lyrics.kugou.com") {
+        return new Response(JSON.stringify({ status: 200, candidates: [] }), { status: 200 });
+      }
+      if (url.hostname === "provider.test" && url.pathname === "/v1/chat/completions") {
+        return new Response(JSON.stringify({ choices: [{ message: { content: JSON.stringify({
+          version: "lyricstage-lyrics-lookup-assist-v1",
+          trackID: track.trackID,
+          canonicalTitle: "泥中に咲く",
+          titleAliases: [],
+          recordingArtists: ["星乃めあ"],
+          originalArtists: ["ウォルピスカーター"],
+          isCover: true,
+          preferredCandidate: { provider: "lrclib", id: "41" },
+          confidence: 0.94,
+        }) } }] }), { status: 200, headers: { "Content-Type": "application/json" } });
+      }
+      throw new Error(`unexpected request: ${url.href}`);
+    }));
+
+    const response = await sendResolved({ type: "youtube-music-resolve-lyrics", track }, sender(10));
+    expect(response).toMatchObject({
+      status: "match",
+      assistance: "ai",
+      matchKind: "originalFallback",
+      match: { provider: "lrclib", id: "41" },
+    });
+  });
+
   it("progressively evicts older lyrics entries after a quota rejection", async () => {
     const track = {
       provider: "youtubeMusic" as const,

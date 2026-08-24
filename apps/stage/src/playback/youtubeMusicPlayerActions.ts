@@ -2,6 +2,8 @@ interface YouTubeMusicPlayerActionsOptions {
   expectedTrackID?: string;
   setLiked(liked: boolean, expectedTrackID: string): Promise<boolean>;
   selectQueueItem(queueTrackID: string, queueIndex: number, expectedTrackID: string): Promise<boolean>;
+  setVolume(expectedTrackID: string, volume?: number, muted?: boolean): Promise<boolean>;
+  setMode(expectedTrackID: string, mode: "shuffle" | "repeat", value: boolean | "off" | "all" | "one"): Promise<boolean>;
   notify(message: string): void;
 }
 
@@ -9,6 +11,8 @@ export const createYouTubeMusicPlayerActions = ({
   expectedTrackID,
   setLiked,
   selectQueueItem,
+  setVolume,
+  setMode,
   notify,
 }: YouTubeMusicPlayerActionsOptions) => ({
   async setStageLiked(liked: boolean) {
@@ -20,5 +24,13 @@ export const createYouTubeMusicPlayerActions = ({
       ? await selectQueueItem(queueTrackID, queueIndex, expectedTrackID)
       : false;
     if (!ok) notify("播放列表已变化，请重新打开后再选择。");
+  },
+  async setStageVolume(volume?: number, muted?: boolean) {
+    const ok = expectedTrackID ? await setVolume(expectedTrackID, volume, muted) : false;
+    if (!ok) notify("音量控制暂时不可用。");
+  },
+  async setStagePlaybackMode(mode: "shuffle" | "repeat", value: boolean | "off" | "all" | "one") {
+    const ok = expectedTrackID ? await setMode(expectedTrackID, mode, value) : false;
+    if (!ok) notify("播放模式暂时不可用。");
   },
 });

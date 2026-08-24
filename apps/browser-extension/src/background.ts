@@ -104,6 +104,8 @@ import {
 } from "./rollingRequestOwnership";
 import { sanitizedRollingReason } from "./backgroundDirectorErrors";
 import { createYouTubeMusicControlForwarder } from "./youtubeMusicControls";
+import { assistAutomaticLyrics } from "./automaticLyricsAssist";
+import { routeYouTubeMusicPlaybackSettings } from "./youtubeMusicPlaybackSettings";
 
 const chromeAPI = (globalThis as typeof globalThis & { chrome: ExtensionChrome }).chrome;
 const stagePorts = new Map<ExtensionPort, number | undefined>();
@@ -411,7 +413,7 @@ const resolveAutomaticLyrics = async (track: LyricsLookupTrackV0): Promise<Lyric
   } catch {
     // Cache availability must never turn an otherwise valid network lookup into an error.
   }
-  if (cached) return cached;
+  if (cached?.status === "match" || cached?.assistance !== undefined) return cached;
   const fingerprint = lyricsFingerprint(track);
   const existing = lyricsLookupTasks.get(fingerprint);
   if (existing) return existing;
@@ -426,12 +428,22 @@ const resolveAutomaticLyrics = async (track: LyricsLookupTrackV0): Promise<Lyric
         : track;
       const lddc = await privateLyricsConfiguration();
       const localIdentity = buildLyricsLookupIdentity(lookupTrack);
-      const found = await lookupLayeredLyrics(lookupTrack, { lddc, identity: localIdentity });
+      const initial = await lookupLayeredLyrics(lookupTrack, { lddc, identity: localIdentity });
+      const assisted = await assistAutomaticLyrics({
+        track: lookupTrack,
+        identity: localIdentity,
+        initial,
+        lddc,
+        configuration: await directorConfiguration(),
+      });
+      const found = assisted.result;
+      const assistance = assisted.assistance;
       const decorate = (candidate: LyricsCandidateV0): LyricsCandidateV0 =>
         nonMusicSegmentsMs.length > 0 ? { ...candidate, nonMusicSegmentsMs } : candidate;
       const response: LyricsLookupResponseV0 = {
         ...found,
         trackID: track.trackID,
+        ...(assistance ? { assistance } : {}),
         ...(found.match ? { match: decorate(found.match) } : {}),
         candidates: found.candidates.map(decorate),
       };
@@ -2144,8 +2156,9 @@ const youtubeMusicControls = createYouTubeMusicControlForwarder({
 const seekInYouTubeMusic = youtubeMusicControls.seek;
 const transportInYouTubeMusic = youtubeMusicControls.transport;
 const likeInYouTubeMusic = youtubeMusicControls.like;
+const setYouTubeMusicVolume = youtubeMusicControls.volume;
+const setYouTubeMusicPlaybackMode = youtubeMusicControls.playbackMode;
 const selectYouTubeMusicQueueItem = youtubeMusicControls.selectQueue;
-
 chromeAPI.runtime.onConnect.addListener((port) => {
   if (port.name !== "lyricstage-stage") return;
   stagePorts.set(port, sourceTabIDForSender(port.sender));
@@ -2201,6 +2214,11 @@ chromeAPI.runtime.onMessage.addListener((message, sender, sendResponse) => {
     liked?: unknown;
     queueTrackID?: unknown;
     queueIndex?: unknown;
+    volume?: unknown;
+    muted?: unknown;
+    mode?: unknown;
+    enabled?: unknown;
+    repeat?: unknown;
   };
   const fromOffscreen = sender.url === chromeAPI.runtime.getURL("offscreen.html");
   const captureForUpdate = (): AudioCaptureState | undefined => fromOffscreen
@@ -2748,6 +2766,13 @@ chromeAPI.runtime.onMessage.addListener((message, sender, sendResponse) => {
     ).then(sendResponse, () => sendResponse({ ok: false, reason: "like-failed" }));
     return true;
   }
+
+  const playbackSettingsRoute = routeYouTubeMusicPlaybackSettings(request, sendResponse, {
+    preferredTabID: sourceTabIDForSender(sender),
+    setVolume: setYouTubeMusicVolume,
+    setMode: setYouTubeMusicPlaybackMode,
+  });
+  if (playbackSettingsRoute !== undefined) return playbackSettingsRoute;
 
   if (request.type === "youtube-music-queue-select") {
     if (

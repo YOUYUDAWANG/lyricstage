@@ -259,9 +259,10 @@ describe("rolling Performance Director", () => {
     expect(css).toContain("animation: stage-wash-drift 22s");
     expect(css).not.toContain("data-layout-transition-phase");
     const stageSource = readFileSync(new URL("../StageCanvas.tsx", import.meta.url), "utf8");
-    expect(stageSource).toMatch(/useLayoutEffect\(\(\) => \{\s*if \(!remoteDirectorPlan\)/u);
     expect(stageSource).toContain("handoffRef.current = { active: localDirectorPlan }");
-    expect(stageSource).toContain('directorMode === "legacy" && Boolean(remoteDirectorPlan)');
+    expect(stageSource).toContain('data-shell-layout="apple-player"');
+    expect(stageSource).not.toContain("queueRollingDirectorPlanV1");
+    expect(stageSource).not.toContain("queueDirectorPlanV1");
     expect(stageSource).toContain("applyStageFrameDOMV1(stageFrame");
     expect(stageSource).not.toContain("setLayoutTransitionPhase");
     const appSource = readFileSync(new URL("../App.tsx", import.meta.url), "utf8");

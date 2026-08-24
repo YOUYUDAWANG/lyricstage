@@ -221,6 +221,37 @@ export const setYouTubeMusicLiked = async (
   }
 };
 
+export const setYouTubeMusicVolume = async (
+  expectedTrackID: string,
+  volume?: number,
+  muted?: boolean,
+): Promise<boolean> => {
+  const runtime = extensionRuntime();
+  if (!runtime || !expectedTrackID) return false;
+  try {
+    const response = await runtime.sendMessage({ type: "youtube-music-volume", volume, muted, expectedTrackID });
+    return (response as { ok?: unknown } | undefined)?.ok === true;
+  } catch { return false; }
+};
+
+export const setYouTubeMusicPlaybackMode = async (
+  expectedTrackID: string,
+  mode: "shuffle" | "repeat",
+  value: boolean | "off" | "all" | "one",
+): Promise<boolean> => {
+  const runtime = extensionRuntime();
+  if (!runtime || !expectedTrackID) return false;
+  try {
+    const response = await runtime.sendMessage({
+      type: "youtube-music-playback-mode",
+      mode,
+      ...(mode === "shuffle" ? { enabled: value === true } : { repeat: value }),
+      expectedTrackID,
+    });
+    return (response as { ok?: unknown } | undefined)?.ok === true;
+  } catch { return false; }
+};
+
 export const selectYouTubeMusicQueueItem = async (
   queueTrackID: string,
   queueIndex: number,

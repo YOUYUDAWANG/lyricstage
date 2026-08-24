@@ -30,6 +30,7 @@
     "seeked",
     "durationchange",
     "ratechange",
+    "volumechange",
     "timeupdate",
     "ended",
   ];
@@ -390,6 +391,30 @@
     return playerBar?.querySelector?.(selector) ?? null;
   };
 
+  const playbackModeButton = (playerBar, mode) => playerBar?.querySelector?.(
+    mode === "shuffle"
+      ? ".shuffle, #shuffle-button, tp-yt-paper-icon-button[aria-label*='シャッフル'], button[aria-label*='Shuffle']"
+      : ".repeat, #repeat-button, tp-yt-paper-icon-button[aria-label*='リピート'], button[aria-label*='Repeat']",
+  ) ?? null;
+
+  const shuffleEnabled = (playerBar) => {
+    const control = playbackModeButton(playerBar, "shuffle");
+    return control?.getAttribute?.("aria-pressed") === "true"
+      || control?.hasAttribute?.("active") === true;
+  };
+
+  const repeatMode = (playerBar) => {
+    const control = playbackModeButton(playerBar, "repeat");
+    const value = clean(
+      control?.getAttribute?.("repeat-mode")
+      || control?.getAttribute?.("data-repeat-mode")
+      || control?.getAttribute?.("aria-label"),
+    ).toLocaleLowerCase();
+    if (/(?:one|single|1\s*曲)/u.test(value)) return "one";
+    if (control?.getAttribute?.("aria-pressed") === "true" || control?.hasAttribute?.("active") === true) return "all";
+    return "off";
+  };
+
   const likeButtons = (playerBar) => {
     const renderer = playerBar?.querySelector?.("ytmusic-like-button-renderer")
       ?? document.querySelector?.("ytmusic-player-bar ytmusic-like-button-renderer");
@@ -745,6 +770,10 @@
         durationMs,
         playbackRate: Number.isFinite(media.playbackRate) ? Math.max(0, media.playbackRate) : 1,
         state: playbackState(media),
+        volume: Number.isFinite(media.volume) ? Math.max(0, Math.min(1, media.volume)) : 1,
+        muted: media.muted === true,
+        shuffle: shuffleEnabled(playerBar ?? document),
+        repeat: repeatMode(playerBar ?? document),
       },
       controls: {
         seek: true,
@@ -753,6 +782,9 @@
         next: enabledControl(transportButton(playerBar ?? document, "next")),
         like: enabledControl(nativeLikeButtons.like),
         queue: Boolean(nativeQueue?.items.length),
+        volume: true,
+        shuffle: enabledControl(playbackModeButton(playerBar ?? document, "shuffle")),
+        repeat: enabledControl(playbackModeButton(playerBar ?? document, "repeat")),
       },
       engagement: { likeStatus: likeStatus(playerBar ?? document) },
       ...(nativeQueue ? { queue: nativeQueue } : {}),
@@ -770,12 +802,19 @@
     snapshot.playback.durationMs,
     snapshot.playback.playbackRate,
     snapshot.playback.state,
+    snapshot.playback.volume,
+    snapshot.playback.muted,
+    snapshot.playback.shuffle,
+    snapshot.playback.repeat,
     snapshot.controls.seek,
     snapshot.controls.playPause,
     snapshot.controls.previous,
     snapshot.controls.next,
     snapshot.controls.like,
     snapshot.controls.queue,
+    snapshot.controls.volume,
+    snapshot.controls.shuffle,
+    snapshot.controls.repeat,
     snapshot.engagement?.likeStatus ?? "neutral",
     ...(snapshot.queue?.items ?? []).flatMap((item) => [
       item.trackID,
@@ -1351,6 +1390,42 @@
       control.click();
       queueSend();
       sendResponse({ ok: true, liked: requested });
+      return;
+    }
+
+    if (message?.type === "youtube-music-volume-command") {
+      const playerBar = document.querySelector("ytmusic-player-bar");
+      const media = selectPlaybackMedia(playerBar);
+      if (!(media instanceof HTMLMediaElement) || !commandMatchesCurrentTrack(message, playerBar, sendResponse)) return;
+      if (typeof message.muted === "boolean") media.muted = message.muted;
+      if (Number.isFinite(message.volume)) {
+        media.volume = Math.max(0, Math.min(1, message.volume));
+        if (media.volume > 0) media.muted = false;
+      }
+      queueSend();
+      sendResponse({ ok: true, volume: media.volume, muted: media.muted });
+      return;
+    }
+
+    if (message?.type === "youtube-music-playback-mode-command") {
+      const playerBar = document.querySelector("ytmusic-player-bar");
+      if (!commandMatchesCurrentTrack(message, playerBar, sendResponse)) return;
+      const mode = message.mode;
+      const control = playbackModeButton(playerBar ?? document, mode);
+      if (!enabledControl(control) || typeof control.click !== "function") {
+        sendResponse({ ok: false, reason: "playback-mode-unavailable" });
+        return;
+      }
+      if (mode === "shuffle") {
+        if (shuffleEnabled(playerBar ?? document) !== (message.enabled === true)) control.click();
+      } else if (mode === "repeat" && ["off", "all", "one"].includes(message.repeat)) {
+        for (let index = 0; index < 2 && repeatMode(playerBar ?? document) !== message.repeat; index += 1) control.click();
+      } else {
+        sendResponse({ ok: false, reason: "invalid-playback-mode" });
+        return;
+      }
+      queueSend();
+      sendResponse({ ok: true });
       return;
     }
 

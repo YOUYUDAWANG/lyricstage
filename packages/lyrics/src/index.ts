@@ -1,4 +1,5 @@
 export * from "./aiIdentity";
+export * from "./aiLookupAssist";
 export * from "./identity";
 export * from "./kugou";
 export * from "./lddc";

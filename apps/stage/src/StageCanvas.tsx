@@ -6,10 +6,7 @@ import {
   directorSectionAtV1,
   compileEnvironmentSceneV1,
   effectRecipeAtV1,
-  queueDirectorPlanV1,
-  sampleDirectorPlanHandoffV1,
   stagePresentationAtV1,
-  type DirectorPlanHandoffV1,
   type DirectorPlanV1,
   type ReactiveBusV1,
   type SceneCardV1,
@@ -31,17 +28,10 @@ import {
   mergeArtworkDirectorPaletteV1,
   paletteToneForV1,
 } from "./artworkPalette";
-import {
-  directorPlanForStageEntry,
-  directorStatusLabel,
-  type DirectorLookupState,
-} from "./playback/performanceDirector";
+import type { DirectorLookupState } from "./playback/performanceDirector";
 import { lyricsTimeForPlaybackMs } from "./playback/lyricsTimeOffset";
 import { canvasBackingStoreForV1 } from "./canvasBackingStore";
-import {
-  queueRollingDirectorPlanV1,
-  rollingPreparedRendererIdentityV1,
-} from "./playback/rollingPerformanceDirector";
+import { rollingPreparedRendererIdentityV1 } from "./playback/rollingPerformanceDirector";
 import { artworkCandidates, artworkShapeForAspectV1, type ArtworkShapeV1 } from "./artworkCandidates";
 import {
   applyStageFrameDOMV1,
@@ -76,6 +66,7 @@ interface StageCanvasProps {
   artworkURL?: string;
   durationMs: number;
   playbackState?: "playing" | "paused" | "buffering" | "ended";
+  playbackDetails?: YouTubeMusicSnapshotV0["playback"];
   controls?: YouTubeMusicSnapshotV0["controls"];
   engagement?: YouTubeMusicSnapshotV0["engagement"];
   queue?: YouTubeMusicSnapshotV0["queue"];
@@ -83,6 +74,8 @@ interface StageCanvasProps {
   onTransport?: (action: YouTubeMusicTransportActionV0) => void | Promise<void>;
   onLike?: (liked: boolean) => void | Promise<void>;
   onQueueSelect?: (trackID: string, queueIndex: number) => void | Promise<void>;
+  onVolume?: (volume?: number, muted?: boolean) => void | Promise<void>;
+  onPlaybackMode?: (mode: "shuffle" | "repeat", value: boolean | "off" | "all" | "one") => void | Promise<void>;
   onExit?: () => void;
 }
 
@@ -116,7 +109,10 @@ function TransportIcon({ kind }: { kind: "previous" | "next" | "play" | "pause" 
   return <svg viewBox="0 0 24 24" aria-hidden="true"><path d={path} /></svg>;
 }
 
-function PlayerActionIcon({ kind }: { kind: "like" | "queue" }) {
+function PlayerActionIcon({ kind }: { kind: "like" | "queue" | "shuffle" | "repeat" | "volume" }) {
+  if (kind === "shuffle") return <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M16 3h5v5h-2V6.4l-3.8 3.8-1.4-1.4L17.6 5H16V3ZM3 6h4.6l9.8 9.8H21v2h-4.4L6.8 8H3V6Zm7.8 6.6 1.4 1.4-5.4 5.4H3v-2h3l4.8-4.8ZM19 16.6l-2.2-2.2 1.4-1.4 1.8 1.8V13h2v5h-5v-2h2v.6Z" /></svg>;
+  if (kind === "repeat") return <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 7h10V4l4 4-4 4V9H7a3 3 0 0 0-3 3H2a5 5 0 0 1 5-5Zm10 10H7v3l-4-4 4-4v3h10a3 3 0 0 0 3-3h2a5 5 0 0 1-5 5Z" /></svg>;
+  if (kind === "volume") return <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 9v6h4l5 4V5L8 9H4Zm11.5-.5a5 5 0 0 1 0 7l1.4 1.4a7 7 0 0 0 0-9.8l-1.4 1.4Z" /></svg>;
   return kind === "like" ? (
     <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 20.4 10.55 19.1C5.4 14.54 2 11.45 2 7.65 2 4.56 4.42 2.2 7.5 2.2c1.74 0 3.41.81 4.5 2.08A6.02 6.02 0 0 1 16.5 2.2C19.58 2.2 22 4.56 22 7.65c0 3.8-3.4 6.89-8.55 11.46L12 20.4Z" /></svg>
   ) : (
@@ -127,7 +123,6 @@ function PlayerActionIcon({ kind }: { kind: "like" | "queue" }) {
 export function StageCanvas({
   lyrics,
   localDirectorPlan,
-  remoteDirectorPlan,
   directorLookupState,
   directorMode = "legacy",
   bibleSource,
@@ -149,6 +144,7 @@ export function StageCanvas({
   artworkURL,
   durationMs,
   playbackState,
+  playbackDetails,
   controls,
   engagement,
   queue,
@@ -156,9 +152,11 @@ export function StageCanvas({
   onTransport,
   onLike,
   onQueueSelect,
+  onVolume,
+  onPlaybackMode,
   onExit,
 }: StageCanvasProps) {
-  const entryDirectorPlan = directorPlanForStageEntry(localDirectorPlan, remoteDirectorPlan);
+  const entryDirectorPlan = localDirectorPlan;
   const hostRef = useRef<HTMLDivElement>(null);
   const lyricViewportRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -174,7 +172,7 @@ export function StageCanvas({
   const frameTimeRef = useRef(lyricsTimeForPlaybackMs(displayTimeMs, lyricsOffsetMs, durationMs));
   const frameBuffersRef = useRef<StageFrameBuffersV1 | null>(null);
   const reactiveBusRef = useRef(reactiveBus);
-  const handoffRef = useRef<DirectorPlanHandoffV1>({ active: entryDirectorPlan });
+  const handoffRef = useRef({ active: entryDirectorPlan });
   const [artworkPalette, setArtworkPalette] = useState<DirectedStagePaletteV1 | undefined>();
   const [artworkCandidateIndex, setArtworkCandidateIndex] = useState(0);
   const [artworkAspect, setArtworkAspect] = useState(1);
@@ -189,10 +187,8 @@ export function StageCanvas({
   const availablePlans = useMemo(() => {
     const plans = new Map<string, DirectorPlanV1>();
     plans.set(localDirectorPlan.planIdentity, localDirectorPlan);
-    plans.set(entryDirectorPlan.planIdentity, entryDirectorPlan);
-    if (remoteDirectorPlan) plans.set(remoteDirectorPlan.planIdentity, remoteDirectorPlan);
     return plans;
-  }, [entryDirectorPlan, localDirectorPlan, remoteDirectorPlan]);
+  }, [localDirectorPlan]);
   const sectionPalettes = useMemo(() => {
     const palettes = new Map<string, DirectedStagePaletteV1>();
     availablePlans.forEach((plan) => plan.sections.forEach((section) => {
@@ -270,25 +266,9 @@ export function StageCanvas({
   }, [normalizedArtworkURL]);
 
   useEffect(() => {
-    const entry = directorPlanForStageEntry(localDirectorPlan, remoteDirectorPlan);
-    handoffRef.current = { active: entry };
+    handoffRef.current = { active: localDirectorPlan };
     frameBuffersRef.current = null;
   }, [localDirectorPlan.planIdentity]);
-
-  useLayoutEffect(() => {
-    if (!remoteDirectorPlan) {
-      if (directorMode === "rolling" && handoffRef.current.active.planIdentity !== localDirectorPlan.planIdentity) {
-        handoffRef.current = { active: localDirectorPlan };
-      }
-      return;
-    }
-    const sample = clock.sample();
-    const playbackTimeMs = sample.state === "unavailable" ? displayTimeRef.current : sample.timeMs;
-    const timeMs = lyricsTimeForPlaybackMs(playbackTimeMs, lyricsOffsetMs, durationMs);
-    handoffRef.current = directorMode === "rolling"
-      ? queueRollingDirectorPlanV1(lyrics, handoffRef.current, remoteDirectorPlan, timeMs)
-      : queueDirectorPlanV1(handoffRef.current, remoteDirectorPlan, timeMs);
-  }, [clock, directorMode, durationMs, lyrics, lyricsOffsetMs, remoteDirectorPlan?.planIdentity]);
 
   const rendererIdentity = useMemo(
     () => Array.from(availablePlans.keys())
@@ -388,10 +368,7 @@ export function StageCanvas({
         : sample.timeMs;
       const timeMs = lyricsTimeForPlaybackMs(playbackTimeMs, lyricsOffsetMs, durationMs);
       frameTimeRef.current = timeMs;
-      const handoff = sampleDirectorPlanHandoffV1(handoffRef.current, timeMs);
-      if (handoff.active.planIdentity !== handoffRef.current.active.planIdentity) {
-        handoffRef.current = handoff;
-      }
+      const handoff = handoffRef.current;
       const activeSection = directorSectionAtV1(handoff.active, timeMs);
       const activeEffect = effectRecipeAtV1(handoff.active.effects, timeMs);
       const activeLine = lyrics.lines.find((line) => timeMs >= line.fromMs && timeMs < line.toMs);
@@ -509,7 +486,7 @@ export function StageCanvas({
       if (renderFrameRef.current === render) renderFrameRef.current = null;
       document.removeEventListener("visibilitychange", visibilityChanged);
     };
-  }, [artworkPalette, bibleSource, clock, continuous, directorMode, durationMs, environmentScenes, lightweight, lyrics, lyricsOffsetMs, onMetrics, paletteForPlanTime, reduceMotion, remoteDirectorPlan?.planIdentity, rollingCards, showGuides, vjMode]);
+  }, [artworkPalette, bibleSource, clock, continuous, directorMode, durationMs, environmentScenes, lightweight, lyrics, lyricsOffsetMs, onMetrics, paletteForPlanTime, reduceMotion, rollingCards, showGuides, vjMode]);
 
   useEffect(() => {
     if (!continuous) renderFrameRef.current?.();
@@ -549,15 +526,6 @@ export function StageCanvas({
   const observedSection = directorSectionAtV1(observedPlan, observedTimeMs);
   const observedScene = rollingCards.find((card) => observedSection.id === `rolling:${card.sceneID}`
     && observedTimeMs >= card.fromMs && observedTimeMs < card.toMs);
-  const hasSemanticRollingCard = rollingCards.some((card) => card.directives !== undefined);
-  const directorStatusSource = directorMode === "rolling" && hasSemanticRollingCard
-    ? observedScene?.directives !== undefined ? observedPlan.source : "continuity"
-    : observedPlan.source;
-  const directorStatus = directorStatusLabel(
-    directorLookupState,
-    directorStatusSource,
-    directorMode === "legacy" && Boolean(remoteDirectorPlan),
-  );
   const renderedPlaybackState = playbackState ?? (continuous ? "playing" : "paused");
   return (
     <div
@@ -579,7 +547,7 @@ export function StageCanvas({
       data-dramatic-moment-count={observedPlan.dramaticScore.signatureMoments.length}
       data-dramatic-motif={observedPlan.dramaticScore.motifActor.family}
       data-playback-state={renderedPlaybackState}
-      data-shell-layout="lower-leading-dock"
+      data-shell-layout="apple-player"
       data-artwork-shape={artworkShape}
     >
       {normalizedArtworkURL && (
@@ -598,37 +566,32 @@ export function StageCanvas({
       ) : null}
       <div className="stage-now-playing-layout">
         <aside className="stage-now-playing-info" aria-label="正在播放">
-          <div className="stage-artwork-frame">
-            {normalizedArtworkURL ? (
-              <img
-                className="stage-artwork"
-                src={normalizedArtworkURL}
-                alt={title ? `${title} 的歌曲封面` : "当前歌曲封面"}
-                onLoad={(event) => {
-                  const image = event.currentTarget;
-                  if (image.naturalWidth > 0 && image.naturalHeight > 0) {
-                    setArtworkAspect(image.naturalWidth / image.naturalHeight);
-                  }
-                }}
-                onError={() => setArtworkCandidateIndex((index) => (
-                  index + 1 < normalizedArtworkCandidates.length ? index + 1 : normalizedArtworkCandidates.length
-                ))}
-              />
-            ) : (
-              <div className="stage-artwork-fallback" aria-label="当前歌曲无可用封面">{coverInitial}</div>
-            )}
+          <div className="stage-artwork-stage">
+            <div className="stage-artwork-frame">
+              {normalizedArtworkURL ? (
+                <img
+                  className="stage-artwork"
+                  src={normalizedArtworkURL}
+                  alt={title ? `${title} 的歌曲封面` : "当前歌曲封面"}
+                  onLoad={(event) => {
+                    const image = event.currentTarget;
+                    if (image.naturalWidth > 0 && image.naturalHeight > 0) {
+                      setArtworkAspect(image.naturalWidth / image.naturalHeight);
+                    }
+                  }}
+                  onError={() => setArtworkCandidateIndex((index) => (
+                    index + 1 < normalizedArtworkCandidates.length ? index + 1 : normalizedArtworkCandidates.length
+                  ))}
+                />
+              ) : (
+                <div className="stage-artwork-fallback" aria-label="当前歌曲无可用封面">{coverInitial}</div>
+              )}
+            </div>
           </div>
 
           <div className="stage-track-meta">
             <strong>{title || "LyricStage"}</strong>
             <span>{artist || "Local rehearsal"}</span>
-            <span
-              className="stage-director-status"
-              aria-live="polite"
-              title={directorLookupState.reason}
-            >
-              {directorStatus}
-            </span>
           </div>
 
           <div className="stage-progress-group">
@@ -687,6 +650,12 @@ export function StageCanvas({
                   <PlayerActionIcon kind="like" />
                 </button>
               )}
+              {controls?.shuffle && onPlaybackMode && (
+                <button type="button" aria-label="随机播放" aria-pressed={playbackDetails?.shuffle === true}
+                  onClick={() => void onPlaybackMode("shuffle", playbackDetails?.shuffle !== true)}>
+                  <PlayerActionIcon kind="shuffle" />
+                </button>
+              )}
               {controls?.previous && onTransport && (
                 <button type="button" aria-label="上一首" onClick={() => void onTransport("previous")}>
                   <TransportIcon kind="previous" />
@@ -707,6 +676,13 @@ export function StageCanvas({
                   <TransportIcon kind="next" />
                 </button>
               )}
+              {controls?.repeat && onPlaybackMode && (
+                <button type="button" aria-label={`循环播放：${playbackDetails?.repeat ?? "off"}`}
+                  aria-pressed={playbackDetails?.repeat !== "off"}
+                  onClick={() => void onPlaybackMode("repeat", playbackDetails?.repeat === "off" ? "all" : playbackDetails?.repeat === "all" ? "one" : "off")}>
+                  <PlayerActionIcon kind="repeat" />
+                </button>
+              )}
               {controls?.queue && Boolean(queue?.items.length) && (
                 <button
                   type="button"
@@ -718,6 +694,15 @@ export function StageCanvas({
                   <PlayerActionIcon kind="queue" />
                 </button>
               )}
+            </div>
+          )}
+          {controls?.volume && onVolume && (
+            <div className="stage-volume-group">
+              <button type="button" aria-label={playbackDetails?.muted ? "取消静音" : "静音"}
+                onClick={() => void onVolume(undefined, !playbackDetails?.muted)}><PlayerActionIcon kind="volume" /></button>
+              <input type="range" min={0} max={1} step={0.01}
+                value={playbackDetails?.volume ?? 1} aria-label="音量"
+                onChange={(event) => void onVolume(event.currentTarget.valueAsNumber, false)} />
             </div>
           )}
         </aside>

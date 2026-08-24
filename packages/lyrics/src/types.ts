@@ -35,6 +35,7 @@ export interface LyricsLookupResponseV0 {
   source: "network" | "cache";
   match?: LyricsCandidateV0;
   matchKind?: "sameRecording" | "originalFallback";
+  assistance?: "ai" | "aiUnavailable";
   identityResolution?: {
     method: "gemma4GoogleSearch";
     canonicalTitle: string;
@@ -113,6 +114,7 @@ export const isLyricsLookupResponseV0 = (value: unknown): value is LyricsLookupR
     response.candidates.every(isLyricsCandidateV0) &&
     (response.match === undefined || isLyricsCandidateV0(response.match)) &&
     (response.matchKind === undefined || response.matchKind === "sameRecording" || response.matchKind === "originalFallback") &&
+    (response.assistance === undefined || response.assistance === "ai" || response.assistance === "aiUnavailable") &&
     (
       response.identityResolution === undefined ||
       (

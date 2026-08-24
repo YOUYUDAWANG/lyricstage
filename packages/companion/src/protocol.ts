@@ -37,6 +37,10 @@ export interface YouTubeMusicSnapshotV0 {
     durationMs: number;
     playbackRate: number;
     state: YouTubeMusicPlaybackStateV0;
+    volume?: number;
+    muted?: boolean;
+    shuffle?: boolean;
+    repeat?: "off" | "all" | "one";
   };
   controls?: {
     seek: boolean;
@@ -45,6 +49,9 @@ export interface YouTubeMusicSnapshotV0 {
     next: boolean;
     like?: boolean;
     queue?: boolean;
+    volume?: boolean;
+    shuffle?: boolean;
+    repeat?: boolean;
   };
   engagement?: {
     likeStatus: YouTubeMusicLikeStatusV0;
@@ -146,6 +153,10 @@ export const isYouTubeMusicSnapshotV0 = (
     finiteNonNegative(playback.durationMs) &&
     finiteNonNegative(playback.playbackRate) &&
     ["playing", "paused", "buffering", "ended"].includes(playback.state) &&
+    (playback.volume === undefined || (finiteNonNegative(playback.volume) && playback.volume <= 1)) &&
+    (playback.muted === undefined || typeof playback.muted === "boolean") &&
+    (playback.shuffle === undefined || typeof playback.shuffle === "boolean") &&
+    (playback.repeat === undefined || ["off", "all", "one"].includes(playback.repeat)) &&
     (controls === undefined || (
       typeof controls.seek === "boolean" &&
       typeof controls.playPause === "boolean" &&
@@ -153,6 +164,9 @@ export const isYouTubeMusicSnapshotV0 = (
       typeof controls.next === "boolean" &&
       (controls.like === undefined || typeof controls.like === "boolean") &&
       (controls.queue === undefined || typeof controls.queue === "boolean")
+      && (controls.volume === undefined || typeof controls.volume === "boolean")
+      && (controls.shuffle === undefined || typeof controls.shuffle === "boolean")
+      && (controls.repeat === undefined || typeof controls.repeat === "boolean")
     )) &&
     (engagement === undefined || ["neutral", "liked", "disliked"].includes(engagement.likeStatus)) &&
     validQueue

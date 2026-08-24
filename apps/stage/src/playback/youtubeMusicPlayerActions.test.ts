@@ -10,6 +10,8 @@ describe("YouTube Music player actions", () => {
       expectedTrackID: "track-a",
       setLiked,
       selectQueueItem,
+      setVolume: vi.fn(async () => true),
+      setMode: vi.fn(async () => true),
       notify,
     });
     await actions.setStageLiked(true);
@@ -24,6 +26,8 @@ describe("YouTube Music player actions", () => {
     const actions = createYouTubeMusicPlayerActions({
       setLiked: vi.fn(async () => true),
       selectQueueItem: vi.fn(async () => true),
+      setVolume: vi.fn(async () => true),
+      setMode: vi.fn(async () => true),
       notify,
     });
     await actions.setStageLiked(true);

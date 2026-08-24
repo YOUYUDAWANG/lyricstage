@@ -39,6 +39,7 @@ import {
   selectYouTubeMusicQueueItem,
   seekYouTubeMusic,
   setYouTubeMusicLiked,
+  setYouTubeMusicPlaybackMode, setYouTubeMusicVolume,
   startYouTubeMusicAudioAnalysis,
   stopYouTubeMusicAudioAnalysis,
   useYouTubeMusicBridge,
@@ -816,10 +817,10 @@ export default function App({ embedded = embeddedStageFromLocation, onEmbeddedRe
           });
           setMessage(
             response.matchKind === "originalFallback"
-              ? `${response.source === "cache" ? "已从缓存恢复" : "未找到翻唱专用歌词，已采用"}原唱 ${response.match.artist || "版本"} 的同步歌词。`
+              ? `${response.source === "cache" ? "已从缓存恢复" : response.assistance === "ai" ? "AI 已识别原曲并采用" : "未找到翻唱专用歌词，已采用"}原唱 ${response.match.artist || "版本"} 的同步歌词。`
               : response.source === "cache"
                 ? "已从本地缓存恢复同步歌词，舞台正在跟随 YouTube Music。"
-                : "已自动匹配同步歌词，舞台正在跟随 YouTube Music。",
+                : response.assistance === "ai" ? "AI 已清洗标题与歌手并自动匹配同步歌词。" : "已自动匹配同步歌词，舞台正在跟随 YouTube Music。",
           );
         }
         return;
@@ -832,7 +833,7 @@ export default function App({ embedded = embeddedStageFromLocation, onEmbeddedRe
           trackIdentity,
           candidates: response.candidates,
         });
-        setMessage("找到了歌词候选，但歌手或时长不足以自动确认。请选择版本或手动搜索。");
+        setMessage(response.assistance === "ai" ? "本地规则与 AI 已完成清洗，但候选仍无法安全自动确认；请选择版本。" : "找到了歌词候选，但歌手或时长不足以自动确认。请选择版本或手动搜索。");
         return;
       }
       if (response.status === "miss") {
@@ -843,7 +844,7 @@ export default function App({ embedded = embeddedStageFromLocation, onEmbeddedRe
           trackIdentity,
           candidates: [],
         });
-        setMessage("多源歌词库暂时没有匹配结果，可修改歌名或歌手后手动搜索。");
+        setMessage(response.assistance === "ai" ? "本地规则与 AI 已尝试清洗，多源歌词库仍没有同步歌词。" : "多源歌词库暂时没有匹配结果，可修改歌名或歌手后手动搜索。");
         return;
       }
       setAutomaticLyrics({
@@ -1161,10 +1162,12 @@ export default function App({ embedded = embeddedStageFromLocation, onEmbeddedRe
     if (action === "play" || action === "pause") await togglePlayback();
   };
 
-  const { setStageLiked, selectStageQueueItem } = createYouTubeMusicPlayerActions({
+  const { setStageLiked, selectStageQueueItem, setStageVolume, setStagePlaybackMode } = createYouTubeMusicPlayerActions({
     expectedTrackID: source === "youtubeMusic" ? youtubeMusic.snapshot?.track.trackID : undefined,
     setLiked: setYouTubeMusicLiked,
     selectQueueItem: selectYouTubeMusicQueueItem,
+    setVolume: setYouTubeMusicVolume,
+    setMode: setYouTubeMusicPlaybackMode,
     notify: (notice) => { setMessage(notice); interaction.show(notice); },
   });
 
@@ -1449,13 +1452,14 @@ export default function App({ embedded = embeddedStageFromLocation, onEmbeddedRe
                   artworkURL={stageArtworkURL}
                   durationMs={durationMs}
                   playbackState={stagePlaybackState}
-                  controls={stageControls}
+                  playbackDetails={youtubeMusic.snapshot?.playback} controls={stageControls}
                   engagement={youtubeMusic.snapshot?.engagement}
                   queue={youtubeMusic.snapshot?.queue}
                   onSeek={seekStage}
                   onTransport={controlStageTransport}
                   onLike={setStageLiked}
                   onQueueSelect={selectStageQueueItem}
+                  onVolume={setStageVolume} onPlaybackMode={setStagePlaybackMode}
                   onExit={() => void exitEmbeddedFullscreen()}
                 />
               </Suspense>
@@ -1662,13 +1666,14 @@ export default function App({ embedded = embeddedStageFromLocation, onEmbeddedRe
               artworkURL={stageArtworkURL}
               durationMs={durationMs}
               playbackState={stagePlaybackState}
-              controls={stageControls}
+              playbackDetails={youtubeMusic.snapshot?.playback} controls={stageControls}
               engagement={youtubeMusic.snapshot?.engagement}
               queue={youtubeMusic.snapshot?.queue}
               onSeek={seekStage}
               onTransport={controlStageTransport}
               onLike={setStageLiked}
               onQueueSelect={selectStageQueueItem}
+              onVolume={setStageVolume} onPlaybackMode={setStagePlaybackMode}
             />
           </Suspense>
           <div className="stage-header">

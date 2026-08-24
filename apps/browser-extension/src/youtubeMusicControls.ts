@@ -82,6 +82,28 @@ export const createYouTubeMusicControlForwarder = ({
         failureReason: "like-failed",
       });
     },
+    volume(volume: number | undefined, muted: boolean | undefined, expectedTrackID: string, preferredTabID?: number) {
+      if ((!Number.isFinite(volume) && typeof muted !== "boolean") || !expectedTrackID) {
+        return Promise.resolve({ ok: false, reason: "invalid-volume" });
+      }
+      return forward({
+        expectedTrackID,
+        preferredTabID,
+        message: { type: "youtube-music-volume-command", volume, muted, expectedTrackID },
+        failureReason: "volume-failed",
+      });
+    },
+    playbackMode(mode: "shuffle" | "repeat", value: boolean | "off" | "all" | "one", expectedTrackID: string, preferredTabID?: number) {
+      if (!expectedTrackID) return Promise.resolve({ ok: false, reason: "invalid-track" });
+      return forward({
+        expectedTrackID,
+        preferredTabID,
+        message: mode === "shuffle"
+          ? { type: "youtube-music-playback-mode-command", mode, enabled: value === true, expectedTrackID }
+          : { type: "youtube-music-playback-mode-command", mode, repeat: value, expectedTrackID },
+        failureReason: "playback-mode-failed",
+      });
+    },
     selectQueue(queueTrackID: string, queueIndex: number, expectedTrackID: string, preferredTabID?: number) {
       if (!queueTrackID || !Number.isSafeInteger(queueIndex) || queueIndex < 0 || !expectedTrackID) {
         return Promise.resolve({ ok: false, reason: "invalid-queue-selection" });
