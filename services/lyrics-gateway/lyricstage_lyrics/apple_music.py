@@ -58,6 +58,14 @@ def _parse_time(value: str | None) -> int | None:
     if len(parts) == 3:
         hours, minutes, seconds = parts
         return round((int(hours) * 3600 + int(minutes) * 60 + float(seconds)) * 1000)
+    if len(parts) == 2:
+        minutes, seconds = parts
+        return round((int(minutes) * 60 + float(seconds)) * 1000)
+    if len(parts) == 1:
+        try:
+            return round(float(value) * 1000)
+        except ValueError:
+            return None
     return None
 
 

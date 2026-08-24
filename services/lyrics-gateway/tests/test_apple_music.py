@@ -20,3 +20,19 @@ def test_parse_line_timed_ttml() -> None:
     assert lines[0].start_ms == 1500
     assert lines[0].end_ms == 3000
     assert lines[0].words == []
+
+
+def test_parse_apple_bare_second_offsets() -> None:
+    lines = parse_apple_ttml(
+        '<tt xmlns="http://www.w3.org/ns/ttml"><body><p begin="28.623" end="31.343">First line</p></body></tt>'
+    )
+    assert lines[0].start_ms == 28623
+    assert lines[0].end_ms == 31343
+
+
+def test_parse_apple_minute_second_offsets() -> None:
+    lines = parse_apple_ttml(
+        '<tt xmlns="http://www.w3.org/ns/ttml"><body><p begin="1:02.427" end="1:05.027">Later line</p></body></tt>'
+    )
+    assert lines[0].start_ms == 62427
+    assert lines[0].end_ms == 65027
