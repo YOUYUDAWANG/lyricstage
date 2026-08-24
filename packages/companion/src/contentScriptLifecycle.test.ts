@@ -1836,6 +1836,8 @@ describe("YouTube Music companion isolated content script lifecycle (real DOM sh
     expect(contentScriptSource).toContain('const OWNED_LYRICS_TAB_ATTR = "data-lyricstage-owned-lyrics-tab"');
     expect(contentScriptSource).toContain('const OWNED_LYRICS_RENDERER_ATTR = "data-lyricstage-owned-lyrics-renderer"');
     expect(contentScriptSource).toContain("ensureOwnedLyricsSurface(sidePanel, tabList)");
+    expect(contentScriptSource).toContain('data-lyricstage-hidden-tab", "comments"');
+    expect(contentScriptSource).toContain("ensureAppleShellGuide()");
     expect(manifest.web_accessible_resources).toEqual([{
       resources: ["assets/content-ui.js", "assets/content-*.js", "assets/content-*.css"],
       matches: ["https://music.youtube.com/*"],

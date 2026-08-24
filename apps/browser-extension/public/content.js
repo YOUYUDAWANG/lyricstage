@@ -84,6 +84,7 @@
   const observedOwnedSurfaceTabs = new WeakSet();
   let ownedLyricsTab = null;
   let ownedLyricsRenderer = null;
+  let appleShellGuideInitialized = false;
 
   const clean = (value) => (typeof value === "string" ? value.trim() : "");
 
@@ -926,11 +927,37 @@
     return label === "lyrics" || label === "lyric" || label === "歌词" || label === "歌詞";
   };
 
+  const looksLikeCommentsTab = (tab) => {
+    const label = clean(
+      tab?.getAttribute?.("aria-label")
+      || tab?.querySelector?.("yt-formatted-string")?.textContent
+      || tab?.textContent,
+    ).toLowerCase();
+    return label === "comments" || label === "comment" || label === "评论"
+      || label === "評論" || label === "コメント";
+  };
+
   const isTabDisabled = (tab) => Boolean(
     tab?.disabled === true
     || tab?.getAttribute?.("aria-disabled") === "true"
     || tab?.hasAttribute?.("disabled")
   );
+
+  const ensureAppleShellGuide = () => {
+    if (
+      appleShellGuideInitialized
+      || document.documentElement?.getAttribute?.("data-lyricstage-shell") !== "apple"
+      || window.innerWidth < 1100
+    ) return;
+    const navigation = document.querySelector?.("ytmusic-nav-bar");
+    const drawer = document.querySelector?.("tp-yt-app-drawer#guide");
+    const guideButton = navigation?.querySelector?.("#guide-button");
+    if (!navigation || !drawer || !guideButton) return;
+    appleShellGuideInitialized = true;
+    if (navigation.hasAttribute?.("guide-collapsed") && !drawer.hasAttribute?.("opened")) {
+      guideButton.click?.();
+    }
+  };
 
   const deactivateOwnedLyricsSurface = (sidePanel) => {
     sidePanel?.removeAttribute?.(OWNED_LYRICS_ACTIVE_ATTR);
@@ -976,6 +1003,9 @@
   const ensureOwnedLyricsSurface = (sidePanel, tabList) => {
     if (!sidePanel || !tabList) return;
     const tabs = Array.from(tabList.querySelectorAll?.('[role="tab"], tp-yt-paper-tab') ?? []);
+    for (const tab of tabs) {
+      if (looksLikeCommentsTab(tab)) tab.setAttribute?.("data-lyricstage-hidden-tab", "comments");
+    }
     const nativeLyricsTab = tabs.find((tab) => !tab.hasAttribute?.(OWNED_LYRICS_TAB_ATTR) && looksLikeLyricsTab(tab));
     if (nativeLyricsTab && !isTabDisabled(nativeLyricsTab)) {
       removeOwnedLyricsSurface(sidePanel, nativeLyricsTab);
@@ -1205,6 +1235,9 @@
     for (const tab of Array.from(document.querySelectorAll?.('[data-lyricstage-native-lyrics-hidden]') ?? [])) {
       tab.removeAttribute?.("data-lyricstage-native-lyrics-hidden");
     }
+    for (const tab of Array.from(document.querySelectorAll?.('[data-lyricstage-hidden-tab="comments"]') ?? [])) {
+      tab.removeAttribute?.("data-lyricstage-hidden-tab");
+    }
     lastInteractedTab = null;
     stageMountState = "idle";
     stageMountFailure = "";
@@ -1225,6 +1258,7 @@
 
   const updateStageMount = () => {
     if (stopped || !runtimeAvailable()) return false;
+    ensureAppleShellGuide();
     updateSponsorBlockCompatibility();
     const sidePanel = document.querySelector("ytmusic-player-page#player-page #side-panel");
     const tabList =
