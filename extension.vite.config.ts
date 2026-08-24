@@ -9,6 +9,9 @@ export default defineConfig({
   publicDir: fromRoot("./apps/browser-extension/public"),
   base: "./",
   plugins: [react()],
+  define: {
+    "import.meta.env.LYRICSTAGE_CONTENT_UI": "false",
+  },
   resolve: {
     alias: {
       "@lyricstage/contracts": fromRoot("./packages/contracts/src/index.ts"),

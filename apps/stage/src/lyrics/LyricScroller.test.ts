@@ -12,7 +12,6 @@ describe("LyricScroller", () => {
       lyricTimeMs: 12_600,
       lyricsOffsetMs: 0,
       durationMs: lyrics.durationMs,
-      density: "fullscreen",
       reduceMotion: false,
       onSeek: () => undefined,
     }));
@@ -35,7 +34,6 @@ describe("LyricScroller", () => {
       lyricTimeMs: 2_000,
       lyricsOffsetMs: 0,
       durationMs: lyrics.durationMs,
-      density: "column",
       reduceMotion: false,
       onSeek: () => undefined,
     }));
@@ -43,32 +41,4 @@ describe("LyricScroller", () => {
     expect(html).toContain("data-has-active=\"false\"");
   });
 
-  it("keeps YouLy character styling exclusive to the persistent column", () => {
-    const base = lyricFixtures.duetOverlap;
-    const first = base.lines[0]!;
-    const lyrics = {
-      ...base,
-      lines: [{
-        ...first,
-        text: "光へ",
-        words: [
-          { wordIndex: 0, fromMs: first.fromMs, toMs: first.fromMs + 1_200, text: "光へ" },
-        ],
-      }],
-    };
-    const props = {
-      lyrics,
-      lyricTimeMs: first.fromMs + 600,
-      lyricsOffsetMs: 0,
-      durationMs: lyrics.durationMs,
-      reduceMotion: false,
-      onSeek: () => undefined,
-    } as const;
-    const column = renderToStaticMarkup(createElement(LyricScroller, { ...props, density: "column" }));
-    const fullscreen = renderToStaticMarkup(createElement(LyricScroller, { ...props, density: "fullscreen" }));
-    expect(column).toContain("lyric-scroller-char");
-    expect(column).toContain("youly-phase-active");
-    expect(fullscreen).not.toContain("lyric-scroller-char");
-    expect(fullscreen).not.toContain("youly-phase-active");
-  });
 });

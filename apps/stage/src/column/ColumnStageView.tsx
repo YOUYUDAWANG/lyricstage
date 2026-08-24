@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import type { LyricDocumentV0 } from "@lyricstage/contracts";
 import { lyricsProviderLabel, type LyricsCandidateV0 } from "@lyricstage/lyrics";
 import {
@@ -18,9 +18,8 @@ import {
   LYRICS_OFFSET_STEP_MS,
   lyricsTimeForPlaybackMs,
 } from "../playback/lyricsTimeOffset";
-import { LyricScroller } from "../lyrics/LyricScroller";
+import { YouLyColumnScroller, type YouLyColumnScrollerHandle } from "../lyrics/YouLyColumnScroller";
 import { activeLyricLineIndices } from "../lyrics/lyricFollowModel";
-import { columnArtworkAccentFromPixels } from "./columnArtworkAccent";
 
 export interface ColumnStageViewProps {
   bridgeAvailable: boolean;
@@ -29,7 +28,6 @@ export interface ColumnStageViewProps {
   disconnected: boolean;
   title: string;
   artist: string;
-  artworkURL?: string;
   directorStatus: string;
   directorStatusReason?: string;
   automaticStatus: AutomaticLyricsStatus;
@@ -94,7 +92,6 @@ export function ColumnStageView({
   disconnected,
   title,
   artist,
-  artworkURL,
   directorStatus,
   directorStatusReason,
   automaticStatus,
@@ -126,16 +123,20 @@ export function ColumnStageView({
   const moreButtonRef = useRef<HTMLButtonElement>(null);
   const toolsMenuRef = useRef<HTMLDivElement>(null);
   const toolPanelRef = useRef<HTMLElement>(null);
+  const youlyScrollerRef = useRef<YouLyColumnScrollerHandle>(null);
   const previousAutomaticStatusRef = useRef(automaticStatus);
+  const onSeekLineRef = useRef(onSeekLine);
+  onSeekLineRef.current = onSeekLine;
+  const lyricTimeRef = useRef(0);
   const enterFullscreenRef = useRef(onEnterFullscreen);
   enterFullscreenRef.current = onEnterFullscreen;
   const [activeTool, setActiveTool] = useState<ColumnTool | null>(null);
   const [showToolsMenu, setShowToolsMenu] = useState(false);
   const [manualTitle, setManualTitle] = useState(title);
   const [manualArtist, setManualArtist] = useState(artist);
-  const [artworkAccent, setArtworkAccent] = useState<ReturnType<typeof columnArtworkAccentFromPixels>>(null);
   const frozen = disconnected || playbackState === "paused" || playbackState === "ended";
   const lyricTimeMs = lyricsTimeForPlaybackMs(timeMs, lyricsOffsetMs, durationMs);
+  lyricTimeRef.current = lyricTimeMs;
   const lyricsOffsetLabel = lyricsOffsetMs === 0 ? "" : ` · 歌词${formatLyricsOffset(lyricsOffsetMs)}`;
 
   const closeTool = useCallback((restoreFocus = true) => {
@@ -144,40 +145,16 @@ export function ColumnStageView({
     setShowToolsMenu(false);
     if (restoreFocus) requestAnimationFrame(() => moreButtonRef.current?.focus({ preventScroll: true }));
   }, [activeTool, onShowVersions, showVersionPicker]);
+  const seekFromYouLy = useCallback((timeMs: number) => onSeekLineRef.current(timeMs), []);
+  const sampleYouLyOnReady = useCallback((handle: YouLyColumnScrollerHandle) => {
+    handle.sample(lyricTimeRef.current, true);
+  }, []);
 
   useEffect(() => {
     setManualTitle(title);
     setManualArtist(artist);
     setShowToolsMenu(false);
   }, [title, artist]);
-
-  useEffect(() => {
-    let cancelled = false;
-    if (!artworkURL) {
-      setArtworkAccent(null);
-      return;
-    }
-    const image = new Image();
-    image.crossOrigin = "anonymous";
-    image.decoding = "async";
-    image.onload = () => {
-      if (cancelled) return;
-      try {
-        const canvas = document.createElement("canvas");
-        canvas.width = 24;
-        canvas.height = 24;
-        const context = canvas.getContext("2d", { willReadFrequently: true });
-        if (!context) return;
-        context.drawImage(image, 0, 0, 24, 24);
-        setArtworkAccent(columnArtworkAccentFromPixels(context.getImageData(0, 0, 24, 24).data));
-      } catch {
-        setArtworkAccent(null);
-      }
-    };
-    image.onerror = () => { if (!cancelled) setArtworkAccent(null); };
-    image.src = artworkURL;
-    return () => { cancelled = true; };
-  }, [artworkURL]);
 
   useEffect(() => {
     if (activeTool === "versions" && !showVersionPicker) setActiveTool(null);
@@ -264,6 +241,10 @@ export function ColumnStageView({
     [hasMatchingLyrics, lyricTimeMs, lyrics.lines],
   );
 
+  useLayoutEffect(() => {
+    youlyScrollerRef.current?.sample(lyricTimeMs);
+  }, [disconnected, lyricTimeMs]);
+
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
       if (event.key === "f" || event.key === "F") {
@@ -302,11 +283,6 @@ export function ColumnStageView({
       data-state={surface}
       data-frozen={frozen || undefined}
       data-lightweight={lightweight || undefined}
-      style={artworkAccent ? {
-        "--column-lyrics-primary": artworkAccent.primary,
-        "--column-lyrics-secondary": artworkAccent.secondary,
-        "--column-artwork-ground": artworkAccent.ground,
-      } as CSSProperties : undefined}
     >
       <header className="column-header">
         <div className="column-header-info">
@@ -496,15 +472,15 @@ export function ColumnStageView({
 
       <div className="column-stream" data-shared-scroller={showStream || undefined}>
         {showStream ? (
-          <LyricScroller
+          <YouLyColumnScroller
+            ref={youlyScrollerRef}
             lyrics={lyrics}
-            lyricTimeMs={lyricTimeMs}
             lyricsOffsetMs={lyricsOffsetMs}
             durationMs={durationMs}
-            density="column"
             reduceMotion={lightweight}
             followSuspended={disconnected}
-            onSeek={onSeekLine}
+            onSeek={seekFromYouLy}
+            onReady={sampleYouLyOnReady}
           />
         ) : (
           <div className="column-stream-spacer" aria-hidden="true" />

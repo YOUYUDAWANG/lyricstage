@@ -30,7 +30,6 @@ import {
   embeddedFullscreenSurface,
   fullscreenOwnershipConfirmed,
 } from "./column/embeddedFullscreen";
-import { ColumnStageView } from "./column/ColumnStageView";
 import { FullscreenTrackTransition } from "./column/FullscreenTrackTransition";
 import { retainCandidatesAfterChoice } from "./column/timedLineText";
 import {
@@ -94,6 +93,9 @@ import {
 
 const loadStageCanvasModule = () => import("./StageCanvas");
 const StageCanvas = lazy(() => loadStageCanvasModule().then((module) => ({ default: module.StageCanvas })));
+const ColumnStageView = import.meta.env.DEV || import.meta.env.LYRICSTAGE_CONTENT_UI
+  ? lazy(() => import("./column/ColumnStageView").then((module) => ({ default: module.ColumnStageView })))
+  : null;
 const stageCanvasFallback = <div className="stage-canvas-loading" role="status">正在装入全屏演出引擎…</div>;
 
 const fixtureParameter = import.meta.env.DEV
@@ -1354,6 +1356,7 @@ export default function App({ embedded = embeddedStageFromLocation, onEmbeddedRe
     && Boolean(remoteDirectorPlan)
     && !displayedRemoteDirectorPlan;
   const fullscreenSurface = embeddedFullscreenSurface(presentation, hasMatchingLyrics);
+  const devColumnPreview = import.meta.env.DEV && embeddedStage && Boolean(fixtureParameter);
   const fullscreenTransitionStatus = automaticLyrics.status === "candidates"
     ? "等待选择歌词版本"
     : automaticLyrics.status === "miss"
@@ -1364,29 +1367,29 @@ export default function App({ embedded = embeddedStageFromLocation, onEmbeddedRe
 
   if (embeddedStage) {
     return (
-      <div className="column-app" data-presentation={presentation}>
-        {presentation === "column" && (
-          <ColumnStageView
-            bridgeAvailable={youtubeMusic.available}
-            bridgeConnected={youtubeMusic.connected}
-            hasSnapshot={Boolean(youtubeMusic.snapshot)}
-            disconnected={disconnected}
+      <div className="column-app" data-presentation={presentation} data-dev-preview={devColumnPreview || undefined}>
+        {presentation === "column" && ColumnStageView && (
+          <Suspense fallback={<div className="column-stage" aria-busy="true" />}>
+            <ColumnStageView
+            bridgeAvailable={devColumnPreview || youtubeMusic.available}
+            bridgeConnected={devColumnPreview || youtubeMusic.connected}
+            hasSnapshot={devColumnPreview || Boolean(youtubeMusic.snapshot)}
+            disconnected={devColumnPreview ? false : disconnected}
             title={columnTitle}
             artist={columnArtist}
-            artworkURL={stageArtworkURL}
             directorStatus={directorStatusLabel(directorLookupState, columnDirectorSource, columnHasQueuedDirectorPlan)}
             directorStatusReason={directorStatusDetail(directorLookupState)}
-            automaticStatus={automaticLyrics.status}
+            automaticStatus={devColumnPreview ? "matched" : automaticLyrics.status}
             message={message}
             interactionNotice={interaction.notice}
             candidates={automaticLyrics.candidates}
             selectedCandidateKey={automaticLyrics.selectedCandidateKey}
-            hasMatchingLyrics={hasMatchingLyrics}
+            hasMatchingLyrics={devColumnPreview || hasMatchingLyrics}
             lyrics={lyrics}
-            timeMs={columnTimeMs}
+            timeMs={devColumnPreview ? demoTimeMs : columnTimeMs}
             durationMs={durationMs}
             playbackState={youtubeMusic.snapshot?.playback.state}
-            canEnterFullscreen={canEnterEmbeddedFullscreen(hasMatchingLyrics)}
+            canEnterFullscreen={canEnterEmbeddedFullscreen(devColumnPreview || hasMatchingLyrics)}
             lightweight={lightweight}
             lyricsOffsetMs={effectiveLyricsOffsetMs}
             onSetLyricsOffset={setCurrentLyricsOffset}
@@ -1402,7 +1405,8 @@ export default function App({ embedded = embeddedStageFromLocation, onEmbeddedRe
             showVersionPicker={showVersionPicker}
             manualSearchPending={manualSearchPending}
             onManualSearch={(title, artist) => void searchLyricsManually(title, artist)}
-          />
+            />
+          </Suspense>
         )}
         <section
           ref={stageShellRef}

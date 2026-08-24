@@ -9,6 +9,7 @@ export default defineConfig({
   publicDir: false,
   define: {
     "process.env.NODE_ENV": JSON.stringify("production"),
+    "import.meta.env.LYRICSTAGE_CONTENT_UI": "true",
   },
   plugins: [react()],
   resolve: {

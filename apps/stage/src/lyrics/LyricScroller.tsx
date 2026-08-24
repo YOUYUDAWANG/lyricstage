@@ -2,7 +2,6 @@ import {
   useCallback,
   useEffect,
   useLayoutEffect,
-  memo,
   useMemo,
   useRef,
   useState,
@@ -10,11 +9,7 @@ import {
   type KeyboardEvent as ReactKeyboardEvent,
 } from "react";
 import type { LyricDocumentV0 } from "@lyricstage/contracts";
-import {
-  alignTimedLineSegments,
-  wordProgressFromTiming,
-  type TimedLineSegment,
-} from "../column/timedLineText";
+import { alignTimedLineSegments, wordProgressFromTiming } from "../column/timedLineText";
 import { formatClock, mapVoiceClass } from "../column/columnModel";
 import { playbackTimeForLyricsMs } from "../playback/lyricsTimeOffset";
 import {
@@ -27,19 +22,12 @@ import {
   nextLyricStartIntervalMs,
   type LyricFollowMode,
 } from "./lyricFollowModel";
-import {
-  graphemeWipeProgress,
-  segmentDisplayGraphemes,
-  youlyLineVisualClass,
-  youlyWordGrowthScale,
-} from "./youlyVisualModel";
 
 export interface LyricScrollerProps {
   lyrics: LyricDocumentV0;
   lyricTimeMs: number;
   lyricsOffsetMs: number;
   durationMs: number;
-  density: "column" | "fullscreen";
   reduceMotion: boolean;
   followSuspended?: boolean;
   onSeek: (playbackTimeMs: number) => void | Promise<void>;
@@ -47,59 +35,11 @@ export interface LyricScrollerProps {
 
 const userBrowseKeys = new Set(["ArrowUp", "ArrowDown", "PageUp", "PageDown", "Home", "End"]);
 
-type TimedWordSegment = Extract<TimedLineSegment, { kind: "word" }>;
-
-const YouLyTimedWord = memo(function YouLyTimedWord({
-  segment,
-  sampleTimeMs,
-  phase,
-  reduceMotion,
-}: {
-  segment: TimedWordSegment;
-  sampleTimeMs: number;
-  phase: "past" | "active" | "future";
-  reduceMotion: boolean;
-}) {
-  const graphemes = useMemo(() => segmentDisplayGraphemes(segment.text), [segment.text]);
-  const progress = phase === "active"
-    ? wordProgressFromTiming(sampleTimeMs, segment.fromMs, segment.toMs)
-    : phase === "past" ? 1 : 0;
-  const scale = youlyWordGrowthScale(
-    progress,
-    graphemes.length,
-    segment.toMs - segment.fromMs,
-    reduceMotion,
-  );
-  return (
-    <span
-      className="lyric-scroller-word lyric-scroller-word-wrap"
-      data-has-timing="true"
-      data-timing-kind={segment.timingKind}
-      data-growable={scale !== 1 || undefined}
-      style={{
-        "--word-progress": `${progress * 100}%`,
-        "--youly-word-scale": String(scale),
-      } as CSSProperties}
-    >
-      {graphemes.map((grapheme, index) => (
-        <span
-          key={`${index}:${grapheme}`}
-          className="lyric-scroller-char"
-          style={{ "--char-progress": `${graphemeWipeProgress(progress, index, graphemes.length) * 100}%` } as CSSProperties}
-        >
-          {grapheme}
-        </span>
-      ))}
-    </span>
-  );
-});
-
 export function LyricScroller({
   lyrics,
   lyricTimeMs,
   lyricsOffsetMs,
   durationMs,
-  density,
   reduceMotion,
   followSuspended = false,
   onSeek,
@@ -151,7 +91,7 @@ export function LyricScroller({
     const bounds = elements.map((element) => element.getBoundingClientRect());
     const groupTop = Math.min(...bounds.map((rect) => rect.top));
     const groupBottom = Math.max(...bounds.map((rect) => rect.bottom));
-    const anchor = density === "fullscreen" ? 0.4 : 0.3;
+    const anchor = 0.4;
     const target = viewport.scrollTop
       + (groupTop + groupBottom) / 2
       - viewportRect.top
@@ -188,7 +128,7 @@ export function LyricScroller({
       }
     };
     animationFrameRef.current = requestAnimationFrame(step);
-  }, [cancelAutomaticScroll, density, nextIntervalMs, reduceMotion, setMode]);
+  }, [cancelAutomaticScroll, nextIntervalMs, reduceMotion, setMode]);
 
   const enterBrowsing = useCallback(() => {
     cancelAutomaticScroll();
@@ -281,10 +221,10 @@ export function LyricScroller({
   return (
     <div
       className="lyric-scroller"
-      data-density={density}
+      data-density="fullscreen"
       data-follow-mode={followMode}
       data-has-active={activeIndices.length > 0}
-      style={{ "--lyric-anchor": density === "fullscreen" ? "40%" : "30%" } as CSSProperties}
+      style={{ "--lyric-anchor": "40%" } as CSSProperties}
     >
       <div
         ref={viewportRef}
@@ -311,7 +251,6 @@ export function LyricScroller({
             const proximity = phase === "active" ? "active" : distance <= 1 ? "near" : distance <= 2 ? "middle" : "far";
             const segments = lineSegments.get(line.lineIndex) ?? [{ kind: "plain" as const, text: line.text }];
             const targetTimeMs = playbackTimeForLyricsMs(line.fromMs, lyricsOffsetMs, durationMs);
-            const visualClass = density === "column" ? youlyLineVisualClass(phase, proximity) : "";
             return (
               <button
                 key={line.lineIndex}
@@ -320,7 +259,7 @@ export function LyricScroller({
                   else lineElementsRef.current.delete(line.lineIndex);
                 }}
                 type="button"
-                className={`lyric-scroller-line ${visualClass}`.trim()}
+                className="lyric-scroller-line"
                 dir="auto"
                 tabIndex={lyricLineTabIndex(line.lineIndex, activeIndices, lyrics.lines[0]?.lineIndex ?? line.lineIndex)}
                 aria-current={phase === "active" ? "true" : undefined}
@@ -328,31 +267,18 @@ export function LyricScroller({
                 title={`跳转到 ${formatClock(targetTimeMs)}`}
                 data-phase={phase}
                 data-voice={mapVoiceClass(line.voiceRole)}
-                data-voice-role={line.voiceRole ?? "lead"}
                 data-proximity={proximity}
-                data-gap={!line.text.trim() || undefined}
                 onClick={() => seekLine(line.lineIndex, line.fromMs)}
                 onKeyDown={(event) => moveFocus(event, line.lineIndex)}
               >
                 <span className="lyric-scroller-line-words">
-                  {!line.text.trim() ? <span className="lyric-scroller-gap-dots" aria-hidden="true">···</span> : segments.map((segment, index) => {
+                  {segments.map((segment, index) => {
                     if (segment.kind !== "word") {
                       return <span key={`${line.lineIndex}:gap:${index}`} className="lyric-scroller-word">{segment.text}</span>;
                     }
                     const progress = phase === "active"
                       ? wordProgressFromTiming(lyricTimeMs, segment.fromMs, segment.toMs)
                       : phase === "past" ? 1 : 0;
-                    if (density === "column") {
-                      return (
-                        <YouLyTimedWord
-                          key={`${line.lineIndex}:word:${segment.wordIndex}:${index}`}
-                          segment={segment}
-                          sampleTimeMs={phase === "active" ? lyricTimeMs : phase === "past" ? segment.toMs : segment.fromMs}
-                          phase={phase}
-                          reduceMotion={reduceMotion}
-                        />
-                      );
-                    }
                     return (
                       <span
                         key={`${line.lineIndex}:word:${segment.wordIndex}:${index}`}

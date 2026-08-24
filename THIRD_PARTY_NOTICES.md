@@ -21,7 +21,9 @@ This notice is informational and does not replace the license texts shipped by t
 
 ## YouLy+
 
-The persistent lyrics column adapts interaction and visual presentation concepts from
-[YouLy+](https://github.com/ibratabian17/YouLyPlus), including proximity-based lyric hierarchy,
-per-character progress styling, inactive-line blur, voice-aware alignment, and direct lyric seeking.
+The persistent lyrics column adapts the rendering structure and animation algorithms from
+[YouLy+ 4.4.3 at `69d2480`](https://github.com/ibratabian17/YouLyPlus/tree/69d2480c39dd226ebfc3960430b21a9f869c353e),
+including its persistent line/word/syllable/character hierarchy, directional staggered scrolling,
+pre-highlight and wipe states, growable-word metrics, gap lines, inactive-line blur,
+voice-aware alignment, off-screen suspension, and direct lyric seeking.
 YouLy+ is Copyright (c) 2025 Ibra Al Tabian and is distributed under the MIT License.

@@ -1,7 +1,5 @@
 .column-stage {
   --column-lyrics-primary: #ffffff;
-  --column-lyrics-secondary: rgba(255, 255, 255, 0.5);
-  --column-artwork-ground: rgb(16 16 20);
   position: relative;
   display: flex;
   flex-direction: column;
@@ -16,28 +14,6 @@
   box-sizing: border-box;
   isolation: isolate;
   overflow: hidden;
-}
-
-.column-stage::before {
-  position: absolute;
-  z-index: 0;
-  inset: -18%;
-  content: "";
-  pointer-events: none;
-  background:
-    radial-gradient(circle at 68% 24%, color-mix(in srgb, var(--column-lyrics-primary) 24%, transparent), transparent 47%),
-    radial-gradient(circle at 12% 78%, color-mix(in srgb, var(--column-lyrics-secondary) 16%, transparent), transparent 52%),
-    linear-gradient(150deg, color-mix(in srgb, var(--column-artwork-ground) 76%, transparent), transparent 68%);
-  filter: blur(28px) saturate(1.08);
-  opacity: 0.78;
-  transform: scale(1.05);
-  will-change: filter, opacity, transform;
-}
-
-.column-stream,
-.column-footer {
-  position: relative;
-  z-index: 1;
 }
 
 .column-header {
@@ -632,6 +608,8 @@
   overflow: hidden;
   background: transparent;
 }
+
+.column-app[data-dev-preview="true"] { height: 100vh; }
 
 .fullscreen-runtime {
   position: relative;

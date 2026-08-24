@@ -709,7 +709,6 @@ export function StageCanvas({
             lyricTimeMs={lyricsTimeForPlaybackMs(displayTimeMs, lyricsOffsetMs, durationMs)}
             lyricsOffsetMs={lyricsOffsetMs}
             durationMs={durationMs}
-            density="fullscreen"
             reduceMotion={reduceMotion || lightweight}
             followSuspended={scrubbing}
             onSeek={(timeMs) => onSeek?.(timeMs)}

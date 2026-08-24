@@ -1,0 +1,272 @@
+/* Adapted from YouLy+ 4.4.3 lyrics.css (MIT, Copyright 2025 Ibra Al Tabian). */
+.youly-column-shell {
+  --lyplus-text-primary: var(--column-lyrics-primary, #fff);
+  --lyplus-text-secondary: rgba(255, 255, 255, 0.33);
+  --lyplus-blur-amount: 0.07em;
+  --lyplus-blur-amount-near: 0.035em;
+  --lyplus-font-size-base-grow: 24;
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  min-height: 0;
+  color: #fff;
+  font-family: Roboto, "Noto Sans SC", "Noto Sans JP", Arial, -apple-system, sans-serif;
+}
+
+.youly-column-viewport {
+  width: 100%;
+  height: 100%;
+  overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-width: none;
+  scroll-behavior: auto;
+  will-change: scroll-position;
+  mask-image: linear-gradient(to bottom, transparent 0%, #000 8%, #000 72%, transparent 100%);
+  -webkit-mask-image: linear-gradient(to bottom, transparent 0%, #000 8%, #000 72%, transparent 100%);
+}
+
+.youly-column-viewport::-webkit-scrollbar { display: none; }
+
+.youly-column-container {
+  box-sizing: border-box;
+  width: 100%;
+  min-height: 100%;
+  padding-top: calc(1em + 25%);
+  color: var(--lyplus-text-primary);
+  font-size: clamp(22px, 6.1cqi, 26px);
+  font-weight: 750;
+  direction: ltr;
+  transform: translateZ(0);
+}
+
+.youly-line {
+  appearance: none;
+  display: block;
+  width: 100%;
+  margin: 0 0 0.12em;
+  border: 0;
+  border-radius: 0.6em;
+  padding: 10px;
+  color: var(--lyplus-text-secondary);
+  background: transparent;
+  font: inherit;
+  line-height: 1.25;
+  text-align: start;
+  white-space: pre-wrap;
+  overflow-wrap: break-word;
+  cursor: pointer;
+  opacity: 0.8;
+  transform: translateZ(1px);
+  transform-origin: left;
+  transition: opacity 300ms ease, transform 400ms cubic-bezier(.41, 0, .12, .99) var(--lyrics-line-delay, 0ms), filter 300ms ease;
+  will-change: transform, filter, opacity;
+  content-visibility: auto;
+  contain-intrinsic-size: auto 52px;
+  text-rendering: optimizeLegibility;
+  mix-blend-mode: lighten;
+}
+
+.youly-line.singer-right { text-align: end; transform-origin: right; }
+.youly-line.rtl-text { direction: rtl; }
+.youly-line.active { color: var(--lyplus-text-primary); opacity: 1; }
+
+.youly-column-container.blur-inactive-enabled:not(.not-focused) .youly-line:not(.active):not(.lyrics-gap) {
+  filter: blur(var(--lyplus-blur-amount));
+}
+
+.youly-column-container.blur-inactive-enabled:not(.not-focused) .youly-line:is(.post-active-line, .next-active-line, .lyrics-activest):not(.active):not(.lyrics-gap) {
+  filter: blur(var(--lyplus-blur-amount-near));
+}
+
+.youly-column-container.hide-offscreen .youly-line.viewport-hidden * {
+  visibility: hidden;
+  animation: none !important;
+  transition: none !important;
+  will-change: auto !important;
+  filter: none !important;
+}
+
+.youly-line-container {
+  display: block;
+  transform: scale3d(0.93, 0.93, 0.95);
+  transform-origin: 5% 50%;
+  transition: transform 700ms ease, color 700ms;
+}
+
+.youly-line.singer-right .youly-line-container { transform-origin: 95% 50%; }
+.youly-line.active:not(.lyrics-gap) .youly-line-container {
+  transform: scale3d(1.001, 1.001, 1);
+  transition: transform 500ms ease, color 180ms;
+  will-change: transform;
+}
+
+.youly-column-container.not-focused .youly-line-container {
+  transform: scale3d(1, 1, 1);
+  transition: transform 300ms ease, color 700ms;
+}
+
+.youly-main-vocal-container { display: block; margin: 0; transform-origin: inherit; }
+.youly-word:not(.allow-break) { display: inline-block; vertical-align: baseline; }
+.youly-syllable-wrap { display: inline; }
+
+.youly-syllable {
+  display: inline-block;
+  color: transparent;
+  background-color: var(--lyplus-text-secondary);
+  background-clip: text;
+  -webkit-background-clip: text;
+  white-space: normal;
+  font-variant-ligatures: none;
+  font-feature-settings: "liga" 0;
+  transition: color 700ms, background-color 700ms, transform 700ms ease;
+}
+
+.youly-syllable.finished { background-color: var(--lyplus-text-primary); transition: transform 1s ease !important; }
+.youly-line.active:not(.lyrics-gap) .youly-syllable {
+  transform: translateY(0.001%) translateZ(1px);
+  transition: transform 1s ease, background-color 500ms, color 500ms;
+  will-change: transform, background;
+}
+
+.youly-line.active:not(.lyrics-gap) .youly-syllable:is(.highlight, .pre-highlight) {
+  background-image: linear-gradient(90deg, transparent 0%, var(--lyplus-text-primary) 50%, transparent 100%), linear-gradient(90deg, var(--lyplus-text-primary) 100%, transparent 100%);
+  background-repeat: no-repeat;
+  background-size: 0.5em 100%, 0% 100%;
+  background-position: -0.5em 0%, -0.25em 0%;
+}
+
+.youly-line.active:not(.lyrics-gap) .youly-word:not(.growable) .youly-syllable.highlight,
+.youly-word.growable .youly-syllable.cleanup .youly-char {
+  transform: translateY(-3.5%) translateZ(1px);
+}
+
+.youly-syllable.pre-highlight {
+  animation: youly-pre-wipe-universal var(--pre-wipe-duration) linear var(--pre-wipe-delay) forwards;
+}
+
+.youly-syllable:has(.youly-char) { color: transparent; background: none !important; }
+.youly-char {
+  display: inline-block;
+  color: transparent;
+  background-color: var(--lyplus-text-secondary);
+  background-clip: text;
+  -webkit-background-clip: text;
+  white-space: break-spaces;
+  font-variant-ligatures: none;
+  font-feature-settings: "liga" 0;
+  transform-origin: 50% 80%;
+  transition: color 180ms, background-color 700ms, transform 700ms ease;
+  will-change: background, transform;
+}
+
+.youly-syllable.finished .youly-char { background-color: var(--lyplus-text-primary); }
+.youly-line.active .youly-char {
+  background-image: linear-gradient(90deg, transparent 0%, var(--lyplus-text-primary) 50%, transparent 100%), linear-gradient(90deg, var(--lyplus-text-primary) 100%, transparent 100%);
+  background-repeat: no-repeat;
+  background-size: 0.5em 100%, 0% 100%;
+  background-position: -0.5em 0%, -0.25em 0%;
+}
+
+.youly-line.lyrics-gap {
+  box-sizing: content-box;
+  height: 0;
+  padding: 0 0.4em;
+  overflow: hidden;
+  opacity: 0;
+  transition: padding 300ms 500ms, height 300ms 500ms, opacity 200ms 500ms, transform 300ms var(--lyrics-line-delay, 0ms);
+}
+
+.youly-line.lyrics-gap.active {
+  height: 1em;
+  padding: 0.4em;
+  opacity: 1;
+  transition: padding 300ms, height 300ms, opacity 200ms 300ms, transform 300ms;
+}
+
+.youly-line.lyrics-gap .youly-line-container { transform: translateY(-25%) scale(1) translateZ(0); }
+.youly-line.lyrics-gap.active .youly-word { animation: youly-gap-loop 4s ease infinite alternate; }
+.youly-line.lyrics-gap .youly-syllable {
+  width: 0.4em;
+  height: 0.4em;
+  margin: 0 0.1em;
+  overflow: hidden;
+  border-radius: 1em;
+  background-color: var(--lyplus-text-secondary);
+  background-clip: unset;
+}
+.youly-line.lyrics-gap.active .youly-syllable:is(.highlight, .finished),
+.youly-line.lyrics-gap:is(.post-active-line, .lyrics-activest) .youly-syllable {
+  background-color: var(--lyplus-text-primary);
+  opacity: 1;
+}
+
+.youly-line.scroll-animate {
+  animation: youly-lyrics-scroll var(--scroll-duration, 400ms) cubic-bezier(.41, 0, .12, .99) var(--lyrics-line-delay, 0ms) both;
+}
+
+.youly-column-end-space { height: 100vh; pointer-events: none; }
+
+.youly-return-current {
+  position: absolute;
+  z-index: 4;
+  left: 50%;
+  bottom: 14px;
+  transform: translateX(-50%);
+  border: 1px solid rgba(255, 255, 255, 0.24);
+  border-radius: 999px;
+  padding: 9px 14px;
+  color: #fff;
+  background: rgba(18, 18, 22, 0.72);
+  backdrop-filter: blur(18px) saturate(1.25);
+  font: 650 12px/1 system-ui, sans-serif;
+  cursor: pointer;
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .youly-line:hover { background: rgba(255, 255, 255, 0.13); }
+}
+
+@keyframes youly-wipe {
+  from { background-size: 0.75em 100%, 0% 100%; background-position: -0.375em 0%, left; }
+  to { background-size: 0.75em 100%, 100% 100%; background-position: calc(100% + 0.375em) 0%, left; }
+}
+@keyframes youly-start-wipe {
+  from { background-size: 0.75em 100%, 0% 100%; background-position: -0.75em 0%, -0.375em 0%; }
+  to { background-size: 0.75em 100%, 100% 100%; background-position: calc(100% + 0.375em) 0%, left; }
+}
+@keyframes youly-wipe-rtl {
+  from { background-size: 0.75em 100%, 0% 100%; background-position: calc(100% + 0.375em) 0%, calc(100% + 0.36em); }
+  to { background-size: 0.75em 100%, 100% 100%; background-position: -0.75em 0%, right; }
+}
+@keyframes youly-start-wipe-rtl {
+  from { background-size: 0.75em 100%, 0% 100%; background-position: calc(100% + 0.75em) 0%, calc(100% + 0.5em); }
+  to { background-size: 0.75em 100%, 100% 100%; background-position: -0.75em 0%, right; }
+}
+@keyframes youly-pre-wipe-universal {
+  from { background-size: 0.75em 100%, 0% 100%; background-position: -0.75em 0%, left; }
+  to { background-size: 0.75em 100%, 0% 100%; background-position: -0.375em 0%, left; }
+}
+@keyframes youly-pre-wipe-char {
+  from { background-size: 0.75em 100%, 0% 100%; background-position: -0.75em 0%, left; }
+  to { background-size: 0.75em 100%, 0% 100%; background-position: -0.375em 0%, left; }
+}
+@keyframes youly-grow-dynamic {
+  0% { transform: matrix3d(1,0,0,0,0,1,0,0,0,0,1,0,0,0,0,1); filter: drop-shadow(0 0 0 transparent); }
+  25%, 30% {
+    transform: matrix3d(calc(var(--max-scale) * calc(var(--lyplus-font-size-base-grow) / 25)),0,0,0,0,calc(var(--max-scale) * calc(var(--lyplus-font-size-base-grow) / 25)),0,0,0,0,1,0,calc(var(--char-offset-x) * calc(var(--lyplus-font-size-base-grow) / 25)),var(--translate-y-peak, -2%),0,1);
+    filter: drop-shadow(0 0 0.1em rgba(255,255,255,var(--shadow-intensity)));
+  }
+  100% { transform: translateY(-3.5%) translateZ(1px); }
+}
+@keyframes youly-fade-gap { from { background-color: var(--lyplus-text-secondary); } to { background-color: var(--lyplus-text-primary); } }
+@keyframes youly-gap-loop { from { transform: scale(1.1); } to { transform: scale(0.9); } }
+@keyframes youly-lyrics-scroll { from { transform: translateY(var(--scroll-delta)) translateZ(1px); } to { transform: translateY(0) translateZ(1px); } }
+
+@media (prefers-reduced-motion: reduce) {
+  .youly-line,
+  .youly-line-container,
+  .youly-syllable,
+  .youly-char { animation: none !important; transform: none !important; transition-duration: 120ms; }
+}
