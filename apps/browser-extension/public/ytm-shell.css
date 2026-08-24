@@ -30,7 +30,10 @@
   --ytmusic-badge-chip-background: rgba(60, 60, 67, 0.08);
   --ytmusic-explore-chip-background: rgba(255, 255, 255, 0.68);
   color-scheme: light;
-  background: var(--ls-shell-bg);
+  background:
+    radial-gradient(circle at 78% 8%, rgba(207, 224, 255, 0.78), transparent 38%),
+    radial-gradient(circle at 18% 82%, rgba(255, 221, 231, 0.62), transparent 42%),
+    linear-gradient(145deg, #f7f7fa 0%, var(--ls-shell-bg) 58%, #e3e7ef 100%) fixed;
 }
 
 :root[data-lyricstage-shell="apple"][data-lyricstage-guide="collapsed"] {
@@ -40,10 +43,7 @@
 :root[data-lyricstage-shell="apple"] body,
 :root[data-lyricstage-shell="apple"] ytmusic-app {
   color: var(--ls-shell-label) !important;
-  background:
-    radial-gradient(circle at 78% 8%, rgba(207, 224, 255, 0.78), transparent 38%),
-    radial-gradient(circle at 18% 82%, rgba(255, 221, 231, 0.62), transparent 42%),
-    linear-gradient(145deg, #f7f7fa 0%, var(--ls-shell-bg) 58%, #e3e7ef 100%) !important;
+  background: transparent !important;
   font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Helvetica Neue", sans-serif !important;
   font-optical-sizing: auto;
 }
@@ -267,7 +267,7 @@
   height: 56px !important;
   min-height: 56px !important;
   border-radius: 18px !important;
-  overflow: hidden !important;
+  overflow: visible !important;
   transform: translateX(-50%) !important;
   grid-template-columns: minmax(232px, 260px) minmax(0, 1fr) minmax(232px, 260px) !important;
   color: var(--ls-shell-label) !important;
@@ -497,6 +497,20 @@
 
 :root[data-lyricstage-shell="apple"] ytmusic-player-page#player-page #song-media-window {
   background-image: none !important;
+}
+
+:root[data-lyricstage-shell="apple"] ytmusic-player-page#player-page #song-video,
+:root[data-lyricstage-shell="apple"] ytmusic-player-page#player-page #song-video .player-wrapper,
+:root[data-lyricstage-shell="apple"] ytmusic-player-page#player-page #song-video #movie_player,
+:root[data-lyricstage-shell="apple"] ytmusic-player-page#player-page #song-video .html5-video-container,
+:root[data-lyricstage-shell="apple"] ytmusic-player-page#player-page #song-video video {
+  width: 100% !important;
+  height: 100% !important;
+}
+
+:root[data-lyricstage-shell="apple"] ytmusic-player-page#player-page #song-video .html5-video-container,
+:root[data-lyricstage-shell="apple"] ytmusic-player-page#player-page #song-video video {
+  inset: 0 !important;
 }
 
 :root[data-lyricstage-shell="apple"] ytmusic-player-page#player-page #song-media-window .top-row-buttons {
