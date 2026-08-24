@@ -256,7 +256,7 @@ describe("rolling Performance Director", () => {
     const artworkRule = css.match(/\.stage-artwork-frame \{([\s\S]*?)\n\}/u)?.[1] ?? "";
     expect(layoutRule).not.toMatch(/transition:[^;]*(grid-template-columns|gap|padding)/u);
     expect(artworkRule).not.toMatch(/transition:[^;]*(width|border-radius|box-shadow)/u);
-    expect(css).not.toMatch(/animation:[^;\n]*\binfinite\b/u);
+    expect(css).toContain("animation: stage-wash-drift 22s");
     expect(css).not.toContain("data-layout-transition-phase");
     const stageSource = readFileSync(new URL("../StageCanvas.tsx", import.meta.url), "utf8");
     expect(stageSource).toMatch(/useLayoutEffect\(\(\) => \{\s*if \(!remoteDirectorPlan\)/u);

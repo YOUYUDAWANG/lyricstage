@@ -632,6 +632,8 @@ h1 {
   transform: scale(1.12);
   transform-origin: 50% 50%;
   mix-blend-mode: screen;
+  animation: stage-wash-drift 22s cubic-bezier(0.77, 0, 0.175, 1) infinite alternate;
+  will-change: transform;
   pointer-events: none;
 }
 
@@ -645,6 +647,8 @@ h1 {
   object-position: 72% 32%;
   filter: blur(124px) saturate(1.76) brightness(0.74) contrast(1.04);
   mix-blend-mode: screen;
+  animation-direction: alternate-reverse;
+  animation-duration: 29s;
 }
 
 .stage-world-motif {
@@ -657,6 +661,7 @@ h1 {
     radial-gradient(circle at 76% 66%, color-mix(in srgb, var(--stage-signal-alt, #ffffff) 24%, transparent), transparent 42%);
   filter: blur(var(--stage-world-blur-silk, 42px));
   transform: scale(1.08);
+  will-change: transform;
   pointer-events: none;
 }
 
@@ -700,6 +705,36 @@ h1 {
     radial-gradient(circle at 74% 28%, color-mix(in srgb, var(--stage-ink, #ffffff) 28%, transparent), transparent 30%);
   filter: blur(var(--stage-world-blur-light, 35px));
 }
+
+.stage-canvas-host[data-world-motion="flow"] .stage-world-motif { animation: stage-world-flow 13s cubic-bezier(0.77, 0, 0.175, 1) infinite alternate; }
+.stage-canvas-host[data-world-motion="pulse"] .stage-world-motif { animation: stage-world-pulse 4.8s cubic-bezier(0.77, 0, 0.175, 1) infinite; }
+.stage-canvas-host[data-world-motion="fall"] .stage-world-motif { animation: stage-world-fall 10s cubic-bezier(0.77, 0, 0.175, 1) infinite alternate; }
+.stage-canvas-host[data-world-motion="orbit"] .stage-world-motif { animation: stage-world-orbit 18s linear infinite; }
+.stage-canvas-host[data-world-motion="converge"] .stage-world-motif { animation: stage-world-converge 8s cubic-bezier(0.77, 0, 0.175, 1) infinite alternate; }
+.stage-canvas-host[data-world-motion="suspend"] .stage-world-motif { animation: stage-world-suspend 14s cubic-bezier(0.77, 0, 0.175, 1) infinite alternate; }
+.stage-canvas-host[data-world-motion="fracture"] .stage-world-motif { animation: stage-world-fracture 7s steps(1, end) infinite; }
+
+@keyframes stage-wash-drift {
+  from { transform: translate3d(-1.4%, 0.8%, 0) scale(1.12) rotate(-0.22deg); }
+  48% { transform: translate3d(1.1%, -0.9%, 0) scale(1.16) rotate(0.16deg); }
+  to { transform: translate3d(0.3%, 1.1%, 0) scale(1.14) rotate(0.24deg); }
+}
+
+@keyframes stage-world-flow {
+  from { transform: translate3d(-2.4%, 1.2%, 0) scale(1.08) rotate(-0.4deg); }
+  to { transform: translate3d(2.8%, -1.8%, 0) scale(1.14) rotate(0.5deg); }
+}
+
+@keyframes stage-world-pulse {
+  0%, 100% { transform: scale(1.06); opacity: var(--stage-world-opacity-pulse-low, 0.30); }
+  48% { transform: scale(var(--stage-world-pulse-scale, 1.11)); opacity: var(--stage-world-opacity-pulse-high, 0.46); }
+}
+
+@keyframes stage-world-fall { from { transform: translate3d(0, -4%, 0) scale(1.10); } to { transform: translate3d(0, 4%, 0) scale(1.12); } }
+@keyframes stage-world-orbit { to { transform: scale(1.12) rotate(360deg); } }
+@keyframes stage-world-converge { from { transform: scale(1.24); } to { transform: scale(1.04); } }
+@keyframes stage-world-suspend { from { transform: translate3d(0, -0.8%, 0) scale(1.1); } to { transform: translate3d(0, 0.8%, 0) scale(1.1); } }
+@keyframes stage-world-fracture { 0%, 88% { transform: translate3d(0, 0, 0) scale(1.1); } 90% { transform: translate3d(-0.6%, 0.2%, 0) scale(1.105); } 92% { transform: translate3d(0.5%, -0.2%, 0) scale(1.095); } 94%, 100% { transform: translate3d(0, 0, 0) scale(1.1); } }
 
 .stage-canvas-host[data-palette-tone="dusk"] .stage-artwork-wash {
   opacity: 0.26;

@@ -23,6 +23,10 @@ import {
   type PreparedDirectedStageV1,
 } from "@lyricstage/renderer";
 import {
+  PerformanceEnvironment,
+  type PerformanceEnvironmentHandle,
+} from "./PerformanceEnvironment";
+import {
   extractArtworkPaletteV1,
   mergeArtworkDirectorPaletteV1,
   paletteToneForV1,
@@ -142,6 +146,7 @@ export function StageCanvas({
   const hostRef = useRef<HTMLDivElement>(null);
   const lyricViewportRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
+  const environmentRef = useRef<PerformanceEnvironmentHandle>(null);
   const progressRef = useRef<HTMLInputElement>(null);
   const elapsedRef = useRef<HTMLSpanElement>(null);
   const remainingRef = useRef<HTMLSpanElement>(null);
@@ -454,6 +459,7 @@ export function StageCanvas({
         showGuides: stageFrame.showGuides,
         palette: stageFrame.palette,
       });
+      environmentRef.current?.renderFrame(stageFrame);
       samplerRef.current.push(duration);
       frameCount += 1;
       if (frameCount % 60 === 0) {
@@ -555,6 +561,14 @@ export function StageCanvas({
       data-shell-layout="lower-leading-dock"
       data-artwork-shape={artworkShape}
     >
+      {normalizedArtworkURL && (
+        <>
+          <img className="stage-artwork-wash stage-artwork-wash-primary" src={normalizedArtworkURL} alt="" aria-hidden="true" />
+          <img className="stage-artwork-wash stage-artwork-wash-secondary" src={normalizedArtworkURL} alt="" aria-hidden="true" />
+        </>
+      )}
+      <div className="stage-world-motif" aria-hidden="true" />
+      <PerformanceEnvironment ref={environmentRef} />
       {onExit ? (
         <button type="button" className="stage-exit-button" onClick={onExit} aria-label="退出全屏舞台">
           <span aria-hidden="true">×</span>

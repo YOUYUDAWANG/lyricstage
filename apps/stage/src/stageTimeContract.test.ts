@@ -18,11 +18,14 @@ describe("Stage authoritative-time contract", () => {
     expect(environmentSource).not.toContain("continuous:");
   });
 
-  it("keeps fullscreen ambience static while lyrics carry the performance", () => {
-    expect(stageSource).not.toContain("<PerformanceEnvironment");
-    expect(stageSource).not.toContain("stage-artwork-wash");
-    expect(stageSource).not.toContain("stage-world-motif");
-    expect(stageSource).not.toContain("environmentRef.current?.renderFrame");
+  it("keeps fullscreen ambience on stable compositor layers instead of per-frame DOM writes", () => {
+    expect(stageSource).toContain("<PerformanceEnvironment");
+    expect(stageSource).toContain("stage-artwork-wash");
+    expect(stageSource).toContain("stage-world-motif");
+    expect(stageSource).toContain("environmentRef.current?.renderFrame");
+    expect(stageSource).toContain("motif: null");
+    expect(stageSource).toContain("washPrimary: null");
+    expect(stageSource).toContain("washSecondary: null");
     expect(stageFrameSource).toContain("frameVisualIdentity");
   });
 
@@ -33,8 +36,9 @@ describe("Stage authoritative-time contract", () => {
   });
 
   it("does not let CSS own directed Stage time", () => {
-    expect(stageCSS).not.toMatch(/animation:[^;\n]*\binfinite\b/u);
     expect(stageCSS).not.toContain("data-layout-transition-phase");
+    expect(stageCSS).toContain("animation: stage-wash-drift 22s");
+    expect(stageCSS).toContain("[data-world-motion=\"flow\"] .stage-world-motif");
     const directedTransitionRule = stageCSS.match(/:is\(\.stage-now-playing-info, \.stage-lyric-viewport\) \{([\s\S]*?)\n\}/u)?.[1] ?? "";
     expect(directedTransitionRule).not.toContain("transition:");
     const artworkFrameRule = stageCSS.match(/(?:^|\n)\.stage-artwork-frame \{([\s\S]*?)\n\}/u)?.[1] ?? "";
