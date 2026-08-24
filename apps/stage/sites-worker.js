@@ -59,12 +59,23 @@ const proxyShowcaseAudio = async (request) => {
   throw new Error("bilibili-cdn");
 };
 
+const assetRequest = (request, pathname) => {
+  const url = new URL(request.url);
+  url.pathname = pathname;
+  url.search = "";
+  return new Request(url, request);
+};
+
 export default {
   async fetch(request, env) {
     const url = new URL(request.url);
     if (url.pathname === "/api/showcase/you-and-aizu/audio") {
       if (request.method !== "GET" && request.method !== "HEAD") {
         return new Response("Method Not Allowed", { status: 405, headers: { Allow: "GET, HEAD" } });
+      }
+      if (env?.ASSETS?.fetch) {
+        const bundled = await env.ASSETS.fetch(assetRequest(request, "/showcase/you-and-aizu.m4a"));
+        if (bundled.ok || bundled.status === 206) return bundled;
       }
       try {
         return await proxyShowcaseAudio(request);
@@ -78,6 +89,10 @@ export default {
     if (!env?.ASSETS?.fetch) {
       return new Response("LyricStage assets are unavailable", { status: 503 });
     }
-    return env.ASSETS.fetch(request);
+    const asset = await env.ASSETS.fetch(request);
+    if (asset.status !== 404 || request.method !== "GET") return asset;
+    const acceptsHTML = request.headers.get("Accept")?.includes("text/html") ?? false;
+    if (url.pathname !== "/" && !acceptsHTML) return asset;
+    return env.ASSETS.fetch(assetRequest(request, "/index.html"));
   },
 };
