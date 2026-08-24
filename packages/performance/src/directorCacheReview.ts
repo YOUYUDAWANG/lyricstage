@@ -211,7 +211,8 @@ export const summarizeDirectorCacheEntryV1 = (input: DirectorCacheSummaryInputV1
     durationMs: input.lyrics.durationMs,
     lineCount: input.lyrics.lines.length,
     cacheVersion: "rolling-v1",
-    compilerVersion: input.cacheEpoch.includes("scene-pack-v2") || input.cacheEpoch.includes("layered-director-v2") || input.cacheEpoch.includes("perceptual-stage-v2")
+    compilerVersion: input.cacheEpoch.includes("scene-pack-v2") || input.cacheEpoch.includes("layered-director-v2")
+      || input.cacheEpoch.includes("perceptual-stage-v2") || input.cacheEpoch.includes("lyric-first-v3")
       ? "scene-pack-v2" : semanticDirectiveCount > 0 ? "window-intent-v2" : "scene-pack-v1",
     semanticDirectiveCount,
     cacheEpoch: clean(input.cacheEpoch, 80),
