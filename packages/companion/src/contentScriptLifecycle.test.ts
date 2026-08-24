@@ -1793,10 +1793,12 @@ describe("YouTube Music companion isolated content script lifecycle (real DOM sh
     expect(manifestSource.includes('"world":"MAIN"')).toBe(false);
     expect(manifest.content_scripts?.[0]?.js).toEqual(["content-ui-loader.js", "content.js"]);
     expect(manifest.web_accessible_resources).toEqual([{
-      resources: ["assets/content-ui.js", "assets/content-*.js"],
+      resources: ["assets/content-ui.js", "assets/content-*.js", "assets/content-*.css"],
       matches: ["https://music.youtube.com/*"],
     }]);
     expect(contentUISource).toContain('const contentUIStopEvent = "lyricstage-content-ui-stop-v2"');
+    expect(contentUISource).toContain('import youLyColumnScrollerStyles from "../../stage/src/lyrics/YouLyColumnScroller.css?inline"');
+    expect(contentUISource).toContain("${youLyColumnScrollerStyles}");
     expect(contentUISource).toContain("new MutationObserver(reconcileHostMutations)");
     expect(contentUISource).not.toContain("new MutationObserver(reconcileHosts)");
     expect(contentUISource).toContain("hostObserver.disconnect()");

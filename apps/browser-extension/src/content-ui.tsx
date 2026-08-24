@@ -4,6 +4,7 @@ import App from "../../stage/src/App";
 import { ColumnErrorBoundary } from "../../stage/src/column/ColumnErrorBoundary";
 import columnStyles from "../../stage/src/column/column.css?inline";
 import lyricScrollerStyles from "../../stage/src/lyrics/LyricScroller.css?inline";
+import youLyColumnScrollerStyles from "../../stage/src/lyrics/YouLyColumnScroller.css?inline";
 import stageStyles from "../../stage/src/styles.css?inline";
 
 interface EmbeddedColumnCallbacks {
@@ -28,7 +29,7 @@ const mountEmbeddedColumn: MountEmbeddedColumn = (shadowRoot, mountNode, callbac
   if (!shadowRoot.querySelector("style[data-lyricstage-column-styles]")) {
     const style = document.createElement("style");
     style.setAttribute("data-lyricstage-column-styles", "true");
-    style.textContent = `${stageStyles}\n${columnStyles}\n${lyricScrollerStyles}`;
+    style.textContent = `${stageStyles}\n${columnStyles}\n${lyricScrollerStyles}\n${youLyColumnScrollerStyles}`;
     shadowRoot.prepend(style);
   }
 
