@@ -178,7 +178,7 @@ describe("YouTube Music companion isolated content script lifecycle (real DOM sh
       "ended" | "paused" | "readyState" | "duration" | "currentTime" | "playbackRate"
     >>>;
     liked?: boolean;
-    queueItems?: Array<{ trackID: string; title: string; artist: string; selected?: boolean }>;
+    queueItems?: Array<{ trackID?: string; title: string; artist: string; selected?: boolean }>;
   } = {}) => {
     const createdElements: FakeElement[] = [];
     const clock = new FakeClock();
@@ -312,13 +312,14 @@ describe("YouTube Music companion isolated content script lifecycle (real DOM sh
       querySelectorAll: () => [likeControl],
     };
     const queueElements = (overrides.queueItems ?? []).map((entry) => {
-      const link = {
+      const link = entry.trackID ? {
         href: `/watch?v=${entry.trackID}`,
         click: vi.fn(),
         getAttribute: (name: string) => name === "href" ? `/watch?v=${entry.trackID}` : null,
-      };
+      } : null;
       return {
         link,
+        click: vi.fn(),
         querySelector: (selector: string) => {
           if (selector.includes("a[href")) return link;
           if (selector.includes("song-title")) return { textContent: entry.title };
@@ -1700,7 +1701,7 @@ describe("YouTube Music companion isolated content script lifecycle (real DOM sh
       undefined,
       queueResponse,
     );
-    expect(env.queueElements[1]?.link.click).toHaveBeenCalledOnce();
+    expect(env.queueElements[1]?.link?.click).toHaveBeenCalledOnce();
     expect(queueResponse).toHaveBeenCalledWith({ ok: true, queueTrackID: "next-track", queueIndex: 1 });
 
     env.setQueueAvailable(false);
@@ -1716,6 +1717,42 @@ describe("YouTube Music companion isolated content script lifecycle (real DOM sh
       queueTrackID: "next-track",
       queueIndex: 1,
       navigated: true,
+    });
+  });
+
+  it("mirrors Polymer queue rows that expose no watch link to the isolated content world", () => {
+    const env = createEnvironment({
+      queueItems: [
+        { title: "Current", artist: "Artist", selected: true },
+        { title: "Next", artist: "Artist" },
+      ],
+    });
+    vm.runInContext(contentScriptSource, env.context);
+    env.clock.advance(40);
+    const sourceMessage = env.sentMessages.find((message) =>
+      (message as { type?: string }).type === "youtube-music-source-snapshot"
+    ) as { snapshot?: { controls?: { queue?: boolean }; queue?: { items?: Array<{ trackID?: string }> } } };
+    expect(sourceMessage.snapshot?.controls?.queue).toBe(true);
+    expect(sourceMessage.snapshot?.queue?.items?.map((item) => item.trackID)).toEqual([
+      "queue:0:Current",
+      "queue:1:Next",
+    ]);
+
+    const queueResponse = vi.fn();
+    env.runtimeListeners[0]?.(
+      {
+        type: "youtube-music-queue-select",
+        queueTrackID: "queue:1:Next",
+        queueIndex: 1,
+        expectedTrackID: "ZmCRFGcON-I",
+      },
+      undefined,
+      queueResponse,
+    );
+    expect(queueResponse).toHaveBeenCalledWith({
+      ok: true,
+      queueTrackID: "queue:1:Next",
+      queueIndex: 1,
     });
   });
 

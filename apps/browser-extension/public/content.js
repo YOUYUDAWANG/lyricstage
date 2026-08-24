@@ -414,12 +414,10 @@
     return "neutral";
   };
 
-  const queueItemSnapshot = (item) => {
+  const queueItemSnapshot = (item, queueIndex = -1) => {
     const itemData = item?.data?.playlistPanelVideoRenderer ?? item?.data ?? null;
     const runsText = (value) => clean(value?.runs?.map?.((run) => run?.text || "")?.join?.(""));
     const link = item?.querySelector?.('a[href*="watch?"][href*="v="]');
-    const trackID = videoIDFromHref(link?.getAttribute?.("href") || link?.href)
-      || clean(itemData?.videoId);
     const title = clean(
       item?.querySelector?.(".song-title, #song-title, yt-formatted-string.song-title")?.textContent
       || item?.querySelector?.(".title-column yt-formatted-string, yt-formatted-string.title")?.textContent
@@ -427,6 +425,9 @@
       || link?.textContent
       || runsText(itemData?.title),
     );
+    const trackID = videoIDFromHref(link?.getAttribute?.("href") || link?.href)
+      || clean(itemData?.videoId)
+      || (title && queueIndex >= 0 ? `queue:${queueIndex}:${title}` : "");
     if (!trackID || !title) return null;
     const artist = clean(
       item?.querySelector?.(".byline, #byline, .secondary-flex-columns yt-formatted-string")?.textContent,
@@ -465,7 +466,7 @@
 
   const queueSnapshot = (currentTrackID) => {
     const elements = queueItemElements().slice(0, 100);
-    const items = elements.map((item) => queueItemSnapshot(item)).filter(Boolean);
+    const items = elements.map((item, index) => queueItemSnapshot(item, index)).filter(Boolean);
     if (items.length) {
       cachedQueueHrefs = elements.map((item) => clean(
         item?.querySelector?.('a[href*="watch?"][href*="v="]')?.getAttribute?.("href"),
@@ -1376,7 +1377,7 @@
       }
       if (
         !requestedTrackID
-        || queueItemSnapshot(item)?.trackID !== requestedTrackID
+        || queueItemSnapshot(item, queueIndex)?.trackID !== requestedTrackID
         || !target
         || typeof target.click !== "function"
       ) {
