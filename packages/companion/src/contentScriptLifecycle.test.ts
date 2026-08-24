@@ -627,6 +627,22 @@ describe("YouTube Music companion isolated content script lifecycle (real DOM sh
     expect(snapshots()).toHaveLength(1);
   });
 
+  it("publishes a fresh snapshot when the native queue finishes loading", () => {
+    const env = createEnvironment({
+      queueItems: [{ trackID: "ZmCRFGcON-I", title: "Current", artist: "Artist", selected: true }],
+    });
+    env.setQueueAvailable(false);
+    vm.runInContext(contentScriptSource, env.context);
+    env.clock.advance(40);
+    env.setQueueAvailable(true);
+    env.emitMutations(env.sidePanel, [{ target: env.sidePanel, addedNodes: [], removedNodes: [] }]);
+    env.clock.advance(100);
+    const snapshots = env.sentMessages.filter((message) =>
+      (message as { type?: string }).type === "youtube-music-source-snapshot"
+    ) as Array<{ snapshot?: { queue?: { items?: unknown[] } } }>;
+    expect(snapshots.at(-1)?.snapshot?.queue?.items).toHaveLength(1);
+  });
+
   it("keeps an unchanged paused snapshot alive without restoring the 500 ms flood", () => {
     const env = createEnvironment({ mediaElements: [{ paused: true }] });
     vm.runInContext(contentScriptSource, env.context);

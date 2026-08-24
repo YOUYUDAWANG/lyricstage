@@ -1555,7 +1555,10 @@
       shouldRefreshPlayer = true;
       shouldRefreshStage = true;
     }
-    if (shouldRefreshStage) updateStageMount();
+    if (shouldRefreshStage) {
+      updateStageMount();
+      queueSend();
+    }
     if (shouldRefreshPlayer) {
       observeMedia();
       if (!shouldRefreshStage) updateSponsorBlockCompatibility();
