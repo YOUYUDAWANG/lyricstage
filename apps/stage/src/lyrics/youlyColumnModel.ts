@@ -161,3 +161,13 @@ export const youLyScrollLookAheadMs = (
   if (!current || !next) return 350;
   return Math.min(500, Math.max(350, next.fromMs - current.fromMs));
 };
+
+/**
+ * Keeps a lyric row visually stationary for the first frame after the viewport
+ * scroll position changes. Moving scrollTop down moves content up, so the row
+ * needs an equal positive translateY before it animates back to zero.
+ */
+export const youLyScrollCompensationPx = (
+  currentScrollTop: number,
+  targetScrollTop: number,
+): number => targetScrollTop - currentScrollTop;

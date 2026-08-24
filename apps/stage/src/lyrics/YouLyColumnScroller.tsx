@@ -16,6 +16,7 @@ import { formatClock } from "../column/columnModel";
 import {
   buildYouLyColumnLines,
   youLyLineIndexAtTime,
+  youLyScrollCompensationPx,
   youLyScrollLookAheadMs,
   type YouLyLineModel,
   type YouLySyllableModel,
@@ -190,7 +191,7 @@ const YouLyColumnScrollerImpl = forwardRef<YouLyColumnScrollerHandle, YouLyColum
       const target = models[index] && lineRefs.current.get(models[index].key);
       if (!viewport || !target) return;
       const targetTop = Math.max(0, target.offsetTop - viewport.clientHeight * 0.25);
-      const delta = viewport.scrollTop - targetTop;
+      const delta = youLyScrollCompensationPx(viewport.scrollTop, targetTop);
       if (Math.abs(delta) < 1 && !force) return;
 
       if (scrollTimeoutRef.current !== null) window.clearTimeout(scrollTimeoutRef.current);

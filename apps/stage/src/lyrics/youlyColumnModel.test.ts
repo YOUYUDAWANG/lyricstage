@@ -1,6 +1,11 @@
 import { describe, expect, it } from "vitest";
 import type { LyricDocumentV0 } from "@lyricstage/contracts";
-import { buildYouLyColumnLines, youLyLineIndexAtTime, youLyScrollLookAheadMs } from "./youlyColumnModel";
+import {
+  buildYouLyColumnLines,
+  youLyLineIndexAtTime,
+  youLyScrollCompensationPx,
+  youLyScrollLookAheadMs,
+} from "./youlyColumnModel";
 
 const lyrics: LyricDocumentV0 = {
   version: "lyric-document-v0",
@@ -37,6 +42,11 @@ describe("YouLy Column adapter", () => {
     expect(youLyLineIndexAtTime(lines, 8_500, 0)).toBe(1);
     expect(youLyLineIndexAtTime(lines, 15_000, 1)).toBe(2);
     expect(youLyScrollLookAheadMs(lines, 1)).toBe(500);
+  });
+
+  it("cancels the first-frame displacement caused by a scrollTop change", () => {
+    expect(youLyScrollCompensationPx(413, 464)).toBe(51);
+    expect(youLyScrollCompensationPx(464, 413)).toBe(-51);
   });
 
   it("keeps RTL text on its source direction and disables character growth", () => {
