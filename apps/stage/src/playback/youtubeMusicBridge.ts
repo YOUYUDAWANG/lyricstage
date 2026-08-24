@@ -207,6 +207,40 @@ export const controlYouTubeMusic = async (
   }
 };
 
+export const setYouTubeMusicLiked = async (
+  liked: boolean,
+  expectedTrackID: string,
+): Promise<boolean> => {
+  const runtime = extensionRuntime();
+  if (!runtime || !expectedTrackID) return false;
+  try {
+    const response = await runtime.sendMessage({ type: "youtube-music-like", liked, expectedTrackID });
+    return (response as { ok?: unknown } | undefined)?.ok === true;
+  } catch {
+    return false;
+  }
+};
+
+export const selectYouTubeMusicQueueItem = async (
+  queueTrackID: string,
+  queueIndex: number,
+  expectedTrackID: string,
+): Promise<boolean> => {
+  const runtime = extensionRuntime();
+  if (!runtime || !queueTrackID || !Number.isSafeInteger(queueIndex) || queueIndex < 0 || !expectedTrackID) return false;
+  try {
+    const response = await runtime.sendMessage({
+      type: "youtube-music-queue-select",
+      queueTrackID,
+      queueIndex,
+      expectedTrackID,
+    });
+    return (response as { ok?: unknown } | undefined)?.ok === true;
+  } catch {
+    return false;
+  }
+};
+
 export const startYouTubeMusicAudioAnalysis = async (
   trackID: string,
   durationMs: number,

@@ -16,6 +16,16 @@ export interface YouTubeMusicTrackV0 {
   pageURL: string;
 }
 
+export type YouTubeMusicLikeStatusV0 = "neutral" | "liked" | "disliked";
+
+export interface YouTubeMusicQueueItemV0 {
+  trackID: string;
+  title: string;
+  artist: string;
+  artworkURL?: string;
+  selected: boolean;
+}
+
 export interface YouTubeMusicSnapshotV0 {
   type: "youtube-music-snapshot";
   version: typeof youtubeMusicCompanionVersion;
@@ -33,6 +43,15 @@ export interface YouTubeMusicSnapshotV0 {
     playPause: boolean;
     previous: boolean;
     next: boolean;
+    like?: boolean;
+    queue?: boolean;
+  };
+  engagement?: {
+    likeStatus: YouTubeMusicLikeStatusV0;
+  };
+  queue?: {
+    items: YouTubeMusicQueueItemV0[];
+    currentIndex: number;
   };
 }
 
@@ -92,6 +111,23 @@ export const isYouTubeMusicSnapshotV0 = (
   const track = snapshot.track as Partial<YouTubeMusicTrackV0> | undefined;
   const playback = snapshot.playback as YouTubeMusicSnapshotV0["playback"] | undefined;
   const controls = snapshot.controls as YouTubeMusicSnapshotV0["controls"] | undefined;
+  const engagement = snapshot.engagement as YouTubeMusicSnapshotV0["engagement"] | undefined;
+  const queue = snapshot.queue as YouTubeMusicSnapshotV0["queue"] | undefined;
+  const validQueue = queue === undefined || (
+    Array.isArray(queue.items) &&
+    queue.items.length <= 100 &&
+    Number.isInteger(queue.currentIndex) &&
+    queue.currentIndex >= -1 &&
+    queue.currentIndex < queue.items.length &&
+    queue.items.every((item) => (
+      item &&
+      typeof item.trackID === "string" && item.trackID.length > 0 &&
+      typeof item.title === "string" && item.title.length > 0 &&
+      typeof item.artist === "string" &&
+      (item.artworkURL === undefined || typeof item.artworkURL === "string") &&
+      typeof item.selected === "boolean"
+    ))
+  );
   return (
     snapshot.type === "youtube-music-snapshot" &&
     snapshot.version === youtubeMusicCompanionVersion &&
@@ -114,8 +150,12 @@ export const isYouTubeMusicSnapshotV0 = (
       typeof controls.seek === "boolean" &&
       typeof controls.playPause === "boolean" &&
       typeof controls.previous === "boolean" &&
-      typeof controls.next === "boolean"
-    ))
+      typeof controls.next === "boolean" &&
+      (controls.like === undefined || typeof controls.like === "boolean") &&
+      (controls.queue === undefined || typeof controls.queue === "boolean")
+    )) &&
+    (engagement === undefined || ["neutral", "liked", "disliked"].includes(engagement.likeStatus)) &&
+    validQueue
   );
 };
 

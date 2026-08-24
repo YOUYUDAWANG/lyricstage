@@ -36,11 +36,14 @@ import { retainCandidatesAfterChoice } from "./column/timedLineText";
 import {
   controlYouTubeMusic,
   isYouTubeMusicExtensionContext,
+  selectYouTubeMusicQueueItem,
   seekYouTubeMusic,
+  setYouTubeMusicLiked,
   startYouTubeMusicAudioAnalysis,
   stopYouTubeMusicAudioAnalysis,
   useYouTubeMusicBridge,
 } from "./playback/youtubeMusicBridge";
+import { createYouTubeMusicPlayerActions } from "./playback/youtubeMusicPlayerActions";
 import {
   readExtensionPreferences,
   rollingDirectorRouteV1,
@@ -1158,6 +1161,13 @@ export default function App({ embedded = embeddedStageFromLocation, onEmbeddedRe
     if (action === "play" || action === "pause") await togglePlayback();
   };
 
+  const { setStageLiked, selectStageQueueItem } = createYouTubeMusicPlayerActions({
+    expectedTrackID: source === "youtubeMusic" ? youtubeMusic.snapshot?.track.trackID : undefined,
+    setLiked: setYouTubeMusicLiked,
+    selectQueueItem: selectYouTubeMusicQueueItem,
+    notify: (notice) => { setMessage(notice); interaction.show(notice); },
+  });
+
   const exitEmbeddedFullscreen = useCallback(async () => {
     stopStageAudioAnalysis();
     setPresentation("column");
@@ -1440,8 +1450,12 @@ export default function App({ embedded = embeddedStageFromLocation, onEmbeddedRe
                   durationMs={durationMs}
                   playbackState={stagePlaybackState}
                   controls={stageControls}
+                  engagement={youtubeMusic.snapshot?.engagement}
+                  queue={youtubeMusic.snapshot?.queue}
                   onSeek={seekStage}
                   onTransport={controlStageTransport}
+                  onLike={setStageLiked}
+                  onQueueSelect={selectStageQueueItem}
                   onExit={() => void exitEmbeddedFullscreen()}
                 />
               </Suspense>
@@ -1649,8 +1663,12 @@ export default function App({ embedded = embeddedStageFromLocation, onEmbeddedRe
               durationMs={durationMs}
               playbackState={stagePlaybackState}
               controls={stageControls}
+              engagement={youtubeMusic.snapshot?.engagement}
+              queue={youtubeMusic.snapshot?.queue}
               onSeek={seekStage}
               onTransport={controlStageTransport}
+              onLike={setStageLiked}
+              onQueueSelect={selectStageQueueItem}
             />
           </Suspense>
           <div className="stage-header">

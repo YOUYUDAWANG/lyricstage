@@ -77,8 +77,12 @@ interface StageCanvasProps {
   durationMs: number;
   playbackState?: "playing" | "paused" | "buffering" | "ended";
   controls?: YouTubeMusicSnapshotV0["controls"];
+  engagement?: YouTubeMusicSnapshotV0["engagement"];
+  queue?: YouTubeMusicSnapshotV0["queue"];
   onSeek?: (timeMs: number) => void | Promise<void>;
   onTransport?: (action: YouTubeMusicTransportActionV0) => void | Promise<void>;
+  onLike?: (liked: boolean) => void | Promise<void>;
+  onQueueSelect?: (trackID: string, queueIndex: number) => void | Promise<void>;
   onExit?: () => void;
 }
 
@@ -112,6 +116,14 @@ function TransportIcon({ kind }: { kind: "previous" | "next" | "play" | "pause" 
   return <svg viewBox="0 0 24 24" aria-hidden="true"><path d={path} /></svg>;
 }
 
+function PlayerActionIcon({ kind }: { kind: "like" | "queue" }) {
+  return kind === "like" ? (
+    <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 20.4 10.55 19.1C5.4 14.54 2 11.45 2 7.65 2 4.56 4.42 2.2 7.5 2.2c1.74 0 3.41.81 4.5 2.08A6.02 6.02 0 0 1 16.5 2.2C19.58 2.2 22 4.56 22 7.65c0 3.8-3.4 6.89-8.55 11.46L12 20.4Z" /></svg>
+  ) : (
+    <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 5h11v2H4V5Zm0 6h11v2H4v-2Zm0 6h7v2H4v-2Zm13-4.2v6.4l5-3.2-5-3.2Z" /></svg>
+  );
+}
+
 export function StageCanvas({
   lyrics,
   localDirectorPlan,
@@ -138,8 +150,12 @@ export function StageCanvas({
   durationMs,
   playbackState,
   controls,
+  engagement,
+  queue,
   onSeek,
   onTransport,
+  onLike,
+  onQueueSelect,
   onExit,
 }: StageCanvasProps) {
   const entryDirectorPlan = directorPlanForStageEntry(localDirectorPlan, remoteDirectorPlan);
@@ -162,6 +178,9 @@ export function StageCanvas({
   const [artworkPalette, setArtworkPalette] = useState<DirectedStagePaletteV1 | undefined>();
   const [artworkCandidateIndex, setArtworkCandidateIndex] = useState(0);
   const [artworkAspect, setArtworkAspect] = useState(1);
+  const [queueOpen, setQueueOpen] = useState(false);
+  const selectedQueueTrackID = queue?.items[queue.currentIndex]?.trackID;
+  useEffect(() => setQueueOpen(false), [selectedQueueTrackID]);
   displayTimeRef.current = displayTimeMs;
   reactiveBusRef.current = reactiveBus;
   const normalizedArtworkCandidates = useMemo(() => artworkCandidates(artworkURL), [artworkURL]);
@@ -522,6 +541,8 @@ export function StageCanvas({
 
   const isPlaying = playbackState === "playing" || playbackState === "buffering";
   const hasTransport = Boolean(controls?.playPause || controls?.previous || controls?.next);
+  const hasPlayerActions = Boolean(controls?.like || controls?.queue);
+  const liked = engagement?.likeStatus === "liked";
   const artworkShape = artworkShapeForAspectV1(artworkAspect);
   const observedPlan = handoffRef.current.active;
   const observedTimeMs = frameTimeRef.current;
@@ -653,14 +674,25 @@ export function StageCanvas({
             </div>
           </div>
 
-          {hasTransport && onTransport && (
+          {(hasTransport || hasPlayerActions) && (
             <div className="stage-transport" role="group" aria-label="播放控制">
-              {controls?.previous && (
+              {controls?.like && onLike && (
+                <button
+                  type="button"
+                  className="stage-like-button"
+                  aria-label={liked ? "取消点赞" : "点赞"}
+                  aria-pressed={liked}
+                  onClick={() => void onLike(!liked)}
+                >
+                  <PlayerActionIcon kind="like" />
+                </button>
+              )}
+              {controls?.previous && onTransport && (
                 <button type="button" aria-label="上一首" onClick={() => void onTransport("previous")}>
                   <TransportIcon kind="previous" />
                 </button>
               )}
-              {controls?.playPause && (
+              {controls?.playPause && onTransport && (
                 <button
                   type="button"
                   className="stage-play-pause"
@@ -670,9 +702,20 @@ export function StageCanvas({
                   <TransportIcon kind={isPlaying ? "pause" : "play"} />
                 </button>
               )}
-              {controls?.next && (
+              {controls?.next && onTransport && (
                 <button type="button" aria-label="下一首" onClick={() => void onTransport("next")}>
                   <TransportIcon kind="next" />
+                </button>
+              )}
+              {controls?.queue && Boolean(queue?.items.length) && (
+                <button
+                  type="button"
+                  className="stage-queue-button"
+                  aria-label="播放列表"
+                  aria-expanded={queueOpen}
+                  onClick={() => setQueueOpen((open) => !open)}
+                >
+                  <PlayerActionIcon kind="queue" />
                 </button>
               )}
             </div>
@@ -688,6 +731,36 @@ export function StageCanvas({
           />
         </div>
       </div>
+      {queueOpen && queue?.items.length ? (
+        <aside className="stage-queue-panel" aria-label="当前播放列表">
+          <header>
+            <div>
+              <span>当前播放列表</span>
+              <strong>{queue.items.length} 首</strong>
+            </div>
+            <button type="button" aria-label="关闭播放列表" onClick={() => setQueueOpen(false)}>×</button>
+          </header>
+          <ol>
+            {queue.items.map((item, index) => (
+              <li key={`${item.trackID}:${index}`} data-selected={item.selected || undefined}>
+                <button
+                  type="button"
+                  aria-current={item.selected ? "true" : undefined}
+                  disabled={item.selected || !onQueueSelect}
+                  onClick={() => {
+                    setQueueOpen(false);
+                    void onQueueSelect?.(item.trackID, index);
+                  }}
+                >
+                  {item.artworkURL ? <img src={item.artworkURL} alt="" /> : <span className="stage-queue-index">{index + 1}</span>}
+                  <span className="stage-queue-copy"><strong>{item.title}</strong><span>{item.artist || "YouTube Music"}</span></span>
+                  {item.selected ? <span className="stage-queue-playing">播放中</span> : null}
+                </button>
+              </li>
+            ))}
+          </ol>
+        </aside>
+      ) : null}
     </div>
   );
 }

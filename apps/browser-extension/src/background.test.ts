@@ -1464,6 +1464,30 @@ describe("YouTube Music background routing", () => {
       expectedTrackID: "track-b",
     });
 
+    await send({
+      type: "youtube-music-like",
+      liked: true,
+      expectedTrackID: "track-b",
+    }, sender(11));
+    expect(tabsSendMessage).toHaveBeenCalledWith(11, {
+      type: "youtube-music-like-command",
+      liked: true,
+      expectedTrackID: "track-b",
+    });
+
+    await send({
+      type: "youtube-music-queue-select",
+      queueTrackID: "track-c",
+      queueIndex: 2,
+      expectedTrackID: "track-b",
+    }, sender(11));
+    expect(tabsSendMessage).toHaveBeenCalledWith(11, {
+      type: "youtube-music-queue-select",
+      queueTrackID: "track-c",
+      queueIndex: 2,
+      expectedTrackID: "track-b",
+    });
+
     tabsSendMessage.mockClear();
     tabsSendMessage.mockResolvedValueOnce({ ok: false, reason: "track-changed" });
     const hostChanged = await send({
@@ -1490,8 +1514,21 @@ describe("YouTube Music background routing", () => {
       action: "next",
       expectedTrackID: "track-a",
     }, sender(11));
+    const staleLike = await send({
+      type: "youtube-music-like",
+      liked: false,
+      expectedTrackID: "track-a",
+    }, sender(11));
+    const staleQueue = await send({
+      type: "youtube-music-queue-select",
+      queueTrackID: "track-c",
+      queueIndex: 2,
+      expectedTrackID: "track-a",
+    }, sender(11));
     expect(staleSeek.response).toEqual({ ok: false, reason: "track-changed" });
     expect(staleTransport.response).toEqual({ ok: false, reason: "track-changed" });
+    expect(staleLike.response).toEqual({ ok: false, reason: "track-changed" });
+    expect(staleQueue.response).toEqual({ ok: false, reason: "track-changed" });
     expect(tabsSendMessage).not.toHaveBeenCalled();
   });
 

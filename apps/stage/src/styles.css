@@ -1235,6 +1235,131 @@ h1 {
   height: clamp(44px, 3.4vw, 64px);
 }
 
+.stage-transport .stage-like-button[aria-pressed="true"] {
+  color: #ff5f86;
+  background: color-mix(in srgb, #ff5f86 15%, transparent);
+}
+
+.stage-transport .stage-queue-button[aria-expanded="true"] {
+  color: var(--stage-ink, #ffffff);
+  background: color-mix(in srgb, var(--stage-ink, #ffffff) 13%, transparent);
+}
+
+.stage-queue-panel {
+  position: absolute;
+  z-index: 9;
+  top: max(70px, calc(env(safe-area-inset-top) + 54px));
+  right: max(16px, env(safe-area-inset-right));
+  display: flex;
+  flex-direction: column;
+  width: min(390px, calc(100% - 32px));
+  max-height: min(72vh, 720px);
+  overflow: hidden;
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  border-radius: 18px;
+  color: rgba(255, 255, 255, 0.94);
+  background: rgba(10, 12, 17, 0.88);
+  box-shadow: 0 24px 80px rgba(0, 0, 0, 0.42);
+  backdrop-filter: blur(22px) saturate(1.12);
+  font-family: -apple-system, BlinkMacSystemFont, "SF Pro Display", "Hiragino Sans", "PingFang SC", sans-serif;
+}
+
+.stage-queue-panel > header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.12);
+  padding: 15px 16px 13px;
+}
+
+.stage-queue-panel > header > div {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.stage-queue-panel > header span {
+  color: rgba(255, 255, 255, 0.58);
+  font-size: 11px;
+  font-weight: 650;
+  letter-spacing: 0.04em;
+}
+
+.stage-queue-panel > header strong {
+  font-size: 16px;
+}
+
+.stage-queue-panel > header button {
+  width: 34px;
+  height: 34px;
+  border: 0;
+  border-radius: 50%;
+  color: rgba(255, 255, 255, 0.78);
+  background: rgba(255, 255, 255, 0.08);
+  cursor: pointer;
+  font-size: 20px;
+}
+
+.stage-queue-panel ol {
+  overflow: auto;
+  margin: 0;
+  padding: 7px;
+  list-style: none;
+  scrollbar-color: rgba(255, 255, 255, 0.22) transparent;
+}
+
+.stage-queue-panel li > button {
+  display: grid;
+  grid-template-columns: 44px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 11px;
+  width: 100%;
+  border: 0;
+  border-radius: 12px;
+  padding: 7px 9px;
+  color: inherit;
+  background: transparent;
+  cursor: pointer;
+  text-align: left;
+}
+
+.stage-queue-panel li[data-selected] > button {
+  background: rgba(255, 255, 255, 0.1);
+  cursor: default;
+}
+
+.stage-queue-panel img,
+.stage-queue-index {
+  display: grid;
+  place-items: center;
+  width: 44px;
+  height: 44px;
+  border-radius: 7px;
+  object-fit: cover;
+  color: rgba(255, 255, 255, 0.54);
+  background: rgba(255, 255, 255, 0.08);
+  font-size: 12px;
+}
+
+.stage-queue-copy {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.stage-queue-copy strong,
+.stage-queue-copy span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.stage-queue-copy strong { font-size: 13px; }
+.stage-queue-copy span { color: rgba(255, 255, 255, 0.5); font-size: 11px; }
+.stage-queue-playing { color: #ff6f91; font-size: 10px; font-weight: 680; }
+
 .stage-lyric-viewport {
   position: relative;
   min-width: 0;
@@ -1403,6 +1528,10 @@ h1 {
   .stage-transport button:hover {
     color: var(--stage-ink, #ffffff);
     background: color-mix(in srgb, var(--stage-ink, #ffffff) 10%, transparent);
+  }
+
+  .stage-queue-panel li:not([data-selected]) > button:hover {
+    background: rgba(255, 255, 255, 0.07);
   }
 }
 

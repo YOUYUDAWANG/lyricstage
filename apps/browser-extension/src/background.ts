@@ -103,6 +103,7 @@ import {
   type RollingOwnerKey,
 } from "./rollingRequestOwnership";
 import { sanitizedRollingReason } from "./backgroundDirectorErrors";
+import { createYouTubeMusicControlForwarder } from "./youtubeMusicControls";
 
 const chromeAPI = (globalThis as typeof globalThis & { chrome: ExtensionChrome }).chrome;
 const stagePorts = new Map<ExtensionPort, number | undefined>();
@@ -2136,65 +2137,14 @@ const showInPageStage = async (): Promise<StageActivationResponse> => {
   }
 };
 
-const seekInYouTubeMusic = async (
-  timeMs: number,
-  expectedTrackID: string,
-  preferredTabID?: number,
-): Promise<StageActivationResponse> => {
-  if (!Number.isFinite(timeMs) || timeMs < 0 || !expectedTrackID) {
-    return { ok: false, reason: "invalid-seek" };
-  }
-  sourceRegistry.expire();
-  const tabID = preferredTabID ?? sourceRegistry.sourceTabID;
-  const snapshot = tabID === undefined ? undefined : sourceRegistry.snapshotForTab(tabID);
-  if (tabID === undefined || !snapshot) return { ok: false, reason: "source-not-ready" };
-  if (snapshot.track.trackID !== expectedTrackID) return { ok: false, reason: "track-changed" };
-  try {
-    const response = await chromeAPI.tabs.sendMessage(tabID, {
-      type: "youtube-music-seek-to",
-      timeMs,
-      expectedTrackID,
-    });
-    const result = response as StageActivationResponse | undefined;
-    return result?.ok === true
-      ? { ok: true }
-      : { ok: false, reason: result?.reason || "seek-failed" };
-  } catch (error) {
-    return {
-      ok: false,
-      reason: error instanceof Error ? error.message.slice(0, 120) : "content-script-unavailable",
-    };
-  }
-};
-
-const transportInYouTubeMusic = async (
-  action: YouTubeMusicTransportActionV0,
-  expectedTrackID: string,
-  preferredTabID?: number,
-): Promise<StageActivationResponse> => {
-  if (!expectedTrackID) return { ok: false, reason: "invalid-track" };
-  sourceRegistry.expire();
-  const tabID = preferredTabID ?? sourceRegistry.sourceTabID;
-  const snapshot = tabID === undefined ? undefined : sourceRegistry.snapshotForTab(tabID);
-  if (tabID === undefined || !snapshot) return { ok: false, reason: "source-not-ready" };
-  if (snapshot.track.trackID !== expectedTrackID) return { ok: false, reason: "track-changed" };
-  try {
-    const response = await chromeAPI.tabs.sendMessage(tabID, {
-      type: "youtube-music-transport-command",
-      action,
-      expectedTrackID,
-    });
-    const result = response as StageActivationResponse | undefined;
-    return result?.ok === true
-      ? { ok: true }
-      : { ok: false, reason: result?.reason || "transport-failed" };
-  } catch (error) {
-    return {
-      ok: false,
-      reason: error instanceof Error ? error.message.slice(0, 120) : "content-script-unavailable",
-    };
-  }
-};
+const youtubeMusicControls = createYouTubeMusicControlForwarder({
+  sourceRegistry,
+  sendMessage: (tabID, message) => chromeAPI.tabs.sendMessage(tabID, message),
+});
+const seekInYouTubeMusic = youtubeMusicControls.seek;
+const transportInYouTubeMusic = youtubeMusicControls.transport;
+const likeInYouTubeMusic = youtubeMusicControls.like;
+const selectYouTubeMusicQueueItem = youtubeMusicControls.selectQueue;
 
 chromeAPI.runtime.onConnect.addListener((port) => {
   if (port.name !== "lyricstage-stage") return;
@@ -2248,6 +2198,9 @@ chromeAPI.runtime.onMessage.addListener((message, sender, sendResponse) => {
     desiredHorizonMs?: unknown;
     paused?: unknown;
     seekTargetMs?: unknown;
+    liked?: unknown;
+    queueTrackID?: unknown;
+    queueIndex?: unknown;
   };
   const fromOffscreen = sender.url === chromeAPI.runtime.getURL("offscreen.html");
   const captureForUpdate = (): AudioCaptureState | undefined => fromOffscreen
@@ -2780,6 +2733,37 @@ chromeAPI.runtime.onMessage.addListener((message, sender, sendResponse) => {
       sendResponse,
       () => sendResponse({ ok: false, reason: "transport-failed" }),
     );
+    return true;
+  }
+
+  if (request.type === "youtube-music-like") {
+    if (typeof request.liked !== "boolean" || typeof request.expectedTrackID !== "string") {
+      sendResponse({ ok: false, reason: "invalid-like" });
+      return;
+    }
+    void likeInYouTubeMusic(
+      request.liked,
+      request.expectedTrackID,
+      sourceTabIDForSender(sender),
+    ).then(sendResponse, () => sendResponse({ ok: false, reason: "like-failed" }));
+    return true;
+  }
+
+  if (request.type === "youtube-music-queue-select") {
+    if (
+      typeof request.queueTrackID !== "string"
+      || typeof request.queueIndex !== "number"
+      || typeof request.expectedTrackID !== "string"
+    ) {
+      sendResponse({ ok: false, reason: "invalid-queue-selection" });
+      return;
+    }
+    void selectYouTubeMusicQueueItem(
+      request.queueTrackID,
+      request.queueIndex,
+      request.expectedTrackID,
+      sourceTabIDForSender(sender),
+    ).then(sendResponse, () => sendResponse({ ok: false, reason: "queue-selection-failed" }));
     return true;
   }
 

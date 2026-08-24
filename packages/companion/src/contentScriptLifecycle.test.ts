@@ -177,6 +177,8 @@ describe("YouTube Music companion isolated content script lifecycle (real DOM sh
       FakeMediaElement,
       "ended" | "paused" | "readyState" | "duration" | "currentTime" | "playbackRate"
     >>>;
+    liked?: boolean;
+    queueItems?: Array<{ trackID: string; title: string; artist: string; selected?: boolean }>;
   } = {}) => {
     const createdElements: FakeElement[] = [];
     const clock = new FakeClock();
@@ -294,6 +296,38 @@ describe("YouTube Music companion isolated content script lifecycle (real DOM sh
       playPause: { click: vi.fn(), disabled: false, getAttribute: vi.fn(() => null), hasAttribute: vi.fn(() => false) },
       next: { click: vi.fn(), disabled: false, getAttribute: vi.fn(() => null), hasAttribute: vi.fn(() => false) },
     };
+    let liked = overrides.liked ?? false;
+    const likeControl = {
+      click: vi.fn(() => { liked = !liked; }),
+      disabled: false,
+      getAttribute: vi.fn((name: string) => name === "aria-pressed" ? String(liked) : null),
+      hasAttribute: vi.fn(() => false),
+    };
+    const likeRenderer = {
+      querySelector: (selector: string) => selector.includes("like-button") || selector.includes("button-shape-like")
+        ? likeControl
+        : null,
+      querySelectorAll: () => [likeControl],
+    };
+    const queueElements = (overrides.queueItems ?? []).map((entry) => {
+      const link = {
+        href: `/watch?v=${entry.trackID}`,
+        click: vi.fn(),
+        getAttribute: (name: string) => name === "href" ? `/watch?v=${entry.trackID}` : null,
+      };
+      return {
+        link,
+        querySelector: (selector: string) => {
+          if (selector.includes("a[href")) return link;
+          if (selector.includes("song-title")) return { textContent: entry.title };
+          if (selector.includes("byline")) return { textContent: entry.artist };
+          if (selector === "img") return null;
+          return null;
+        },
+        hasAttribute: (name: string) => name === "selected" && entry.selected === true,
+        getAttribute: (name: string) => name === "aria-selected" ? String(entry.selected === true) : null,
+      };
+    });
     const playerBar = {
       querySelector: (selector: string) => {
         if (selector.includes('a[href*="watch?v="]') && playerBarVideoID) {
@@ -318,6 +352,7 @@ describe("YouTube Music companion isolated content script lifecycle (real DOM sh
         if (selector.includes("play-pause-button")) return transportControls.playPause;
         if (selector.includes("previous-button")) return transportControls.previous;
         if (selector.includes("next-button")) return transportControls.next;
+        if (selector.includes("ytmusic-like-button-renderer")) return likeRenderer;
         return null;
       },
       querySelectorAll: () => overrides.playerBarBylineLinks?.map(({ text, href }) => ({
@@ -382,7 +417,11 @@ describe("YouTube Music companion isolated content script lifecycle (real DOM sh
           return element;
         },
         querySelector: documentQuerySelector,
-        querySelectorAll: (selector: string) => selector === "video, audio" && mediaAvailable ? mediaElements : [],
+        querySelectorAll: (selector: string) => selector === "video, audio" && mediaAvailable
+          ? mediaElements
+          : selector === "ytmusic-player-queue-item"
+            ? queueElements
+            : [],
       },
       HTMLMediaElement: FakeMediaElement,
       navigator: {
@@ -470,6 +509,8 @@ describe("YouTube Music companion isolated content script lifecycle (real DOM sh
       media,
       mediaElements,
       transportControls,
+      likeControl,
+      queueElements,
       playerBar,
       documentElement,
       documentQuerySelector,
@@ -1606,6 +1647,41 @@ describe("YouTube Music companion isolated content script lifecycle (real DOM sh
       vi.fn(),
     );
     expect(env.transportControls.next.click).toHaveBeenCalledOnce();
+  });
+
+  it("mirrors native like and queue state and routes their controls by track identity", () => {
+    const env = createEnvironment({
+      liked: true,
+      queueItems: [
+        { trackID: "ZmCRFGcON-I", title: "Current", artist: "Artist", selected: true },
+        { trackID: "next-track", title: "Next", artist: "Artist" },
+      ],
+    });
+    vm.runInContext(contentScriptSource, env.context);
+    env.clock.advance(40);
+    const sourceMessage = env.sentMessages.find((message) =>
+      (message as { type?: string }).type === "youtube-music-source-snapshot"
+    ) as { snapshot?: { engagement?: { likeStatus?: string }; queue?: { items?: unknown[] } } };
+    expect(sourceMessage.snapshot?.engagement?.likeStatus).toBe("liked");
+    expect(sourceMessage.snapshot?.queue?.items).toHaveLength(2);
+
+    const likeResponse = vi.fn();
+    env.runtimeListeners[0]?.(
+      { type: "youtube-music-like-command", liked: false, expectedTrackID: "ZmCRFGcON-I" },
+      undefined,
+      likeResponse,
+    );
+    expect(env.likeControl.click).toHaveBeenCalledOnce();
+    expect(likeResponse).toHaveBeenCalledWith({ ok: true, liked: false });
+
+    const queueResponse = vi.fn();
+    env.runtimeListeners[0]?.(
+      { type: "youtube-music-queue-select", queueTrackID: "next-track", queueIndex: 1, expectedTrackID: "ZmCRFGcON-I" },
+      undefined,
+      queueResponse,
+    );
+    expect(env.queueElements[1]?.link.click).toHaveBeenCalledOnce();
+    expect(queueResponse).toHaveBeenCalledWith({ ok: true, queueTrackID: "next-track", queueIndex: 1 });
   });
 
   it("uses the snapshot-selected media when deciding whether transport is redundant", () => {

@@ -388,6 +388,64 @@
     return playerBar?.querySelector?.(selector) ?? null;
   };
 
+  const likeButtons = (playerBar) => {
+    const renderer = playerBar?.querySelector?.("ytmusic-like-button-renderer")
+      ?? document.querySelector?.("ytmusic-player-bar ytmusic-like-button-renderer");
+    if (!renderer) return { like: null, dislike: null };
+    const like = renderer.querySelector?.(
+      "#like-button button, #like-button, #button-shape-like button, [data-title-no-tooltip='Like'], button[aria-label*='Like']",
+    ) ?? null;
+    const dislike = renderer.querySelector?.(
+      "#dislike-button button, #dislike-button, #button-shape-dislike button, [data-title-no-tooltip='Dislike'], button[aria-label*='Dislike']",
+    ) ?? null;
+    const pressed = [...(renderer.querySelectorAll?.("button[aria-pressed], [role='button'][aria-pressed]") ?? [])];
+    return {
+      like: like ?? pressed[0] ?? null,
+      dislike: dislike ?? pressed.find((button) => button !== like) ?? null,
+    };
+  };
+
+  const likeStatus = (playerBar) => {
+    const buttons = likeButtons(playerBar);
+    if (buttons.like?.getAttribute?.("aria-pressed") === "true") return "liked";
+    if (buttons.dislike?.getAttribute?.("aria-pressed") === "true") return "disliked";
+    return "neutral";
+  };
+
+  const queueItemSnapshot = (item) => {
+    const link = item?.querySelector?.('a[href*="watch?"][href*="v="]');
+    const trackID = videoIDFromHref(link?.getAttribute?.("href") || link?.href);
+    const title = clean(
+      item?.querySelector?.(".song-title, #song-title, yt-formatted-string.song-title")?.textContent
+      || link?.getAttribute?.("title")
+      || link?.textContent,
+    );
+    if (!trackID || !title) return null;
+    const artist = clean(
+      item?.querySelector?.(".byline, #byline, .secondary-flex-columns yt-formatted-string")?.textContent,
+    );
+    const artworkURL = clean(item?.querySelector?.("img")?.currentSrc || item?.querySelector?.("img")?.src);
+    return {
+      trackID,
+      title,
+      artist,
+      ...(artworkURL ? { artworkURL } : {}),
+      selected: item?.hasAttribute?.("selected") === true
+        || item?.getAttribute?.("aria-selected") === "true",
+    };
+  };
+
+  const queueSnapshot = (currentTrackID) => {
+    const elements = [...(document.querySelectorAll?.("ytmusic-player-queue-item") ?? [])].slice(0, 100);
+    const items = elements.map((item) => queueItemSnapshot(item)).filter(Boolean);
+    if (!items.length) return undefined;
+    if (!items.some((item) => item.selected)) {
+      const fallback = items.find((item) => item.trackID === currentTrackID);
+      if (fallback) fallback.selected = true;
+    }
+    return { items, currentIndex: items.findIndex((item) => item.selected) };
+  };
+
   const enabledControl = (control) => Boolean(
     control &&
     control.disabled !== true &&
@@ -606,6 +664,8 @@
     if (!observation || !acceptsTrackTuple(observation.tuple)) return null;
     const { media, barClock, tuple } = observation;
     const { trackID, title, artist, album, artworkURL, durationMs } = tuple;
+    const nativeQueue = queueSnapshot(trackID);
+    const nativeLikeButtons = likeButtons(playerBar ?? document);
     return {
       type: "youtube-music-snapshot",
       version: protocolVersion,
@@ -633,7 +693,11 @@
         playPause: enabledControl(transportButton(playerBar ?? document, "playPause")),
         previous: enabledControl(transportButton(playerBar ?? document, "previous")),
         next: enabledControl(transportButton(playerBar ?? document, "next")),
+        like: enabledControl(nativeLikeButtons.like),
+        queue: Boolean(nativeQueue?.items.length),
       },
+      engagement: { likeStatus: likeStatus(playerBar ?? document) },
+      ...(nativeQueue ? { queue: nativeQueue } : {}),
     };
   };
 
@@ -652,6 +716,16 @@
     snapshot.controls.playPause,
     snapshot.controls.previous,
     snapshot.controls.next,
+    snapshot.controls.like,
+    snapshot.controls.queue,
+    snapshot.engagement?.likeStatus ?? "neutral",
+    ...(snapshot.queue?.items ?? []).flatMap((item) => [
+      item.trackID,
+      item.title,
+      item.artist,
+      item.artworkURL ?? "",
+      item.selected,
+    ]),
   ]);
 
   const snapshotFieldSignature = (snapshot, stateSignature) => JSON.stringify([
@@ -1202,6 +1276,48 @@
       return;
     }
 
+    if (message?.type === "youtube-music-like-command") {
+      const playerBar = document.querySelector("ytmusic-player-bar");
+      if (!commandMatchesCurrentTrack(message, playerBar, sendResponse)) return;
+      const control = likeButtons(playerBar ?? document).like;
+      if (!enabledControl(control) || typeof control.click !== "function") {
+        sendResponse({ ok: false, reason: "like-unavailable" });
+        return;
+      }
+      const requested = message.liked === true;
+      const current = likeStatus(playerBar ?? document) === "liked";
+      if (requested === current) {
+        sendResponse({ ok: true, liked: current, unchanged: true });
+        return;
+      }
+      control.click();
+      queueSend();
+      sendResponse({ ok: true, liked: requested });
+      return;
+    }
+
+    if (message?.type === "youtube-music-queue-select") {
+      const playerBar = document.querySelector("ytmusic-player-bar");
+      if (!commandMatchesCurrentTrack(message, playerBar, sendResponse)) return;
+      const requestedTrackID = clean(message.queueTrackID);
+      const queueIndex = Number.isSafeInteger(message.queueIndex) ? message.queueIndex : -1;
+      const item = [...(document.querySelectorAll?.("ytmusic-player-queue-item") ?? [])][queueIndex];
+      const target = item?.querySelector?.('a[href*="watch?"][href*="v="]') ?? item;
+      if (
+        !requestedTrackID
+        || queueItemSnapshot(item)?.trackID !== requestedTrackID
+        || !target
+        || typeof target.click !== "function"
+      ) {
+        sendResponse({ ok: false, reason: "queue-item-unavailable" });
+        return;
+      }
+      target.click();
+      queueSend();
+      sendResponse({ ok: true, queueTrackID: requestedTrackID, queueIndex });
+      return;
+    }
+
     if (
       message?.type === "youtube-music-open-stage" ||
       message?.type === "youtube-music-activate-lyrics" ||
@@ -1369,7 +1485,7 @@
           subtree: true,
           characterData: true,
           attributes: true,
-          attributeFilter: ["href", "src", "disabled", "aria-disabled"],
+          attributeFilter: ["href", "src", "disabled", "aria-disabled", "aria-pressed"],
         });
       }
     }
@@ -1382,8 +1498,9 @@
         stageObserver?.observe(observedStageRoot, {
           childList: true,
           subtree: true,
+          characterData: true,
           attributes: true,
-          attributeFilter: ["selected", "aria-selected", "page-type"],
+          attributeFilter: ["selected", "aria-selected", "page-type", "href", "src"],
         });
       }
     }

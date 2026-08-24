@@ -72,6 +72,22 @@ describe("YouTube Music companion protocol", () => {
     expect(isYouTubeMusicSnapshotV0({ ...snapshot(), playback: { ...snapshot().playback, currentTimeMs: -1 } })).toBe(false);
     expect(isYouTubeMusicSnapshotV0({ ...snapshot(), track: { ...snapshot().track, trackID: "" } })).toBe(false);
     expect(isYouTubeMusicSnapshotV0({ ...snapshot(), controls: { ...snapshot().controls!, next: "yes" } })).toBe(false);
+    expect(isYouTubeMusicSnapshotV0({
+      ...snapshot(),
+      queue: { currentIndex: 2, items: [{ trackID: "a", title: "A", artist: "", selected: true }] },
+    })).toBe(false);
+  });
+
+  it("accepts optional native like and bounded queue state", () => {
+    expect(isYouTubeMusicSnapshotV0({
+      ...snapshot(),
+      controls: { ...snapshot().controls!, like: true, queue: true },
+      engagement: { likeStatus: "liked" },
+      queue: {
+        currentIndex: 0,
+        items: [{ trackID: "abc123", title: "A song", artist: "An artist", selected: true }],
+      },
+    })).toBe(true);
   });
 
   it("classifies an invalidated extension context as a fatal bridge failure", () => {
