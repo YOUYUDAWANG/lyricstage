@@ -20,6 +20,7 @@ interface AutomaticLyricsAssistInput {
   initial: LyricsLookupResponseV0;
   configuration?: DirectorBYOKConfigurationV1;
   fetchImplementation?: typeof fetch;
+  executeImplementation?: typeof executeDirectorBYOKProfileV1;
 }
 
 export const assistAutomaticLyrics = async ({
@@ -28,14 +29,16 @@ export const assistAutomaticLyrics = async ({
   initial,
   configuration,
   fetchImplementation = fetch,
+  executeImplementation = executeDirectorBYOKProfileV1,
 }: AutomaticLyricsAssistInput): Promise<{
   result: LyricsLookupResponseV0;
   assistance?: LyricsLookupResponseV0["assistance"];
 }> => {
-  if (initial.status === "match" || !configuration) return { result: initial };
+  const identityNeedsEnrichment = identity.isCover && identity.originalArtists.length === 0;
+  if (!configuration || (initial.status === "match" && !identityNeedsEnrichment)) return { result: initial };
   try {
     const request = buildAILyricsLookupAssistRequestV1(track, identity, initial.candidates);
-    const execution = await executeDirectorBYOKProfileV1(
+    const execution = await executeImplementation(
       configuration, request, aiLyricsLookupAssistProfileV1, fetchImplementation, 12_000, 1,
     );
     const assistedIdentity = mergeAILyricsLookupAssistIdentityV1(track, identity, execution.response);
@@ -49,7 +52,7 @@ export const assistAutomaticLyrics = async ({
       ),
     };
     const requested = execution.response.preferredCandidate;
-    if (requested && execution.response.confidence >= 0.82) {
+    if (initial.status !== "match" && requested && execution.response.confidence >= 0.82) {
       const preferred = initial.candidates.find((candidate) =>
         candidate.provider === requested.provider && candidate.id === requested.id);
       const original = preferredOriginalFallbackCandidate(track, assistedIdentity, preferred ? [preferred] : []);

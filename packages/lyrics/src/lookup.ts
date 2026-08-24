@@ -89,7 +89,7 @@ export const lookupLayeredLyrics = async (
     if (options.lddc && await append(
       () => withSourceDeadline(controller.signal, lddcLyricsLookupTimeoutMilliseconds, (signal) =>
         lookupLDDCLyrics(track, options.lddc!, signal, identity)),
-    )) {
+    ) && !(identity.isCover && identity.originalArtists.length === 0)) {
       return responseFromCandidates(track, identity, pooled);
     }
     if (await append(
