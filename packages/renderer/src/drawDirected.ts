@@ -245,12 +245,12 @@ const drawPrimitiveField = (
   } else if (use.primitive === "field.ribbon") {
     const direction = use.direction ?? 1;
     const scale = use.scale ?? 1;
-    const travel = reduceMotion ? 0 : Math.sin(timeMs / 1650) * width * 0.025;
+    const travel = reduceMotion ? 0 : Math.sin(timeMs / 1650) * width * 0.055;
     for (let index = 0; index < 4; index += 1) {
       const y = height * (0.24 + index * 0.17);
       const color = index % 2 === 0 ? palette.signal : palette.signalAlt;
-      context.strokeStyle = withAlpha(color, 0.08 + intensity * (0.09 + index * 0.018));
-      context.lineWidth = Math.max(1.2, height * (0.002 + index * 0.0007) * scale);
+      context.strokeStyle = withAlpha(color, 0.16 + intensity * (0.18 + index * 0.022));
+      context.lineWidth = Math.max(1.8, height * (0.0032 + index * 0.0008) * scale);
       context.beginPath();
       context.moveTo(-width * 0.08, y + travel * direction);
       context.bezierCurveTo(
@@ -291,8 +291,8 @@ const drawPrimitiveField = (
       context.stroke();
     }
   } else if (use.primitive === "geometry.converge") {
-    context.strokeStyle = withAlpha(palette.signal, 0.18 + intensity * 0.24);
-    context.lineWidth = Math.max(1, height * 0.0024);
+    context.strokeStyle = withAlpha(palette.signal, 0.24 + intensity * 0.34);
+    context.lineWidth = Math.max(1.6, height * 0.0034);
     [-1, 1].forEach((direction) => {
       context.beginPath();
       context.moveTo(width * (direction < 0 ? 0.04 : 0.96), height * (0.25 - phase * direction));
@@ -300,8 +300,8 @@ const drawPrimitiveField = (
       context.stroke();
     });
   } else if (use.primitive === "geometry.expand") {
-    context.strokeStyle = withAlpha(palette.signalAlt, 0.13 + intensity * 0.18);
-    context.lineWidth = Math.max(1, height * 0.0018);
+    context.strokeStyle = withAlpha(palette.signalAlt, 0.2 + intensity * 0.28);
+    context.lineWidth = Math.max(1.5, height * 0.0028);
     for (let ring = 1; ring <= 3; ring += 1) {
       context.beginPath();
       context.ellipse(width * 0.5, height * 0.5, width * (0.09 + ring * 0.1 + phase), height * (0.08 + ring * 0.07 + phase), 0, 0, Math.PI * 2);
@@ -347,7 +347,7 @@ const drawPrimitiveField = (
     context.arc(Math.cos(rotation) * width * 0.28 * scale, Math.sin(rotation) * height * 0.18 * scale, dotRadius, 0, Math.PI * 2);
     context.fill();
   } else if (use.primitive === "density.lift") {
-    context.fillStyle = withAlpha(palette.signal, 0.08 + intensity * 0.11);
+    context.fillStyle = withAlpha(palette.signal, 0.14 + intensity * 0.2);
     for (let index = 0; index < 18; index += 1) {
       const x = width * (0.08 + (index % 6) * 0.17);
       const y = height * (0.18 + Math.floor(index / 6) * 0.31 + phase * ((index % 3) - 1));
@@ -360,8 +360,8 @@ const drawPrimitiveField = (
     context.fillStyle = gradient;
     context.fillRect(0, 0, width, height);
   } else if (use.primitive === "motif.recall" || use.primitive === "memory.echo" || use.primitive === "memory.trail") {
-    context.strokeStyle = withAlpha(palette.signalAlt, use.primitive === "memory.echo" ? 0.15 : 0.1);
-    context.lineWidth = 1;
+    context.strokeStyle = withAlpha(palette.signalAlt, (use.primitive === "memory.echo" ? 0.18 : 0.13) + intensity * 0.24);
+    context.lineWidth = Math.max(1.4, height * (0.0014 + intensity * 0.0012));
     const positions = use.primitive === "memory.trail" ? [0.12, 0.31, 0.5, 0.69, 0.88] : [0.18, 0.5, 0.82];
     positions.forEach((x, index) => {
       context.beginPath();
@@ -444,13 +444,13 @@ const transformFor = (
   if (behavior === "settle") return { x: 0, y: 0, scaleX: 1, scaleY: 1, rotation: 0, alpha: 1, blur: 0 };
   const eased = behavior === "gravityDrop" ? easeOutBack(progress) : easeOutCubic(progress);
   const remainder = 1 - eased;
-  const amount = 24 + line.directive.intensity * 48;
+  const amount = 36 + line.directive.intensity * 72;
   const direction = line.directive.direction;
   if (behavior === "assemble") {
-    return { x: remainder * direction * amount * (glyph.index % 2 ? -1 : 1), y: remainder * ((glyph.index % 3) - 1) * 18, scaleX: 1, scaleY: 1, rotation: remainder * direction * 0.035, alpha: 0.55 + eased * 0.45, blur: 0 };
+    return { x: remainder * direction * amount * (glyph.index % 2 ? -1 : 1), y: remainder * ((glyph.index % 3) - 1) * 28, scaleX: 1, scaleY: 1, rotation: remainder * direction * 0.045, alpha: 0.42 + eased * 0.58, blur: 0 };
   }
   if (behavior === "gravityDrop") {
-    return { x: 0, y: -remainder * amount * 1.7, scaleX: 1, scaleY: 0.9 + eased * 0.1, rotation: 0, alpha: 0.5 + progress * 0.5, blur: 0 };
+    return { x: 0, y: -remainder * amount * 1.9, scaleX: 1, scaleY: 0.86 + eased * 0.14, rotation: 0, alpha: 0.4 + progress * 0.6, blur: 0 };
   }
   if (behavior === "ripple") {
     const wave = Math.sin(glyph.index * 0.72 + timeMs * 0.012) * amount * 0.18 * (0.3 + remainder * 0.7);
@@ -463,15 +463,15 @@ const transformFor = (
     return { x: 0, y: -remainder * amount * 0.12, scaleX: 0.94 + eased * 0.06, scaleY: 0.94 + eased * 0.06, rotation: 0, alpha: 0.7 + eased * 0.3, blur: 0 };
   }
   if (behavior === "drift") {
-    return { x: direction * remainder * amount, y: remainder * amount * 0.32, scaleX: 1, scaleY: 1, rotation: direction * remainder * 0.02, alpha: 0.56 + eased * 0.44, blur: 0 };
+    return { x: direction * remainder * amount, y: remainder * amount * 0.45, scaleX: 1, scaleY: 1, rotation: direction * remainder * 0.03, alpha: 0.44 + eased * 0.56, blur: 0 };
   }
   if (behavior === "focus") {
-    return { x: 0, y: remainder * 8, scaleX: 0.91 + eased * 0.09, scaleY: 0.91 + eased * 0.09, rotation: 0, alpha: 0.44 + eased * 0.56, blur: remainder * 12 };
+    return { x: 0, y: remainder * 14, scaleX: 0.86 + eased * 0.14, scaleY: 0.86 + eased * 0.14, rotation: 0, alpha: 0.34 + eased * 0.66, blur: remainder * 16 };
   }
   if (behavior === "converge") {
     const center = line.bounds.x + line.bounds.width / 2;
     const side = glyph.x + glyph.width / 2 < center ? -1 : 1;
-    return { x: side * remainder * amount * 1.35, y: 0, scaleX: 0.92 + eased * 0.08, scaleY: 1, rotation: -side * remainder * 0.025, alpha: 0.58 + eased * 0.42, blur: 0 };
+    return { x: side * remainder * amount * 1.65, y: 0, scaleX: 0.88 + eased * 0.12, scaleY: 1, rotation: -side * remainder * 0.04, alpha: 0.42 + eased * 0.58, blur: 0 };
   }
   return { x: 0, y: remainder * amount * 0.34, scaleX: 0.98 + eased * 0.02, scaleY: 0.98 + eased * 0.02, rotation: 0, alpha: 0.62 + eased * 0.38, blur: 0 };
 };
@@ -1145,14 +1145,14 @@ export const drawDirectedStageV1 = (
   clearCanvasBackingStoreV1(context);
   context.save();
   context.globalAlpha = presentation === "hero"
-    ? 0.72
+    ? 0.94
     : presentation === "duet"
-      ? 0.56
+      ? 0.84
       : presentation === "aperture"
-        ? 0.2
+        ? 0.62
         : presentation === "section"
-          ? 0.34
-          : 0.24;
+          ? 0.74
+          : 0.42;
   drawStructuralField(context, stage, options.timeMs, options.reduceMotion, palette);
   drawEffectField(context, stage, options.timeMs, options.reduceMotion, palette);
   context.restore();

@@ -406,6 +406,8 @@ export function StageCanvas({
         writeDatasetValue(host, "sceneCoverageMs", String(Math.round(sceneCoverage / 250) * 250));
         writeDatasetValue(host, "sceneCount", String(rollingCards.length));
         writeDatasetValue(host, "sceneId", activeScene?.sceneID);
+        writeDatasetValue(host, "semanticPurpose", activeScene?.semanticScene?.purpose);
+        writeDatasetValue(host, "signatureClip", activeEffect?.id.match(/^signature-clip-v2:([^:]+)/u)?.[1]);
         writeDatasetValue(host, "layoutChangeCount", String(handoff.active.blocking.transitions.length));
         writeDatasetValue(host, "gestureCount", String(handoff.active.gestures.length));
         writeDatasetValue(host, "effectCount", String(handoff.active.effects.length));

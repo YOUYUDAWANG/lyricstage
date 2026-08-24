@@ -265,6 +265,9 @@ describe("rolling Performance Director", () => {
     expect(stageSource).toContain("applyStageFrameDOMV1(stageFrame");
     expect(stageSource).not.toContain("setLayoutTransitionPhase");
     const appSource = readFileSync(new URL("../App.tsx", import.meta.url), "utf8");
+    expect(appSource.indexOf("startYouTubeMusicAudioAnalysis(snapshot.track.trackID"))
+      .toBeLessThan(appSource.indexOf("await host.requestFullscreen()"));
+    expect(appSource).toContain("stopYouTubeMusicAudioAnalysis(active.trackID, active.captureID)");
     expect(appSource).toContain("const priorRollingState = rollingDirectorStateRef.current");
     expect(appSource).toContain("setRollingDirectorState(priorRollingState)");
     expect(appSource).toContain("setRollingForceLocal(priorForceLocal)");

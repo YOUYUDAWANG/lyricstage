@@ -13,6 +13,7 @@ import {
 } from "./rollingDirector";
 import type { EffectRecipeV1 } from "./effectGrammar";
 import { lyricGraphemesV1, type LyricGestureV1 } from "./lyricChoreography";
+import { layoutForSemanticSceneV2, localSemanticSceneDirectionV2 } from "./semanticSceneDirectionV2";
 
 const uniqueByID = <T extends { id: string }>(items: readonly T[]): T[] =>
   [...new Map(items.map((item) => [item.id, item])).values()];
@@ -159,10 +160,18 @@ const densifyLocalCardV2 = (
   state: RollingPerformanceStateV1,
   card: SceneCardV1,
 ): SceneCardV1 | null => {
-  if (card.signatureMoment) return card;
+  const semanticScene = localSemanticSceneDirectionV2(card.sceneIndex);
+  if (card.signatureMoment) {
+    const { sceneID: _ignored, ...withoutID } = card;
+    return sanitizeSceneCardV1(lyrics, bible, state, reidentifySceneCard({
+      ...withoutID, semanticScene, layout: layoutForSemanticSceneV2(state.layout, state.layoutTransitionsUsed, semanticScene),
+    }));
+  }
   const supportGesture = localSupportGestureV2(lyrics, card.sceneIndex, card.fromLineIndex);
   const withoutID: Omit<SceneCardV1, "sceneID"> = {
     ...card,
+    semanticScene,
+    layout: layoutForSemanticSceneV2(state.layout, state.layoutTransitionsUsed, semanticScene),
     intention: "Keep the narrative field visibly progressing between semantic anchors.",
     presentation: "section",
     gestures: supportGesture ? uniqueByID([supportGesture, ...card.gestures]).slice(0, 2) : card.gestures,
@@ -341,7 +350,7 @@ export const compileWindowIntentV2ToSceneCardsV1 = (
   for (const [index, range] of ranges.entries()) {
     const cues = intent.cues.filter((cue) => cue.fromLineIndex >= range.fromLineIndex
       && (cue.toLineIndex ?? cue.fromLineIndex) <= range.toLineIndex);
-    const card = compileWindowIntentV2ToSceneCardV1(lyrics, bible, currentState, {
+    const compiled = compileWindowIntentV2ToSceneCardV1(lyrics, bible, currentState, {
       ...intent,
       id: `${intent.id}:scene:${index}`,
       entryStateHash: currentState.stateHash,
@@ -349,7 +358,11 @@ export const compileWindowIntentV2ToSceneCardsV1 = (
       toLineIndex: range.toLineIndex,
       cues,
     });
-    if (!card) return [];
+    if (!compiled) return [];
+    const semanticScene = localSemanticSceneDirectionV2(compiled.sceneIndex);
+    const { sceneID: _ignored, ...withoutID } = compiled;
+    const card = reidentifySceneCard({ ...withoutID, semanticScene, layout: layoutForSemanticSceneV2(currentState.layout, currentState.layoutTransitionsUsed, semanticScene) });
+    if (!sanitizeSceneCardV1(lyrics, bible, currentState, card)) return [];
     cards.push(card);
     currentState = advanceRollingPerformanceStateV1(currentState, card);
   }

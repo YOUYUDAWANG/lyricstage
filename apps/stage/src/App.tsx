@@ -37,6 +37,8 @@ import {
   controlYouTubeMusic,
   isYouTubeMusicExtensionContext,
   seekYouTubeMusic,
+  startYouTubeMusicAudioAnalysis,
+  stopYouTubeMusicAudioAnalysis,
   useYouTubeMusicBridge,
 } from "./playback/youtubeMusicBridge";
 import {
@@ -208,6 +210,14 @@ export default function App({ embedded = embeddedStageFromLocation, onEmbeddedRe
   const columnClockCommitRef = useRef(0);
   const everConnectedRef = useRef(false);
   const lastTrackRef = useRef<{ title: string; artist: string }>({ title: "", artist: "" });
+  const audioAnalysisRef = useRef<{ trackID: string; captureID?: string } | null>(null);
+  const audioAnalysisGenerationRef = useRef(0);
+  const stopStageAudioAnalysis = useCallback(() => {
+    audioAnalysisGenerationRef.current += 1;
+    const active = audioAnalysisRef.current;
+    audioAnalysisRef.current = null;
+    if (active) void stopYouTubeMusicAudioAnalysis(active.trackID, active.captureID);
+  }, []);
 
   displayTimeRef.current = displayTimeMs;
   const localClockRef = useRef<PlaybackClockV0>({
@@ -734,6 +744,13 @@ export default function App({ embedded = embeddedStageFromLocation, onEmbeddedRe
     }
   }, [youtubeMusic.connected, youtubeMusic.snapshot]);
 
+  useEffect(() => {
+    const active = audioAnalysisRef.current;
+    if (active && active.trackID !== youtubeMusic.snapshot?.track.trackID) stopStageAudioAnalysis();
+  }, [stopStageAudioAnalysis, youtubeMusic.snapshot?.track.trackID]);
+
+  useEffect(() => () => stopStageAudioAnalysis(), [stopStageAudioAnalysis]);
+
   useEffect(
     () => () => {
       if (objectURLRef.current) URL.revokeObjectURL(objectURLRef.current);
@@ -1142,6 +1159,7 @@ export default function App({ embedded = embeddedStageFromLocation, onEmbeddedRe
   };
 
   const exitEmbeddedFullscreen = useCallback(async () => {
+    stopStageAudioAnalysis();
     setPresentation("column");
     if (document.fullscreenElement) {
       try {
@@ -1157,7 +1175,7 @@ export default function App({ embedded = embeddedStageFromLocation, onEmbeddedRe
         : document.querySelector<HTMLButtonElement>("[data-column-enter-fullscreen='true']");
       trigger?.focus();
     });
-  }, []);
+  }, [stopStageAudioAnalysis]);
 
   const setCurrentLyricsOffset = useCallback((nextOffsetMs: number) => {
     const boundedOffset = clampLyricsOffsetMs(nextOffsetMs);
@@ -1216,6 +1234,12 @@ export default function App({ embedded = embeddedStageFromLocation, onEmbeddedRe
         return;
       }
       // Must stay in the user-gesture stack: reveal host then requestFullscreen.
+      const snapshot = source === "youtubeMusic" ? youtubeMusic.snapshot : undefined;
+      if (snapshot && audioAnalysisRef.current && audioAnalysisRef.current.trackID !== snapshot.track.trackID) stopStageAudioAnalysis();
+      const audioGeneration = snapshot && audioAnalysisRef.current?.trackID !== snapshot.track.trackID
+        ? ++audioAnalysisGenerationRef.current : audioAnalysisGenerationRef.current;
+      const audioRequest = snapshot && audioAnalysisRef.current?.trackID !== snapshot.track.trackID
+        ? startYouTubeMusicAudioAnalysis(snapshot.track.trackID, snapshot.playback.durationMs) : undefined;
       void loadStageCanvasModule();
       host.hidden = false;
       host.setAttribute("aria-hidden", "false");
@@ -1234,7 +1258,19 @@ export default function App({ embedded = embeddedStageFromLocation, onEmbeddedRe
           throw new Error("fullscreen-ownership-unconfirmed");
         }
         setPresentation("fullscreen");
+        void audioRequest?.then((result) => {
+          if (!result.ok) return;
+          if (audioAnalysisGenerationRef.current === audioGeneration) {
+            audioAnalysisRef.current = { trackID: snapshot!.track.trackID, captureID: result.captureID };
+          } else void stopYouTubeMusicAudioAnalysis(snapshot!.track.trackID, result.captureID);
+        });
       } catch {
+        if (audioRequest) {
+          audioAnalysisGenerationRef.current += 1;
+          void audioRequest.then((result) => {
+            if (result.ok) void stopYouTubeMusicAudioAnalysis(snapshot!.track.trackID, result.captureID);
+          });
+        }
         host.hidden = true;
         host.setAttribute("aria-hidden", "true");
         setPresentation("column");

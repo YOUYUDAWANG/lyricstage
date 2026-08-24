@@ -30,6 +30,7 @@ import {
   signatureChoreographyFitsV2,
   type SignatureChoreographySelectionV2,
 } from "./signatureChoreographyV2";
+import { layoutForSemanticSceneV2, type SemanticSceneDirectionV2 } from "./semanticSceneDirectionV2";
 
 export type SceneDramaticPurposeV2 = "establish" | "develop" | "turn" | "aftermath" | "resolve";
 export type ScenePreserveV2 = "motif" | "visualWorld" | "spatialAxis" | "voiceOwnership";
@@ -209,7 +210,8 @@ export const compileScenePackV2 = (
     const compiled = compileWindowIntentV2ToSceneCardV1(lyrics, bible, current, intent);
     if (!compiled) return [];
     const { sceneID: _oldSceneID, ...withoutSceneID } = compiled;
-    const intended = { ...withoutSceneID, intention: `${scene.purpose}: preserve ${scene.continuity.preserve.join("+")}; change ${scene.continuity.change}; leave ${scene.continuity.leave}.` };
+    const semanticScene: SemanticSceneDirectionV2 = { version: "semantic-scene-direction-v2", purpose: scene.purpose, spatialIntent: scene.spatialIntent };
+    const intended = { ...withoutSceneID, semanticScene, layout: layoutForSemanticSceneV2(current.layout, current.layoutTransitionsUsed, semanticScene), intention: `${scene.purpose}: preserve ${scene.continuity.preserve.join("+")}; change ${scene.continuity.change}; leave ${scene.continuity.leave}.` };
     const sceneID = sceneCardIdentityV1(intended);
     const candidate: SceneCardV1 = { ...intended, sceneID, effects: intended.effects.map((effect) => ({ ...effect, sectionID: sceneID })) };
     const accepted = sanitizeSceneCardV1(lyrics, bible, current, candidate);

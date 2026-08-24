@@ -3,7 +3,7 @@ import { lyricFixtures } from "@lyricstage/contracts";
 import { scenePackRequestProfileV2 } from "./directorScenePackV2";
 import { signatureChoreographyClipsV2 } from "./signatureChoreographyV2";
 import { windowIntentRequestProfileV2 } from "./directorV2Provider";
-import { compileLocalDirectorBibleV1, initialRollingPerformanceStateV1 } from "./rollingDirector";
+import { compileDirectorPlanFromRollingV1, compileLocalDirectorBibleV1, initialRollingPerformanceStateV1 } from "./rollingDirector";
 
 const lyrics = {
   ...lyricFixtures.longSongStructure,
@@ -63,6 +63,8 @@ describe("ScenePackV2 provider profile", () => {
     });
     expect(result.response, result.reason).toHaveLength(validRanges.length);
     expect(result.response?.map((card) => [card.fromLineIndex, card.toLineIndex])).toEqual(validRanges);
+    expect(new Set(result.response?.map((card) => card.layout)).size).toBeGreaterThanOrEqual(2);
+    expect(result.response?.every((card) => card.semanticScene?.version === "semantic-scene-direction-v2")).toBe(true);
     expect(result.response?.[0]?.intention).toBe("establish: preserve motif; change focus; leave trace.");
     expect(result.response?.at(-1)?.intention).toContain("Choreography final-resolve");
     const lineGestures = result.response?.flatMap((card) => card.gestures) ?? [];
@@ -74,6 +76,8 @@ describe("ScenePackV2 provider profile", () => {
     expect(signatureEffects.some((effect) => effect.id.includes("bridge-fracture"))).toBe(true);
     expect(signatureEffects.some((effect) => effect.id.includes("final-resolve"))).toBe(true);
     expect(signatureChoreographyClipsV2).toHaveLength(8);
+    const plan = compileDirectorPlanFromRollingV1(lyrics, bible, result.response!);
+    expect(plan.blocking.transitions.length).toBeGreaterThanOrEqual(2);
   });
 
   it("rejects count padding, gaps, overlap and concrete visual fields", () => {

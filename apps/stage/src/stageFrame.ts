@@ -29,6 +29,9 @@ export interface StageAmbientFrameV1 {
   artworkScale: number;
   artworkSaturation: number;
   artworkBrightness: number;
+  sceneEnterTranslateXPct: number;
+  sceneEnterScale: number;
+  sceneEnterOpacity: number;
 }
 
 export interface StageFrameV1 {
@@ -274,6 +277,13 @@ export const sampleStageAmbientIntoV1 = (
   target.artworkSaturation = threePoint(coverProgress, 0.5, 1.02, 1.065, 1.035);
   target.artworkBrightness = threePoint(coverProgress, 0.5, 0.98, 1.018, 1.004);
   target.artworkScale = 1;
+  const section = directorSectionAtV1(plan, timeMs);
+  const sceneProgress = reduceMotion || !section.id.startsWith("rolling:")
+    ? 1 : easeInOutSine((finiteTime(timeMs) - section.fromMs) / 900);
+  const sceneDirection = section.layout === "railTrailing" || section.layout === "duetDivide" ? -1 : 1;
+  target.sceneEnterTranslateXPct = sceneDirection * (1 - sceneProgress) * 4.8;
+  target.sceneEnterScale = 0.955 + sceneProgress * 0.045;
+  target.sceneEnterOpacity = 0.52 + sceneProgress * 0.48;
   sampleWorldMotion(world.motionLaw, timeMs, world.elasticity, target);
   if (world.motionLaw === "pulse") {
     const phase = (finiteTime(timeMs) % 4_800) / 4_800;
@@ -293,11 +303,11 @@ export const sampleStageAmbientIntoV1 = (
       : (1 - Math.cos(reactiveBus.beatPhase * TAU)) / 2;
     const weight = reactiveBus.bass * audible;
     const impact = reactiveBus.onset * audible;
-    target.motifTranslateXPct += (reactiveBus.stereoWidth - 0.5) * 1.6 * audible;
+    target.motifTranslateXPct += (reactiveBus.stereoWidth - 0.5) * 4 * audible;
     target.motifTranslateYPct *= 0.38 + audible * 0.62;
-    target.motifScale += weight * 0.025 + impact * 0.018 + beatPulse * 0.008;
-    target.motifOpacity *= 0.58 + audible * (0.38 + reactiveBus.energy * 0.18);
-    target.artworkScale += weight * 0.012 + impact * 0.008;
+    target.motifScale += weight * 0.07 + impact * 0.045 + beatPulse * 0.014;
+    target.motifOpacity *= 0.62 + audible * (0.44 + reactiveBus.energy * 0.24);
+    target.artworkScale += weight * 0.028 + impact * 0.016;
     target.artworkSaturation *= 0.96 + reactiveBus.brightness * 0.1;
     target.artworkBrightness *= 0.96 + reactiveBus.energy * 0.055 + impact * 0.025;
   }
@@ -339,6 +349,9 @@ const createAmbientFrame = (): StageAmbientFrameV1 => ({
   artworkScale: 1,
   artworkSaturation: 1,
   artworkBrightness: 1,
+  sceneEnterTranslateXPct: 0,
+  sceneEnterScale: 1,
+  sceneEnterOpacity: 1,
 });
 
 const createFrame = (input: StageFrameInputV1): StageFrameV1 => ({
@@ -425,6 +438,9 @@ export const applyStageFrameDOMV1 = (
   host.style.setProperty("--stage-world-blur-light", `${18 + plan.world.depth * 34}px`);
   host.style.setProperty("--stage-world-glow-portal", `${72 + plan.world.atmosphere * 90}px`);
   host.style.setProperty("--stage-world-glow-directed", `${90 + plan.world.atmosphere * 120}px`);
+  host.style.setProperty("--stage-scene-enter-x", `${ambient.sceneEnterTranslateXPct.toFixed(4)}%`);
+  host.style.setProperty("--stage-scene-enter-scale", ambient.sceneEnterScale.toFixed(5));
+  host.style.setProperty("--stage-scene-enter-opacity", ambient.sceneEnterOpacity.toFixed(5));
   host.dataset.directorSource = plan.source;
   host.dataset.directorVersion = plan.directorVersion;
   host.dataset.worldSpatial = plan.world.spatialMode;

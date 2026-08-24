@@ -21,7 +21,7 @@ export const backgroundStorageKeys = {
 } as const;
 
 export const directorCacheEpoch = "fullscreen-director-v4-client-contract-v8.7-byok-intent-v1";
-export const rollingDirectorEpoch = "rolling-director-generation-v2.0-layered-director-v2";
+export const rollingDirectorEpoch = "rolling-director-generation-v2.1-perceptual-stage-v2";
 export const lyricsCacheLimit = 100;
 export const lyricsCacheByteLimit = 1_500_000;
 export const localLyricsByteLimit = 1_500_000;
@@ -97,7 +97,7 @@ export interface StoredDirectorBibleCacheEntry {
 export interface StoredDirectorSceneCacheEntry {
   fingerprint: string;
   epoch: string;
-  schemaVersion: "layered-director-v2";
+  schemaVersion: "perceptual-stage-v2";
   provenance: "ai-positive" | "local-repair";
   createdAtUnixMs: number;
   expiresAtUnixMs: number;

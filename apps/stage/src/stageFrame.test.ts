@@ -111,7 +111,20 @@ describe("StageFrameV1", () => {
     expect(replay.ambient).toEqual(direct.ambient);
     expect(replay.environment).toEqual(direct.environment);
     expect(direct.ambient.artworkScale).toBeGreaterThan(baseline.ambient.artworkScale);
+    expect(direct.ambient.motifScale - baseline.ambient.motifScale).toBeGreaterThan(0.05);
     expect(direct.reactiveBus?.atMs).toBe(targetTimeMs);
+  });
+
+  it("gives each rolling Scene a deterministic visible entrance without a wall clock", () => {
+    const first = plan.sections[0]!;
+    const rollingPlan = { ...plan, sections: plan.sections.map((section, index) => index === 0
+      ? { ...section, id: "rolling:perceptual-entry", layout: "editorialSplit" as const } : section) };
+    const entrance = writeStageFrameV1(createStageFrameBuffersV1(input(first.fromMs, { plan: rollingPlan })), input(first.fromMs, { plan: rollingPlan }));
+    const settled = writeStageFrameV1(createStageFrameBuffersV1(input(first.fromMs + 900, { plan: rollingPlan })), input(first.fromMs + 900, { plan: rollingPlan }));
+    expect(entrance.ambient.sceneEnterOpacity).toBeLessThan(0.6);
+    expect(Math.abs(entrance.ambient.sceneEnterTranslateXPct)).toBeGreaterThan(4);
+    expect(settled.ambient.sceneEnterOpacity).toBe(1);
+    expect(settled.ambient.sceneEnterTranslateXPct).toBe(0);
   });
 
   it("ignores stale audio snapshots after seek and keeps reduced motion static", () => {

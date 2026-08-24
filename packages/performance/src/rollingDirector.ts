@@ -41,6 +41,13 @@ import {
   type LyricGestureV1,
   type SongBlockingV1,
 } from "./lyricChoreography";
+import {
+  blockingForRollingSectionsV2,
+  layoutForSemanticSceneV2,
+  sanitizeSemanticSceneDirectionV2,
+  sceneIntensityForDirectionV2,
+  type SemanticSceneDirectionV2,
+} from "./semanticSceneDirectionV2";
 
 export interface SignatureAnchorV1 {
   id: string;
@@ -117,6 +124,7 @@ export interface SceneCardV1 {
   /** Locally compiled V2 output. Providers never author these values. */
   directives?: DirectorLineDirectiveV1[];
   semanticCueCount?: number;
+  semanticScene?: SemanticSceneDirectionV2;
   gestures: LyricGestureV1[];
   effects: EffectRecipeV1[];
   signatureMoment?: SignatureMomentV1;
@@ -598,7 +606,8 @@ const signatureMomentMatchesAnchor = (moment: SignatureMomentV1, anchor: Signatu
   && coverRoles.has(moment.coverRole)
   && consequenceKinds.has(moment.consequence);
 
-const expectedLayoutForCard = (bible: DirectorBibleV1, prior: RollingPerformanceStateV1, fromLineIndex: number): PerformanceLayoutV1 => {
+const expectedLayoutForCard = (bible: DirectorBibleV1, prior: RollingPerformanceStateV1, fromLineIndex: number, semanticScene?: SemanticSceneDirectionV2): PerformanceLayoutV1 => {
+  if (semanticScene) return layoutForSemanticSceneV2(prior.layout, prior.layoutTransitionsUsed, semanticScene);
   const next = bible.layoutBudget.proposedTransitions[prior.layoutTransitionsUsed];
   const act = next ? bible.acts[next.atSectionIndex] : undefined;
   return act && fromLineIndex >= act.fromLineIndex ? next!.toLayout : prior.layout;
@@ -630,9 +639,11 @@ export const sanitizeSceneCardV1 = (
   if (!range || complete.fromMs !== range[0]!.fromMs || complete.toMs !== Math.max(...range.map((line) => line.toMs))
     || complete.fromMs >= complete.toMs || complete.toMs - complete.fromMs > 75_000
     || (priorState.lastToLineIndex !== null && complete.fromLineIndex <= priorState.lastToLineIndex)) return null;
-  const expectedLayout = expectedLayoutForCard(bible, priorState, complete.fromLineIndex);
+  const semanticScene = complete.semanticScene === undefined ? undefined : sanitizeSemanticSceneDirectionV2(complete.semanticScene);
+  if (complete.semanticScene !== undefined && !semanticScene) return null;
+  const expectedLayout = expectedLayoutForCard(bible, priorState, complete.fromLineIndex, semanticScene ?? undefined);
   const layoutChanged = complete.layout !== priorState.layout;
-  if (complete.layout !== expectedLayout || (layoutChanged && priorState.layoutTransitionsUsed >= bible.layoutBudget.maximumTransitions)) return null;
+  if (complete.layout !== expectedLayout || (layoutChanged && priorState.layoutTransitionsUsed >= (semanticScene ? 4 : bible.layoutBudget.maximumTransitions))) return null;
   const gestures = sanitizeLyricGesturesV1(lyrics, complete.gestures);
   if (!gestures || gestures.some((gesture) => gesture.lineIndex < complete.fromLineIndex || gesture.lineIndex > complete.toLineIndex)) return null;
   const perLineGestureCount = new Map<number, number>();
@@ -697,7 +708,7 @@ export const sanitizeSceneCardV1 = (
     || creates.some((id) => consumes.includes(id))) return null;
   const finalSignature = bible.signatureAnchors.at(-1);
   if (signature?.id === finalSignature?.id && consumes.length === 0) return null;
-  return { ...complete, ...(directives ? { directives } : {}), gestures, evidence };
+  return { ...complete, ...(directives ? { directives } : {}), ...(semanticScene ? { semanticScene } : {}), gestures, evidence };
 };
 
 export const advanceRollingPerformanceStateV1 = (
@@ -1021,7 +1032,7 @@ const sectionForCard = (card: SceneCardV1, paletteIndex: number): DirectorSectio
   layout: card.layout,
   typography: card.typography,
   paletteIndex,
-  intensity: card.signatureMoment?.intensity ?? 0.58,
+  intensity: card.signatureMoment?.intensity ?? sceneIntensityForDirectionV2(card.semanticScene),
 });
 
 export const compileDirectorPlanFromRollingV1 = (
@@ -1079,26 +1090,7 @@ export const compileDirectorPlanFromRollingV1 = (
     });
     cursor += 1;
   }
-  const actSectionIndex = (actIndex: number): number => {
-    const lineIndex = bible.acts[actIndex]?.fromLineIndex;
-    return Math.max(0, sections.findIndex((section) => lineIndex !== undefined && lineIndex >= section.fromLineIndex && lineIndex <= section.toLineIndex));
-  };
-  const proposedBlocking: SongBlockingV1 = {
-    version: "song-blocking-v1",
-    baseLayout: bible.layoutBudget.baseLayout,
-    transitions: bible.layoutBudget.proposedTransitions.map((transition) => ({
-      ...transition,
-      atSectionIndex: actSectionIndex(transition.atSectionIndex),
-      evidence: {
-        ...transition.evidence,
-        lineIndices: transition.evidence.lineIndices.filter((lineIndex) => {
-          const section = sections[actSectionIndex(transition.atSectionIndex)];
-          return section && lineIndex >= section.fromLineIndex && lineIndex <= section.toLineIndex;
-        }),
-      },
-    })),
-  };
-  const blocking = sanitizeSongBlockingV1(proposedBlocking, sections) ?? local.blocking;
+  const blocking = blockingForRollingSectionsV2(bible, sections, accepted.some((card) => card.semanticScene), local.blocking);
   const blockedSections = applySongBlockingV1(sections, blocking);
   const sectionByCard = new Map(accepted.map((card) => [card.sceneID, blockedSections.find((section) => section.id === `rolling:${card.sceneID}`)!]));
   const cardEffects = accepted.flatMap((card) => card.effects.map((effect) => {
@@ -1140,7 +1132,8 @@ export const compileDirectorPlanFromRollingV1 = (
     recordingID: lyrics.recordingID,
     lyricsIdentity: bible.lyricsIdentity,
     source: source === "local" ? "local" : source,
-    directorVersion: directedByLine.size > 0 ? "lyricstage-rolling-director-v2" : "lyricstage-rolling-director-v1",
+    directorVersion: directedByLine.size > 0 || accepted.some((card) => card.semanticScene)
+      ? "lyricstage-rolling-director-v2" : "lyricstage-rolling-director-v1",
     concept: bible.premise,
     motif: bible.motifActor.relationship,
     intensityArc: bible.emotionalArc,

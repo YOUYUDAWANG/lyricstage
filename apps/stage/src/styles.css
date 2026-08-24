@@ -626,7 +626,7 @@ h1 {
   left: -20%;
   width: 140%;
   height: 156%;
-  opacity: 0.32;
+  opacity: 0.24;
   object-fit: cover;
   filter: blur(86px) saturate(1.58) brightness(0.82) contrast(1.02);
   transform: scale(1.12);
@@ -641,7 +641,7 @@ h1 {
   left: 22%;
   width: 108%;
   height: 142%;
-  opacity: 0.24;
+  opacity: 0.16;
   object-position: 72% 32%;
   filter: blur(124px) saturate(1.76) brightness(0.74) contrast(1.04);
   mix-blend-mode: screen;
@@ -702,19 +702,19 @@ h1 {
 }
 
 .stage-canvas-host[data-palette-tone="dusk"] .stage-artwork-wash {
-  opacity: 0.34;
+  opacity: 0.26;
   filter: blur(92px) saturate(1.56) brightness(0.84) contrast(1.00);
 }
 
 .stage-canvas-host[data-palette-tone="light"] .stage-artwork-wash {
-  opacity: 0.38;
-  filter: blur(94px) saturate(1.50) brightness(0.88) contrast(0.98);
+  opacity: 0.22;
+  filter: blur(94px) saturate(1.50) brightness(0.72) contrast(1.02);
   mix-blend-mode: screen;
 }
 
 .stage-canvas-host[data-palette-tone="light"] .stage-artwork-wash-secondary {
-  opacity: 0.27;
-  filter: blur(128px) saturate(1.72) brightness(0.76) contrast(1.02);
+  opacity: 0.14;
+  filter: blur(128px) saturate(1.72) brightness(0.68) contrast(1.04);
 }
 
 .stage-now-playing-layout {
@@ -725,6 +725,9 @@ h1 {
   grid-template-columns: minmax(220px, 30%) minmax(0, 1fr);
   gap: clamp(22px, 3.6vw, 68px);
   padding: clamp(34px, 5.4vw, 96px) clamp(38px, 5.8vw, 104px);
+  opacity: var(--stage-scene-enter-opacity, 1);
+  transform: translate3d(var(--stage-scene-enter-x, 0%), 0, 0) scale(var(--stage-scene-enter-scale, 1));
+  transform-origin: center;
 }
 
 .stage-canvas-host[data-director-source="ai"][data-world-spatial="panoramic"] .stage-now-playing-layout,
@@ -852,19 +855,19 @@ h1 {
 
 .stage-canvas-host:is([data-director-source="ai"], [data-director-source="cache"])[data-director-art-direction="editorialKinetic"]
   .stage-artwork-wash {
-  opacity: 0.40;
+  opacity: 0.28;
   filter: blur(72px) saturate(1.72) brightness(0.82) contrast(1.05);
 }
 
 .stage-canvas-host:is([data-director-source="ai"], [data-director-source="cache"])[data-director-art-direction="paperCut"]
   .stage-artwork-wash {
-  opacity: 0.28;
+  opacity: 0.20;
   filter: blur(60px) saturate(1.34) brightness(0.88) contrast(1.08);
 }
 
 .stage-canvas-host:is([data-director-source="ai"], [data-director-source="cache"])[data-director-art-direction="liquidMemory"]
   .stage-artwork-wash {
-  opacity: 0.38;
+  opacity: 0.26;
   filter: blur(118px) saturate(1.38) brightness(0.80) contrast(0.98);
 }
 

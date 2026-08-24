@@ -99,7 +99,7 @@ const hexToOklch = (hex: string): Oklch | undefined => {
 
 export const paletteToneForV1 = (palette: DirectedStagePaletteV1): ArtworkPaletteToneV1 => {
   const lightness = hexToOklch(palette.ground)?.l ?? 0;
-  if (lightness >= 0.36) return "light";
+  if (lightness >= 0.29) return "light";
   if (lightness >= 0.20) return "dusk";
   return "dark";
 };
@@ -184,8 +184,8 @@ const neutralPalette = (averageLightness: number, tone: ArtworkPaletteToneV1): D
   const signal = toHex({ l: light ? 0.68 : dusk ? 0.68 : 0.72, c: 0.075, h: cool });
   const signalAlt = toHex({ l: light ? 0.72 : dusk ? 0.73 : 0.78, c: 0.06, h: (cool + 28) % 360 });
   return {
-    ground: toHex({ l: light ? 0.44 : dusk ? 0.27 : 0.12, c: light ? 0.055 : 0.026, h: cool }),
-    groundLift: toHex({ l: light ? 0.58 : dusk ? 0.42 : 0.24, c: light ? 0.075 : 0.04, h: cool }),
+    ground: toHex({ l: light ? 0.30 : dusk ? 0.27 : 0.12, c: light ? 0.055 : 0.026, h: cool }),
+    groundLift: toHex({ l: light ? 0.43 : dusk ? 0.42 : 0.24, c: light ? 0.075 : 0.04, h: cool }),
     ink,
     inkMuted: rgba(ink, light ? 0.43 : 0.34),
     signal,
@@ -271,8 +271,8 @@ export const extractArtworkPaletteV1 = (
   const signalAlt = toHex({ l: light ? clamp(secondary.l, 0.66, 0.78) : dusk ? clamp(secondary.l, 0.66, 0.76) : clamp(secondary.l, 0.67, 0.82), c: clamp(secondary.c, 0.07, 0.17), h: secondary.h });
   const ink = toHex({ l: light ? 0.975 : 0.955, c: Math.min(0.018, primary.c * 0.1), h: primary.h });
   return {
-    ground: toHex({ l: light ? 0.46 : dusk ? 0.28 : 0.12, c: Math.min(light ? 0.075 : 0.05, Math.max(0.035, primary.c * 0.38)), h: primary.h }),
-    groundLift: toHex({ l: light ? 0.60 : dusk ? 0.43 : 0.25, c: Math.min(light ? 0.11 : 0.08, Math.max(0.045, primary.c * 0.58)), h: primary.h }),
+    ground: toHex({ l: light ? 0.30 : dusk ? 0.28 : 0.12, c: Math.min(light ? 0.075 : 0.05, Math.max(0.035, primary.c * 0.38)), h: primary.h }),
+    groundLift: toHex({ l: light ? 0.43 : dusk ? 0.43 : 0.25, c: Math.min(light ? 0.11 : 0.08, Math.max(0.045, primary.c * 0.58)), h: primary.h }),
     ink,
     inkMuted: rgba(ink, light ? 0.43 : dusk ? 0.39 : 0.34),
     signal,

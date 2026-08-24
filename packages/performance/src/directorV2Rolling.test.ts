@@ -167,6 +167,8 @@ describe("rolling Director V2 compiler", () => {
 
     const localCards = compileLocalContinuitySceneCardsV2(longLyrics, longBible, initial, [], 0, 14);
     expect(localCards.length).toBeGreaterThanOrEqual(4);
+    expect(localCards.every((card) => card.semanticScene?.version === "semantic-scene-direction-v2")).toBe(true);
+    expect(new Set(localCards.map((card) => card.layout)).size).toBeGreaterThanOrEqual(2);
     expect(localCards.every((card) => card.gestures.length > 0 && card.effects.length > 0)).toBe(true);
     expect(new Set(localCards.flatMap((card) => card.gestures.map((gesture) => gesture.primitive))).size).toBeGreaterThanOrEqual(3);
     expect(localCards.flatMap((card) => card.gestures).some((gesture) => gesture.primitive === "phrase.contour")).toBe(false);
@@ -196,6 +198,8 @@ describe("rolling Director V2 compiler", () => {
     expect(cards.every((card) => card.gestures.length > 0)).toBe(true);
     const plan = compileDirectorPlanFromRollingV1(songLyrics, songBible, cards);
     expect(plan.gestures.length).toBeGreaterThanOrEqual(cards.length);
+    expect(plan.blocking.transitions.length).toBeGreaterThanOrEqual(3);
+    expect(plan.blocking.transitions.length).toBeLessThanOrEqual(4);
   });
 
   it("keeps the prior visual world when local continuity follows an AI window", () => {
