@@ -274,8 +274,9 @@ export function ColumnStageView({
       surface === "interlude" ||
       surface === "paused" ||
       surface === "disconnected");
-  const showStateCard = surface !== "singing" && surface !== "paused";
+  const showStateCard = surface !== "singing" && surface !== "paused" && surface !== "prelude";
   const limitedCandidates = alternativeLyricsCandidates(candidates, selectedCandidateKey);
+  const selectedProvider = candidates.find((candidate) => `${candidate.provider}:${candidate.id}` === selectedCandidateKey)?.provider;
 
   const selectTool = (selected: ColumnTool) => {
     const next = toggledColumnTool(activeTool, selected);
@@ -296,7 +297,7 @@ export function ColumnStageView({
           <strong title={title || "YouTube Music 歌词"}>{title || "YouTube Music 歌词"}</strong>
           {artist && <small title={artist}>{artist}</small>}
           <small className="column-director-status" aria-live="polite" title={directorStatusReason || directorStatus}>
-            {directorStatus}{estimatedTimingLabel}{lyricsOffsetLabel}
+            {directorStatus}{selectedProvider ? ` · 歌词 ${lyricsProviderLabel(selectedProvider)}` : ""}{estimatedTimingLabel}{lyricsOffsetLabel}
           </small>
         </div>
         <div ref={toolbarRef} className="column-toolbar" role="toolbar" aria-label="歌词工具栏">
@@ -508,7 +509,7 @@ export function ColumnStageView({
         {showStateCard && (
           <div className="column-state-card" data-status={surface} aria-live="polite">
             {surface === "searching" && <div className="column-skeleton" aria-hidden="true" />}
-            {(surface === "prelude" || surface === "interlude") && (
+            {surface === "interlude" && (
               <div className="column-ellipsis" aria-hidden="true">
                 ···
               </div>
