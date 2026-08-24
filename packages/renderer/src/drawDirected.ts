@@ -20,11 +20,7 @@ import { drawDramaticScenesV1 } from "./drawDramatic";
 
 const clamp01 = (value: number): number => Math.min(1, Math.max(0, value));
 const easeOutCubic = (value: number): number => 1 - (1 - value) ** 3;
-const easeOutBack = (value: number): number => {
-  const amount = 1.70158;
-  const shifted = value - 1;
-  return 1 + (amount + 1) * shifted ** 3 + amount * shifted ** 2;
-};
+export const lyricTransitionDurationMsV1 = 180;
 
 const withAlpha = (hex: string, alpha: number): string => {
   if (/^#[\da-f]{6}$/i.test(hex)) {
@@ -437,43 +433,41 @@ const transformFor = (
   glyph: PreparedDirectedGlyphV1,
   line: PreparedDirectedLineV1,
   progress: number,
-  timeMs: number,
   reduceMotion: boolean,
 ): { x: number; y: number; scaleX: number; scaleY: number; rotation: number; alpha: number; blur: number } => {
   if (reduceMotion) return { x: 0, y: 0, scaleX: 1, scaleY: 1, rotation: 0, alpha: 1, blur: 0 };
   if (behavior === "settle") return { x: 0, y: 0, scaleX: 1, scaleY: 1, rotation: 0, alpha: 1, blur: 0 };
-  const eased = behavior === "gravityDrop" ? easeOutBack(progress) : easeOutCubic(progress);
+  const eased = easeOutCubic(progress);
   const remainder = 1 - eased;
-  const amount = 36 + line.directive.intensity * 72;
   const direction = line.directive.direction;
   if (behavior === "assemble") {
-    return { x: remainder * direction * amount * (glyph.index % 2 ? -1 : 1), y: remainder * ((glyph.index % 3) - 1) * 28, scaleX: 1, scaleY: 1, rotation: remainder * direction * 0.045, alpha: 0.42 + eased * 0.58, blur: 0 };
+    return { x: 0, y: remainder * 8, scaleX: 1, scaleY: 1, rotation: 0, alpha: 0.72 + eased * 0.28, blur: 0 };
   }
   if (behavior === "gravityDrop") {
-    return { x: 0, y: -remainder * amount * 1.9, scaleX: 1, scaleY: 0.86 + eased * 0.14, rotation: 0, alpha: 0.4 + progress * 0.6, blur: 0 };
+    return { x: 0, y: -remainder * 12, scaleX: 1, scaleY: 0.98 + eased * 0.02, rotation: 0, alpha: 0.7 + eased * 0.3, blur: 0 };
   }
   if (behavior === "ripple") {
-    const wave = Math.sin(glyph.index * 0.72 + timeMs * 0.012) * amount * 0.18 * (0.3 + remainder * 0.7);
-    return { x: 0, y: wave, scaleX: 1, scaleY: 1, rotation: wave * 0.0015, alpha: 1, blur: 0 };
+    const wave = Math.sin(glyph.index * 0.72) * remainder * 8;
+    return { x: 0, y: wave, scaleX: 1, scaleY: 1, rotation: 0, alpha: 0.74 + eased * 0.26, blur: 0 };
   }
   if (behavior === "stretch") {
-    return { x: 0, y: 0, scaleX: 0.62 + eased * 0.38, scaleY: 1.08 - eased * 0.08, rotation: 0, alpha: 0.62 + eased * 0.38, blur: 0 };
+    return { x: 0, y: 0, scaleX: 0.97 + eased * 0.03, scaleY: 1, rotation: 0, alpha: 0.72 + eased * 0.28, blur: 0 };
   }
   if (behavior === "echo") {
-    return { x: 0, y: -remainder * amount * 0.12, scaleX: 0.94 + eased * 0.06, scaleY: 0.94 + eased * 0.06, rotation: 0, alpha: 0.7 + eased * 0.3, blur: 0 };
+    return { x: 0, y: -remainder * 4, scaleX: 0.98 + eased * 0.02, scaleY: 0.98 + eased * 0.02, rotation: 0, alpha: 0.74 + eased * 0.26, blur: 0 };
   }
   if (behavior === "drift") {
-    return { x: direction * remainder * amount, y: remainder * amount * 0.45, scaleX: 1, scaleY: 1, rotation: direction * remainder * 0.03, alpha: 0.44 + eased * 0.56, blur: 0 };
+    return { x: direction * remainder * 10, y: remainder * 4, scaleX: 1, scaleY: 1, rotation: 0, alpha: 0.72 + eased * 0.28, blur: 0 };
   }
   if (behavior === "focus") {
-    return { x: 0, y: remainder * 14, scaleX: 0.86 + eased * 0.14, scaleY: 0.86 + eased * 0.14, rotation: 0, alpha: 0.34 + eased * 0.66, blur: 0 };
+    return { x: 0, y: remainder * 6, scaleX: 0.98 + eased * 0.02, scaleY: 0.98 + eased * 0.02, rotation: 0, alpha: 0.7 + eased * 0.3, blur: 0 };
   }
   if (behavior === "converge") {
     const center = line.bounds.x + line.bounds.width / 2;
     const side = glyph.x + glyph.width / 2 < center ? -1 : 1;
-    return { x: side * remainder * amount * 1.65, y: 0, scaleX: 0.88 + eased * 0.12, scaleY: 1, rotation: -side * remainder * 0.04, alpha: 0.42 + eased * 0.58, blur: 0 };
+    return { x: side * remainder * 12, y: 0, scaleX: 0.98 + eased * 0.02, scaleY: 1, rotation: 0, alpha: 0.7 + eased * 0.3, blur: 0 };
   }
-  return { x: 0, y: remainder * amount * 0.34, scaleX: 0.98 + eased * 0.02, scaleY: 0.98 + eased * 0.02, rotation: 0, alpha: 0.62 + eased * 0.38, blur: 0 };
+  return { x: 0, y: remainder * 6, scaleX: 0.99 + eased * 0.01, scaleY: 0.99 + eased * 0.01, rotation: 0, alpha: 0.74 + eased * 0.26, blur: 0 };
 };
 
 const drawLine = (
@@ -490,7 +484,7 @@ const drawLine = (
   scale = 1,
   behaviorOverride?: PerformanceBehaviorV1,
 ): void => {
-  const duration = Math.max(380, 760 - line.directive.intensity * 210);
+  const duration = lyricTransitionDurationMsV1;
   const baseColor = overrideColor ?? paletteColorForRoleV1(palette, line.directive.paletteRole);
   context.save();
   context.font = line.font;
@@ -500,10 +494,9 @@ const drawLine = (
   context.scale(scale, scale);
   for (const glyph of line.glyphs) {
     if (timeMs < glyph.revealMs) continue;
-    const staggerMs = line.directive.glyphStagger * 1000 * Math.min(glyph.index, 12);
-    const progress = clamp01((timeMs - line.fromMs - staggerMs * 0.32) / duration);
+    const progress = clamp01((timeMs - line.fromMs) / duration);
     const revealOpacity = clamp01((timeMs - glyph.revealMs + 1) / 105);
-    const transform = transformFor(behaviorOverride ?? line.directive.behavior, glyph, line, progress, timeMs, reduceMotion);
+    const transform = transformFor(behaviorOverride ?? line.directive.behavior, glyph, line, progress, reduceMotion);
     context.save();
     context.globalAlpha = opacity * revealOpacity * transform.alpha;
     context.translate(glyph.x + transform.x, glyph.y + transform.y);
@@ -533,7 +526,7 @@ const drawAnchoredLine = (
   horizontalAnchor: "center" | "leading" | "trailing" = "center",
 ): void => {
   const behavior = behaviorOverride ?? line.directive.behavior;
-  const motionAmount = reduceMotion ? 0 : 24 + line.directive.intensity * 48;
+  const motionAmount = reduceMotion ? 0 : 12;
   const horizontalReserve = behavior === "converge"
     ? motionAmount * 1.35
     : behavior === "assemble" || behavior === "drift"
@@ -680,18 +673,18 @@ export const readingStackStateAtV1 = (
   hasPrevious: boolean,
   reduceMotion: boolean,
 ): ReadingStackStateV1 => {
-  const raw = reduceMotion || !hasPrevious ? 1 : clamp01((timeMs - current.fromMs) / 760);
+  const raw = reduceMotion || !hasPrevious ? 1 : clamp01((timeMs - current.fromMs) / lyricTransitionDurationMsV1);
   const progress = easeOutCubic(raw);
   const mix = (from: number, to: number) => from + (to - from) * progress;
   return {
     previousY: mix(composition.currentY, composition.previousY),
     currentY: mix(composition.nextY, composition.currentY),
     nextY: mix(composition.nextY + (composition.nextY - composition.currentY) * 0.22, composition.nextY),
-    previousScale: mix(0.88, 0.48),
-    currentScale: mix(0.68, 1.02),
+    previousScale: mix(1.02, 0.48),
+    currentScale: mix(0.96, 1.02),
     nextScale: 0.54,
-    previousOpacity: mix(0.92, 0.23),
-    currentOpacity: mix(0.34, 1),
+    previousOpacity: mix(0.78, 0.23),
+    currentOpacity: mix(0.72, 1),
     nextOpacity: mix(0.08, 0.35),
   };
 };
