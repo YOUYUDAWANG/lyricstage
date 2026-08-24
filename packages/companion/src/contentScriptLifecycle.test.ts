@@ -201,6 +201,7 @@ describe("YouTube Music companion isolated content script lifecycle (real DOM sh
     let invalidateRuntime = overrides.invalidateRuntime ?? false;
     let playerBarAvailable = true;
     let mediaAvailable = true;
+    let queueAvailable = true;
     let playerBarTitle = overrides.playerBarTitle ?? "You & 合図";
     let playerBarArtist = overrides.playerBarArtist ?? "音乃瀬奏";
     let playerBarArtworkURL = overrides.playerBarArtworkURL
@@ -420,7 +421,7 @@ describe("YouTube Music companion isolated content script lifecycle (real DOM sh
         querySelectorAll: (selector: string) => selector === "video, audio" && mediaAvailable
           ? mediaElements
           : selector === "ytmusic-player-queue-item"
-            ? queueElements
+            ? queueAvailable ? queueElements : []
             : [],
       },
       HTMLMediaElement: FakeMediaElement,
@@ -511,6 +512,8 @@ describe("YouTube Music companion isolated content script lifecycle (real DOM sh
       transportControls,
       likeControl,
       queueElements,
+      setQueueAvailable: (value: boolean) => { queueAvailable = value; },
+      locationValue,
       playerBar,
       documentElement,
       documentQuerySelector,
@@ -1682,6 +1685,21 @@ describe("YouTube Music companion isolated content script lifecycle (real DOM sh
     );
     expect(env.queueElements[1]?.link.click).toHaveBeenCalledOnce();
     expect(queueResponse).toHaveBeenCalledWith({ ok: true, queueTrackID: "next-track", queueIndex: 1 });
+
+    env.setQueueAvailable(false);
+    const cachedQueueResponse = vi.fn();
+    env.runtimeListeners[0]?.(
+      { type: "youtube-music-queue-select", queueTrackID: "next-track", queueIndex: 1, expectedTrackID: "ZmCRFGcON-I" },
+      undefined,
+      cachedQueueResponse,
+    );
+    expect(env.locationValue.href).toBe("https://music.youtube.com/watch?v=next-track");
+    expect(cachedQueueResponse).toHaveBeenCalledWith({
+      ok: true,
+      queueTrackID: "next-track",
+      queueIndex: 1,
+      navigated: true,
+    });
   });
 
   it("uses the snapshot-selected media when deciding whether transport is redundant", () => {

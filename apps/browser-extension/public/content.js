@@ -68,6 +68,8 @@
   let pendingPlayerVideoID = "";
   let acceptedTrackTuple = null;
   let pendingTrackTuple = null;
+  let cachedQueue = null;
+  let cachedQueueHrefs = [];
   let metadataEnrichmentUntilUnixMs = Number.NEGATIVE_INFINITY;
   let trackTransitionEpoch = 0;
   let lastSentSnapshotSignature = "";
@@ -438,12 +440,34 @@
   const queueSnapshot = (currentTrackID) => {
     const elements = [...(document.querySelectorAll?.("ytmusic-player-queue-item") ?? [])].slice(0, 100);
     const items = elements.map((item) => queueItemSnapshot(item)).filter(Boolean);
-    if (!items.length) return undefined;
-    if (!items.some((item) => item.selected)) {
-      const fallback = items.find((item) => item.trackID === currentTrackID);
-      if (fallback) fallback.selected = true;
+    if (items.length) {
+      cachedQueueHrefs = elements.map((item) => clean(
+        item?.querySelector?.('a[href*="watch?"][href*="v="]')?.getAttribute?.("href"),
+      ));
+      if (!items.some((item) => item.selected)) {
+        const fallback = items.find((item) => item.trackID === currentTrackID);
+        if (fallback) fallback.selected = true;
+      }
+      cachedQueue = { items, currentIndex: items.findIndex((item) => item.selected) };
+      return cachedQueue;
     }
-    return { items, currentIndex: items.findIndex((item) => item.selected) };
+    if (!cachedQueue?.items.length) return undefined;
+    const priorIndex = cachedQueue.currentIndex;
+    if (cachedQueue.items[priorIndex]?.trackID === currentTrackID) return cachedQueue;
+    let currentIndex = cachedQueue.items.findIndex((item, index) =>
+      index > priorIndex && item.trackID === currentTrackID
+    );
+    if (currentIndex < 0) currentIndex = cachedQueue.items.findIndex((item) => item.trackID === currentTrackID);
+    if (currentIndex < 0) {
+      cachedQueue = null;
+      cachedQueueHrefs = [];
+      return undefined;
+    }
+    cachedQueue = {
+      currentIndex,
+      items: cachedQueue.items.map((item, index) => ({ ...item, selected: index === currentIndex })),
+    };
+    return cachedQueue;
   };
 
   const enabledControl = (control) => Boolean(
@@ -1303,6 +1327,18 @@
       const queueIndex = Number.isSafeInteger(message.queueIndex) ? message.queueIndex : -1;
       const item = [...(document.querySelectorAll?.("ytmusic-player-queue-item") ?? [])][queueIndex];
       const target = item?.querySelector?.('a[href*="watch?"][href*="v="]') ?? item;
+      const cachedItem = cachedQueue?.items?.[queueIndex];
+      const cachedHref = cachedQueueHrefs[queueIndex];
+      if (
+        requestedTrackID
+        && cachedItem?.trackID === requestedTrackID
+        && cachedHref
+        && (!target || typeof target.click !== "function")
+      ) {
+        location.href = new URL(cachedHref, location.origin).href;
+        sendResponse({ ok: true, queueTrackID: requestedTrackID, queueIndex, navigated: true });
+        return;
+      }
       if (
         !requestedTrackID
         || queueItemSnapshot(item)?.trackID !== requestedTrackID
