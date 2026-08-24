@@ -11,6 +11,7 @@ import {
 import { lookupKugouLyrics } from "./kugou";
 import { lookupLDDCLyrics, type LDDCLyricsConfigurationV0 } from "./lddc";
 import { lookupLRCLibLyrics } from "./lrclib";
+import { effectiveMusicDurationMs, type NonMusicSegmentMs } from "./sponsorblock";
 import {
   lyricsLookupVersion,
   type LyricsCandidateV0,
@@ -114,6 +115,22 @@ export const lookupLayeredLyrics = async (
     clearTimeout(timeout);
     options.signal?.removeEventListener("abort", abortFromCaller);
   }
+};
+
+export const lookupLyricsWithDurationFallback = async (
+  track: LyricsLookupTrackV0,
+  nonMusicSegmentsMs: readonly NonMusicSegmentMs[],
+  options: LayeredLyricsLookupOptionsV0 = {},
+): Promise<LyricsLookupResponseV0> => {
+  const rawDurationResult = await lookupLayeredLyrics(track, options);
+  if (rawDurationResult.status === "match" || nonMusicSegmentsMs.length === 0) return rawDurationResult;
+  const musicDurationMs = effectiveMusicDurationMs(track.durationMs, nonMusicSegmentsMs);
+  if (Math.abs(track.durationMs - musicDurationMs) <= 1_000) return rawDurationResult;
+  const musicDurationResult = await lookupLayeredLyrics({ ...track, durationMs: musicDurationMs }, options);
+  if (musicDurationResult.status === "match") return musicDurationResult;
+  return musicDurationResult.candidates.length > rawDurationResult.candidates.length
+    ? musicDurationResult
+    : rawDurationResult;
 };
 
 const responseFromCandidates = (

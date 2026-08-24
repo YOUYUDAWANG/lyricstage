@@ -216,15 +216,16 @@ const parseTitleRoles = (
     const left = trimBoundaries(value.slice(0, dash.index));
     const right = trimBoundaries(value.slice(dash.index + dash[0].length));
     if (left && right) {
-      if (!isCover || featureMarker.test(right)) {
+      if ((!isCover && trackPerformers.some((artist) => artistsMatch(artist, left))) || featureMarker.test(right)) {
         const featured = splitFeaturing(right);
         value = featured.title;
         originals.push(...artistNames(left), ...featured.artists);
-      } else {
+        hasEmbeddedOriginal = true;
+      } else if (isCover) {
         value = left;
         originals.push(...artistNames(right));
+        hasEmbeddedOriginal = true;
       }
-      hasEmbeddedOriginal = true;
     }
   } else if (isCover) {
     const separators = [...value.matchAll(roleSeparator)];

@@ -28,6 +28,19 @@ const candidate = (artist: string, overrides: Partial<LyricsCandidateV0> = {}): 
 });
 
 describe("YouTube Music lyric identity", () => {
+  it("keeps a dash subtitle when its left side is not the page artist", () => {
+    const source = track("水星记 - Mercury Records", "Guo Ding");
+    const identity = buildLyricsLookupIdentity(source);
+    expect(identity).toMatchObject({
+      canonicalTitle: "水星记 - Mercury Records",
+      originalArtists: ["Guo Ding"],
+      isCover: false,
+    });
+    expect(isSafeIdentityMatch(source, identity, candidate("Guo Ding", {
+      title: "水星记 - Mercury Records",
+    }))).toBe(true);
+  });
+
   it("separates a cover performer while keeping unresolved upload wording explicit", () => {
     expect(buildLyricsLookupIdentity(track(
       "水星記 Mercury Records / 東 雪蓮 (cover)",

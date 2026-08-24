@@ -3,6 +3,7 @@ import {
   layeredLyricsLookupTimeoutMilliseconds,
   lddcLyricsLookupTimeoutMilliseconds,
   lookupLayeredLyrics,
+  lookupLyricsWithDurationFallback,
   type LyricsLookupTrackV0,
 } from "./index";
 
@@ -15,6 +16,40 @@ const track: LyricsLookupTrackV0 = {
 };
 
 describe("layered lyrics lookup", () => {
+  it("tries the full YouTube duration before SponsorBlock-adjusted time so Apple Music is not filtered out", async () => {
+    const fullTrack: LyricsLookupTrackV0 = {
+      provider: "youtubeMusic",
+      trackID: "full-duration",
+      title: "水星记 - Mercury Records",
+      artist: "Guo Ding",
+      durationMs: 326_000,
+    };
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockImplementation((_input, init) => {
+      const body = JSON.parse(String(init?.body)) as { durationMilliseconds?: number };
+      return Promise.resolve(new Response(JSON.stringify({
+        schema: "bilimusic-lddc-lyrics-v1",
+        candidates: body.durationMilliseconds === 326_000 ? [{
+          source: "applemusic",
+          id: "am-full",
+          title: fullTrack.title,
+          artist: fullTrack.artist,
+          durationSeconds: 326,
+          timingKind: "line",
+          lyricLines: [{ startMilliseconds: 1_000, endMilliseconds: 2_000, text: "test", words: [] }],
+        }] : [],
+      }), { status: 200 }));
+    });
+    try {
+      const response = await lookupLyricsWithDurationFallback(fullTrack, [[0, 6_000]], {
+        lddc: { endpoint: "https://lyrics.example/api/", token: "secret" },
+      });
+      expect(response).toMatchObject({ status: "match", match: { provider: "applemusic", id: "am-full" } });
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+    } finally {
+      fetchMock.mockRestore();
+    }
+  });
+
   it("returns an exact LRCLIB match without spending requests on a fallback source", async () => {
     const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response(JSON.stringify({
       id: 1,

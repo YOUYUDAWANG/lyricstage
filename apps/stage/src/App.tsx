@@ -829,7 +829,7 @@ export default function App({ embedded = embeddedStageFromLocation, onEmbeddedRe
           candidates: response.candidates,
           resolvedIdentity: response.resolvedIdentity,
         });
-        setMessage(response.assistance === "ai" ? "本地规则与 AI 已完成清洗，但候选仍无法安全自动确认；请选择版本。" : "找到了歌词候选，但歌手或时长不足以自动确认。请选择版本或手动搜索。");
+        setMessage(response.assistance === "ai" ? "AI 已复核现有候选，但仍无法安全确认；请选择版本。" : response.assistance === "aiUnavailable" ? "AI 确认暂时不可用；请选择版本，或稍后重试。" : "找到了歌词候选，但歌手或时长不足以自动确认。请选择版本或手动搜索。");
         return;
       }
       if (response.status === "miss") {

@@ -11,8 +11,7 @@ import {
   isLyricsCandidateV0,
   isLyricsLookupTrackV0,
   lookupResponseContainsCandidate,
-  effectiveMusicDurationMs,
-  lookupLayeredLyrics,
+  lookupLyricsWithDurationFallback,
   lyricsLookupVersion,
   manualLyricsLookupIdentity,
   sanitizeManualLyricsSearchQuery,
@@ -422,17 +421,11 @@ const resolveAutomaticLyrics = async (track: LyricsLookupTrackV0): Promise<Lyric
   const task: Promise<LyricsLookupResponseV0> = (async (): Promise<LyricsLookupResponseV0> => {
     try {
       const nonMusicSegmentsMs = await fetchNonMusicSegments(track.trackID);
-      const lookupTrack = nonMusicSegmentsMs.length > 0
-        ? {
-            ...track,
-            durationMs: effectiveMusicDurationMs(track.durationMs, nonMusicSegmentsMs),
-          }
-        : track;
       const lddc = await privateLyricsConfiguration();
-      const localIdentity = buildLyricsLookupIdentity(lookupTrack);
-      const initial = await lookupLayeredLyrics(lookupTrack, { lddc, identity: localIdentity });
+      const localIdentity = buildLyricsLookupIdentity(track);
+      const initial = await lookupLyricsWithDurationFallback(track, nonMusicSegmentsMs, { lddc, identity: localIdentity });
       const assisted = await assistAutomaticLyrics({
-        track: lookupTrack,
+        track,
         identity: localIdentity,
         initial,
         configuration: await directorConfiguration(),
@@ -480,11 +473,8 @@ const resolveManualLyrics = async (
   const task: Promise<LyricsLookupResponseV0> = (async () => {
     try {
       const nonMusicSegmentsMs = await fetchNonMusicSegments(track.trackID);
-      const lookupTrack = nonMusicSegmentsMs.length > 0
-        ? { ...track, durationMs: effectiveMusicDurationMs(track.durationMs, nonMusicSegmentsMs) }
-        : track;
-      const identity = manualLyricsLookupIdentity(query, buildLyricsLookupIdentity(lookupTrack));
-      const found = await lookupLayeredLyrics(lookupTrack, {
+      const identity = manualLyricsLookupIdentity(query, buildLyricsLookupIdentity(track));
+      const found = await lookupLyricsWithDurationFallback(track, nonMusicSegmentsMs, {
         lddc: await privateLyricsConfiguration(),
         identity,
       });

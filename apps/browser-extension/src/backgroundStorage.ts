@@ -8,7 +8,7 @@ import type {
 } from "@lyricstage/performance";
 
 export const backgroundStorageKeys = {
-  lyricsCache: "lyricstage-youtube-music-lyrics-v9",
+  lyricsCache: "lyricstage-youtube-music-lyrics-v10",
   localLyrics: "lyricstage-local-lyrics-v0",
   privateLyricsConfiguration: "lyricstage-private-lyrics-backend-v0",
   legacyDirectorConfiguration: "lyricstage-director-backend-v1",

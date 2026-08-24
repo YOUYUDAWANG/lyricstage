@@ -292,7 +292,7 @@ describe("YouTube Music background routing", () => {
     const get = (globalThis as any).chrome.storage.local.get as ReturnType<typeof vi.fn>;
     const set = (globalThis as any).chrome.storage.local.set as ReturnType<typeof vi.fn>;
     get.mockImplementation(async (key: string) => {
-      if (key === "lyricstage-local-lyrics-v0" || key === "lyricstage-youtube-music-lyrics-v9") {
+      if (key === "lyricstage-local-lyrics-v0" || key === "lyricstage-youtube-music-lyrics-v10") {
         throw new Error("storage get unavailable");
       }
       return { [key]: storage.get(key) };
@@ -431,7 +431,7 @@ describe("YouTube Music background routing", () => {
       durationMs: 240_000,
     };
     const now = Date.now();
-    storage.set("lyricstage-youtube-music-lyrics-v9", Object.fromEntries(
+    storage.set("lyricstage-youtube-music-lyrics-v10", Object.fromEntries(
       Array.from({ length: 6 }, (_, index) => [`old-${index}`, {
         fingerprint: `old-${index}`,
         expiresAtUnixMs: now + 60_000,
@@ -449,7 +449,7 @@ describe("YouTube Music background routing", () => {
     const set = (globalThis as any).chrome.storage.local.set as ReturnType<typeof vi.fn>;
     let rejected = false;
     set.mockImplementation(async (values: Record<string, unknown>) => {
-      if (!rejected && values["lyricstage-youtube-music-lyrics-v9"]) {
+      if (!rejected && values["lyricstage-youtube-music-lyrics-v10"]) {
         rejected = true;
         throw Object.assign(new Error("QUOTA_BYTES quota exceeded"), { name: "QuotaExceededError" });
       }
@@ -473,8 +473,8 @@ describe("YouTube Music background routing", () => {
     const response = await sendResolved({ type: "youtube-music-resolve-lyrics", track }, sender(10));
     expect(response).toMatchObject({ status: "match", source: "network" });
     expect(set).toHaveBeenCalledTimes(2);
-    const firstRecord = set.mock.calls[0]?.[0]["lyricstage-youtube-music-lyrics-v9"] as Record<string, unknown>;
-    const secondRecord = set.mock.calls[1]?.[0]["lyricstage-youtube-music-lyrics-v9"] as Record<string, unknown>;
+    const firstRecord = set.mock.calls[0]?.[0]["lyricstage-youtube-music-lyrics-v10"] as Record<string, unknown>;
+    const secondRecord = set.mock.calls[1]?.[0]["lyricstage-youtube-music-lyrics-v10"] as Record<string, unknown>;
     expect(Object.keys(secondRecord).length).toBeLessThan(Object.keys(firstRecord).length);
     expect(secondRecord[track.trackID]).toBeDefined();
   });
@@ -516,7 +516,7 @@ describe("YouTube Music background routing", () => {
     expect(await sendResolved({ type: "youtube-music-resolve-lyrics", track }, sender(10)))
       .toMatchObject({ status: "match", match: { id: "3" } });
     const formalBefore = structuredClone(
-      (storage.get("lyricstage-youtube-music-lyrics-v9") as Record<string, unknown>)[track.trackID],
+      (storage.get("lyricstage-youtube-music-lyrics-v10") as Record<string, unknown>)[track.trackID],
     );
     phase = "miss";
     expect(await sendResolved({
@@ -524,7 +524,7 @@ describe("YouTube Music background routing", () => {
       track,
       query: { title: "不存在的歌曲", artist: "无人" },
     }, sender(10))).toMatchObject({ status: "miss", candidates: [] });
-    expect((storage.get("lyricstage-youtube-music-lyrics-v9") as Record<string, unknown>)[track.trackID])
+    expect((storage.get("lyricstage-youtube-music-lyrics-v10") as Record<string, unknown>)[track.trackID])
       .toEqual(formalBefore);
 
     phase = "offline";
