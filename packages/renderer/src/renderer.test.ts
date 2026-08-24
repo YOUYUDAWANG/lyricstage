@@ -9,6 +9,7 @@ import {
   clearCanvasBackingStoreV1,
   directedFieldOpacityV1,
   duplicateLyricTextPrimitiveV1,
+  editorialFieldBoundsV1,
   dissolveEnvelopeAtV1,
   fitAnchoredLineV1,
   lyricTransitionDurationMsV1,
@@ -181,6 +182,19 @@ describe("PreparedDirectedStageV1", () => {
       "phrase.breathe",
     ].every((primitive) => duplicateLyricTextPrimitiveV1(primitive as never))).toBe(true);
     expect(duplicateLyricTextPrimitiveV1("token.underlinePath")).toBe(false);
+  });
+
+  it("keeps the editorial wash inside the lyric field with transparent edge space", () => {
+    [
+      editorialFieldBoundsV1(1_200, 800),
+      editorialFieldBoundsV1(400, 1_000),
+    ].forEach((bounds, index) => {
+      const [width, height] = index === 0 ? [1_200, 800] : [400, 1_000];
+      expect(bounds.x).toBeGreaterThan(0);
+      expect(bounds.y).toBeGreaterThan(0);
+      expect(bounds.x + bounds.size).toBeLessThan(width);
+      expect(bounds.y + bounds.size).toBeLessThan(height);
+    });
   });
 
   it("prepares deterministic 8-20s dramatic scenes with one recurring motif", () => {

@@ -59,6 +59,14 @@ export const reducedMotionPrimitiveUseV1 = (
 const activeLinesAt = (stage: PreparedDirectedStageV1, timeMs: number): PreparedDirectedLineV1[] =>
   stage.lines.filter((line) => timeMs >= line.fromMs && timeMs < line.toMs);
 
+export const editorialFieldBoundsV1 = (
+  width: number,
+  height: number,
+): { x: number; y: number; size: number; radius: number } => {
+  const radius = Math.max(1, Math.min(width * 0.34, height * 0.44));
+  return { x: width * 0.5 - radius, y: height * 0.5 - radius, size: radius * 2, radius };
+};
+
 const drawEditorialField = (
   context: CanvasRenderingContext2D,
   stage: PreparedDirectedStageV1,
@@ -66,13 +74,14 @@ const drawEditorialField = (
   intensity: number,
 ): void => {
   const { width, height } = stage.viewport;
+  const bounds = editorialFieldBoundsV1(width, height);
   context.save();
-  const wash = context.createLinearGradient(width * 0.08, height * 0.18, width * 0.88, height * 0.78);
+  const wash = context.createRadialGradient(width * 0.5, height * 0.5, 0, width * 0.5, height * 0.5, bounds.radius);
   wash.addColorStop(0, withAlpha(palette.signal, 0.035 + intensity * 0.018));
   wash.addColorStop(0.48, withAlpha(palette.signalAlt, 0.012));
-  wash.addColorStop(1, withAlpha(palette.ground, 0));
+  wash.addColorStop(1, withAlpha(palette.signalAlt, 0));
   context.fillStyle = wash;
-  context.fillRect(0, 0, width, height);
+  context.fillRect(bounds.x, bounds.y, bounds.size, bounds.size);
   context.restore();
 };
 
