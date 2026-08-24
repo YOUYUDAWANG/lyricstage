@@ -49,7 +49,7 @@ export default defineConfig({
     },
   },
   build: {
-    outDir: fromRoot("./dist"),
+    outDir: fromRoot("./dist/client"),
     emptyOutDir: true,
   },
 });
