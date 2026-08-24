@@ -1,10 +1,14 @@
-import type { LyricDocumentV0 } from "@lyricstage/contracts";
-import { compileLocalDirectorPlanV1 } from "./directorPlan";
+import { stableHash32, type LyricDocumentV0 } from "@lyricstage/contracts";
+import { compileLocalDirectorPlanV1, type DirectorPlanV1 } from "./directorPlan";
+import { applyLinePerformancesV2 } from "./directorLinePerformanceV2";
 import { compileManualDirectorV2V1, type ObservableVisualPromiseV1 } from "./directorV2Compiler";
 import type { DirectorV2ManualFixtureV1, WindowIntentV2 } from "./directorV2Fixtures";
 import {
   advanceRollingPerformanceStateV1,
+  compileDirectorPlanFromRollingV1,
+  compileLocalDirectorBibleV1,
   compileLocalSceneCardForWindowV1,
+  initialRollingPerformanceStateV1,
   sanitizeSceneCardV1,
   sceneCardIdentityV1,
   type DirectorBibleV1,
@@ -13,7 +17,14 @@ import {
 } from "./rollingDirector";
 import type { EffectRecipeV1 } from "./effectGrammar";
 import { lyricGraphemesV1, type LyricGestureV1 } from "./lyricChoreography";
+import {
+  compileLocalSceneRangesV3,
+  compileLocalSceneTreatmentV3,
+  type LocalSceneTreatmentV3,
+} from "./localDirectorV3";
+import type { MusicMapV1 } from "./musicMap";
 import { layoutForSemanticSceneV2, localSemanticSceneDirectionV2 } from "./semanticSceneDirectionV2";
+import { applySignatureChoreographyV2 } from "./signatureChoreographyV2";
 
 const uniqueByID = <T extends { id: string }>(items: readonly T[]): T[] =>
   [...new Map(items.map((item) => [item.id, item])).values()];
@@ -154,36 +165,126 @@ const localSupportEffectV2 = (
   };
 };
 
+const localTreatmentEffectV3 = (
+  bible: DirectorBibleV1,
+  card: SceneCardV1,
+  treatment: LocalSceneTreatmentV3,
+): EffectRecipeV1 => {
+  const primitiveByPurpose: Record<LocalSceneTreatmentV3["semanticScene"]["purpose"], EffectRecipeV1["primary"]["primitive"]> = {
+    establish: "field.drift",
+    develop: treatment.triggers.includes("repeated_hook") ? "density.lift" : "field.ribbon",
+    turn: treatment.triggers.includes("duet_overlap") ? "geometry.mirror" : "geometry.cut",
+    aftermath: treatment.triggers.includes("silence_gap") ? "field.aperture" : "density.release",
+    resolve: "geometry.converge",
+  };
+  const intensityByPurpose: Record<LocalSceneTreatmentV3["semanticScene"]["purpose"], number> = {
+    establish: 0.58,
+    develop: 0.68,
+    turn: 0.84,
+    aftermath: 0.56,
+    resolve: 0.88,
+  };
+  return {
+    version: "effect-recipe-v1",
+    id: `local-first-v3-effect:${card.sceneIndex}:${card.fromLineIndex}-${card.toLineIndex}`,
+    cardID: "custom",
+    sectionID: card.sceneID,
+    fromMs: card.fromMs,
+    toMs: card.toMs,
+    presentation: "section",
+    primary: {
+      primitive: primitiveByPurpose[treatment.semanticScene.purpose],
+      intensity: intensityByPurpose[treatment.semanticScene.purpose],
+    },
+    support: [],
+    evidence: {
+      songMotif: bible.motifActor.relationship,
+      sectionTriggers: treatment.triggers,
+      lineIndices: treatment.evidenceLineIndices,
+      rationale: treatment.rationale,
+      confidence: treatment.confidence,
+    },
+  };
+};
+
 const densifyLocalCardV2 = (
   lyrics: LyricDocumentV0,
   bible: DirectorBibleV1,
   state: RollingPerformanceStateV1,
+  acceptedCards: readonly SceneCardV1[],
   card: SceneCardV1,
+  musicMap?: MusicMapV1,
 ): SceneCardV1 | null => {
-  const semanticScene = localSemanticSceneDirectionV2(card.sceneIndex);
-  if (card.signatureMoment) {
-    const { sceneID: _ignored, ...withoutID } = card;
-    return sanitizeSceneCardV1(lyrics, bible, state, reidentifySceneCard({
-      ...withoutID, semanticScene, layout: layoutForSemanticSceneV2(state.layout, state.layoutTransitionsUsed, semanticScene),
-    }));
-  }
-  const supportGesture = localSupportGestureV2(lyrics, card.sceneIndex, card.fromLineIndex);
+  const treatment = compileLocalSceneTreatmentV3(
+    lyrics,
+    state,
+    acceptedCards,
+    { fromLineIndex: card.fromLineIndex, toLineIndex: card.toLineIndex },
+    musicMap,
+  );
+  const semanticScene = treatment.semanticScene;
+  const localPlan = compileLocalDirectorPlanV1(lyrics);
+  const directives = localPlan.directives.filter((directive) =>
+    directive.lineIndex >= card.fromLineIndex && directive.lineIndex <= card.toLineIndex);
+  const consequence = card.signatureMoment ? card.consequence : {
+    kind: semanticScene.purpose === "turn" ? "reframe" as const
+      : semanticScene.purpose === "aftermath" ? "absence" as const
+        : semanticScene.purpose === "resolve" ? "return" as const
+          : semanticScene.purpose === "develop" ? "accumulation" as const : "trace" as const,
+    rationale: `The local-first ${semanticScene.purpose} scene leaves an observable consequence for the following phrase.`,
+  };
   const withoutID: Omit<SceneCardV1, "sceneID"> = {
     ...card,
     semanticScene,
     layout: layoutForSemanticSceneV2(state.layout, state.layoutTransitionsUsed, semanticScene),
-    intention: "Keep the narrative field visibly progressing between semantic anchors.",
+    intention: treatment.rationale,
+    coverRole: card.signatureMoment ? card.coverRole
+      : semanticScene.purpose === "establish" ? "origin"
+        : semanticScene.purpose === "turn" ? "boundary"
+          : semanticScene.purpose === "aftermath" ? "absent"
+            : semanticScene.purpose === "resolve" ? "destination" : "anchor",
     presentation: "section",
-    gestures: supportGesture ? uniqueByID([supportGesture, ...card.gestures]).slice(0, 2) : card.gestures,
-    effects: [],
-    consequence: { kind: "trace", rationale: "The scene leaves a visible local trace for the next beat to inherit." },
+    directives,
+    semanticCueCount: 0,
+    gestures: card.gestures,
+    effects: card.signatureMoment ? card.effects : [],
+    consequence,
+    evidence: {
+      sectionTriggers: treatment.triggers,
+      lineIndices: treatment.evidenceLineIndices,
+      audioLandmarkIDs: treatment.audioLandmarkIDs,
+      rationale: treatment.rationale,
+      confidence: treatment.confidence,
+    },
   };
   const identified = reidentifySceneCard(withoutID);
-  const withEffect = reidentifySceneCard({
+  const withEffect = card.signatureMoment ? identified : reidentifySceneCard({
     ...withoutID,
-    effects: [localSupportEffectV2(bible, identified)],
+    effects: [localTreatmentEffectV3(bible, identified, treatment)],
   });
-  return sanitizeSceneCardV1(lyrics, bible, state, withEffect);
+  const staged = sanitizeSceneCardV1(lyrics, bible, state, withEffect);
+  if (!staged) return null;
+  const performed = applyLinePerformancesV2(lyrics, bible, state, staged, treatment.linePerformances);
+  if (!performed) return staged;
+  const choreographed = treatment.signatureClip === "none" ? performed : applySignatureChoreographyV2(
+    lyrics,
+    bible,
+    state,
+    performed,
+    { purpose: semanticScene.purpose, linePerformances: treatment.linePerformances },
+    treatment.signatureClip,
+  ) ?? performed;
+  if (choreographed.gestures.length <= 2) return choreographed;
+  // A full local song can contain twenty Scenes. Keep two visible gesture
+  // layers per Scene so the assembled plan stays inside the existing global
+  // 48-gesture contract; per-line directives still cover every lyric line.
+  const gestures = [...choreographed.gestures]
+    .sort((left, right) => Number(right.id.startsWith("signature-clip-v2:")) - Number(left.id.startsWith("signature-clip-v2:"))
+      || right.intensity - left.intensity
+      || left.lineIndex - right.lineIndex)
+    .slice(0, 2);
+  const { sceneID: _ignored, ...trimmedWithoutID } = choreographed;
+  return sanitizeSceneCardV1(lyrics, bible, state, reidentifySceneCard({ ...trimmedWithoutID, gestures })) ?? choreographed;
 };
 
 export const compileLocalContinuitySceneCardV2 = (
@@ -218,9 +319,9 @@ export const compileLocalContinuitySceneCardsV2 = (
   acceptedCards: readonly SceneCardV1[],
   fromLineIndex: number,
   toLineIndex: number,
+  musicMap?: MusicMapV1,
 ): SceneCardV1[] => {
-  const intent = { fromLineIndex, toLineIndex, cues: [] };
-  const ranges = denseWindowRangesV2(lyrics, bible, intent);
+  const ranges = compileLocalSceneRangesV3(lyrics, bible, fromLineIndex, toLineIndex, musicMap);
   const output: SceneCardV1[] = [];
   let currentState = state;
   for (const range of ranges) {
@@ -233,12 +334,53 @@ export const compileLocalContinuitySceneCardsV2 = (
       range.toLineIndex,
     );
     if (!local) return [];
-    const card = densifyLocalCardV2(lyrics, bible, currentState, local);
+    const card = densifyLocalCardV2(
+      lyrics,
+      bible,
+      currentState,
+      [...acceptedCards, ...output],
+      local,
+      musicMap,
+    );
     if (!card) return [];
     output.push(card);
     currentState = advanceRollingPerformanceStateV1(currentState, card);
   }
   return output;
+};
+
+export const compileLocalDirectorPlanV3 = (
+  lyrics: LyricDocumentV0,
+  musicMap?: MusicMapV1,
+): DirectorPlanV1 => {
+  if (lyrics.lines.length === 0) return compileLocalDirectorPlanV1(lyrics);
+  const bible = compileLocalDirectorBibleV1(lyrics);
+  const cards: SceneCardV1[] = [];
+  let state = initialRollingPerformanceStateV1(bible);
+  let cursor = 0;
+  while (cursor < lyrics.lines.length) {
+    const first = lyrics.lines[cursor]!;
+    let end = cursor;
+    while (end + 1 < lyrics.lines.length
+      && end - cursor + 1 < 30
+      && lyrics.lines[end + 1]!.toMs - first.fromMs <= 60_000) end += 1;
+    const windowCards = compileLocalContinuitySceneCardsV2(
+      lyrics,
+      bible,
+      state,
+      cards,
+      first.lineIndex,
+      lyrics.lines[end]!.lineIndex,
+      musicMap,
+    );
+    if (windowCards.length === 0) return compileLocalDirectorPlanV1(lyrics);
+    cards.push(...windowCards);
+    windowCards.forEach((card) => { state = advanceRollingPerformanceStateV1(state, card); });
+    cursor = end + 1;
+  }
+  const compiled = compileDirectorPlanFromRollingV1(lyrics, bible, cards, "local");
+  const versioned = { ...compiled, directorVersion: "lyricstage-local-first-director-v3", planIdentity: undefined };
+  return { ...compiled, directorVersion: versioned.directorVersion, planIdentity: stableHash32(versioned) };
 };
 
 export const compileWindowIntentV2ToSceneCardV1 = (

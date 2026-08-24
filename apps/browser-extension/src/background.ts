@@ -1277,6 +1277,7 @@ const resolveDirectorCoverageV1 = async (
   const commitLocalContinuity = async (reason: string, timing: RollingTimingV1): Promise<DirectorCoverageResolutionV1> => {
     const localCards = compileLocalContinuitySceneCardsV2(
       lyrics, sanitizedBible, state, cards, window.fromLineIndex, window.toLineIndex,
+      options.musicMap,
     );
     if (localCards.length === 0 || !await rollingSceneStillCurrent(owner, track, lyrics, fingerprint, generation, sceneEpoch)) {
       return staleScene(timing);

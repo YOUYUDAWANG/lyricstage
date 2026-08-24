@@ -22,7 +22,7 @@ import {
 import { applyNonMusicSegments } from "@lyricstage/lyrics";
 import {
   applyMusicMapToDirectorPlanV1,
-  compileLocalDirectorPlanV1,
+  compileLocalDirectorPlanV3,
   type DirectorPlanV1,
 } from "@lyricstage/performance";
 import {
@@ -303,7 +303,7 @@ export default function App({ embedded = embeddedStageFromLocation, onEmbeddedRe
 
   const plan = useMemo(() => compilePerformancePlan(lyrics), [lyrics]);
   const localDirectorPlan = useMemo(() => {
-    const base = compileLocalDirectorPlanV1(lyrics);
+    const base = compileLocalDirectorPlanV3(lyrics);
     if (!requestedPreviewWorld) return base;
     const spatialMode = ["panoramic", "cinematic", "orbital", "splitStage", "chorusWall"].includes(requestedPreviewWorld)
       ? requestedPreviewWorld as "panoramic" | "cinematic" | "orbital" | "splitStage" | "chorusWall"

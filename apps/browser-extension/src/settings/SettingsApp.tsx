@@ -677,7 +677,7 @@ export const SettingsApp = () => {
               <details className="developer-disclosure embedded-disclosure">
                 <summary className="developer-summary"><span><strong>开发者与诊断</strong><small>实验性导演运行模式</small></span></summary>
                 <div className="developer-body">
-                  <label className="settings-switch"><span><strong>Rolling Director V2</strong><small>AI 编写多场景、逐句语义与招牌编舞选择，本地编译为安全演出；Off 使用旧导演，Shadow 只缓存，On 才渲染。</small></span><select data-rolling-director-v1="" value={preferences.rollingDirectorV1} disabled={busy === "performance"} onChange={(event) => void onTogglePreference({ rollingDirectorV1: event.target.value as ExtensionPreferencesV0["rollingDirectorV1"] })}><option value="off">Off · legacy</option><option value="shadow">Shadow · audit only</option><option value="on">On · layered director</option></select></label>
+                  <label className="settings-switch"><span><strong>AI 导演增强</strong><small>本地导演始终生成多场景、逐句表演与招牌编舞；AI 仅改进语义选择。Off 保留完整本地演出，Shadow 只缓存 AI，On 渲染 AI 增强。</small></span><select data-rolling-director-v1="" value={preferences.rollingDirectorV1} disabled={busy === "performance"} onChange={(event) => void onTogglePreference({ rollingDirectorV1: event.target.value as ExtensionPreferencesV0["rollingDirectorV1"] })}><option value="off">Off · local first</option><option value="shadow">Shadow · audit only</option><option value="on">On · AI enhanced</option></select></label>
                 </div>
               </details>
             </section>

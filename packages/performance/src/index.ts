@@ -26,3 +26,4 @@ export * from "./directorScenePackV2";
 export * from "./directorLinePerformanceV2";
 export * from "./reactiveBus";
 export * from "./signatureChoreographyV2";
+export * from "./localDirectorV3";
