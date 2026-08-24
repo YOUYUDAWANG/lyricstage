@@ -35,6 +35,19 @@ const graphemeCount = (text: string): number => {
   return Array.from(text).length;
 };
 
+const splitEdgeWhitespace = (text: string): {
+  leading: string;
+  body: string;
+  trailing: string;
+} => {
+  const match = /^(\s*)([\s\S]*?)(\s*)$/u.exec(text);
+  return {
+    leading: match?.[1] ?? "",
+    body: match?.[2] ?? text,
+    trailing: match?.[3] ?? "",
+  };
+};
+
 const lineModel = (line: LyricLineV0, reduceMotion: boolean): YouLyLineModel => {
   const rtl = isRTL(line.text);
   let pendingText = "";
@@ -44,16 +57,22 @@ const lineModel = (line: LyricLineV0, reduceMotion: boolean): YouLyLineModel => 
       pendingText += segment.text;
       continue;
     }
+    const whitespace = splitEdgeWhitespace(segment.text);
+    pendingText += whitespace.leading;
+    if (!whitespace.body) {
+      pendingText += whitespace.trailing;
+      continue;
+    }
     const durationMs = segment.toMs - segment.fromMs;
     syllables.push({
-      text: segment.text,
+      text: whitespace.body,
       leadingText: pendingText,
       fromMs: segment.fromMs,
       toMs: segment.toMs,
       timingKind: segment.timingKind,
-      growable: !reduceMotion && !rtl && graphemeCount(segment.text.trim()) <= 7 && durationMs >= 1_000,
+      growable: !reduceMotion && !rtl && graphemeCount(whitespace.body) <= 7 && durationMs >= 1_000,
     });
-    pendingText = "";
+    pendingText = whitespace.trailing;
   }
   return {
     key: `line:${line.lineIndex}`,

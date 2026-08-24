@@ -49,6 +49,24 @@ describe("YouLy Column adapter", () => {
     expect(youLyScrollCompensationPx(464, 413)).toBe(-51);
   });
 
+  it("keeps estimated Latin word spacing outside timed inline-block syllables", () => {
+    const englishLyrics: LyricDocumentV0 = {
+      version: "lyric-document-v0",
+      recordingID: "youly-english-spacing",
+      durationMs: 8_000,
+      lines: [{
+        lineIndex: 0,
+        fromMs: 0,
+        toMs: 7_000,
+        text: "I'll be there, I'll be there for you",
+      }],
+    };
+    const [line] = buildYouLyColumnLines(englishLyrics, false);
+    expect(line?.syllables.every((syllable) => !/^\s|\s$/u.test(syllable.text))).toBe(true);
+    expect(line?.syllables.slice(1).every((syllable) => /^\s/u.test(syllable.leadingText))).toBe(true);
+    expect(`${line?.syllables.map((syllable) => `${syllable.leadingText}${syllable.text}`).join("")}${line?.trailingText}`).toBe(englishLyrics.lines[0]?.text);
+  });
+
   it("keeps RTL text on its source direction and disables character growth", () => {
     const rtlLyrics: LyricDocumentV0 = {
       ...lyrics,
