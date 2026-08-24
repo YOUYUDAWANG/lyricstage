@@ -7,6 +7,7 @@ import {
 } from "@lyricstage/performance";
 
 const stageSource = readFileSync(new URL("./StageCanvas.tsx", import.meta.url), "utf8");
+const stageFrameSource = readFileSync(new URL("./stageFrame.ts", import.meta.url), "utf8");
 const environmentSource = readFileSync(new URL("./PerformanceEnvironment.tsx", import.meta.url), "utf8");
 const stageCSS = readFileSync(new URL("./styles.css", import.meta.url), "utf8");
 
@@ -15,6 +16,14 @@ describe("Stage authoritative-time contract", () => {
     expect(stageSource.match(/requestAnimationFrame\(/gu) ?? []).toHaveLength(1);
     expect(environmentSource).not.toContain("requestAnimationFrame(");
     expect(environmentSource).not.toContain("continuous:");
+  });
+
+  it("keeps fullscreen ambience static while lyrics carry the performance", () => {
+    expect(stageSource).not.toContain("<PerformanceEnvironment");
+    expect(stageSource).not.toContain("stage-artwork-wash");
+    expect(stageSource).not.toContain("stage-world-motif");
+    expect(stageSource).not.toContain("environmentRef.current?.renderFrame");
+    expect(stageFrameSource).toContain("frameVisualIdentity");
   });
 
   it("does not enqueue React state from the continuous frame body", () => {

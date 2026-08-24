@@ -23,10 +23,6 @@ import {
   type PreparedDirectedStageV1,
 } from "@lyricstage/renderer";
 import {
-  PerformanceEnvironment,
-  type PerformanceEnvironmentHandle,
-} from "./PerformanceEnvironment";
-import {
   extractArtworkPaletteV1,
   mergeArtworkDirectorPaletteV1,
   paletteToneForV1,
@@ -146,11 +142,6 @@ export function StageCanvas({
   const hostRef = useRef<HTMLDivElement>(null);
   const lyricViewportRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
-  const environmentRef = useRef<PerformanceEnvironmentHandle>(null);
-  const washPrimaryRef = useRef<HTMLImageElement>(null);
-  const washSecondaryRef = useRef<HTMLImageElement>(null);
-  const motifRef = useRef<HTMLDivElement>(null);
-  const artworkRef = useRef<HTMLImageElement>(null);
   const progressRef = useRef<HTMLInputElement>(null);
   const elapsedRef = useRef<HTMLSpanElement>(null);
   const remainingRef = useRef<HTMLSpanElement>(null);
@@ -443,10 +434,10 @@ export function StageCanvas({
       if (hostRef.current) {
         applyStageFrameDOMV1(stageFrame, {
           host: hostRef.current,
-          motif: motifRef.current,
-          washPrimary: washPrimaryRef.current,
-          washSecondary: washSecondaryRef.current,
-          artwork: artworkRef.current,
+          motif: null,
+          washPrimary: null,
+          washSecondary: null,
+          artwork: null,
         });
         hostRef.current.dataset.presentation = stagePresentationAtV1(handoff.active.effects, timeMs, lyrics);
         hostRef.current.dataset.paletteTone = paletteToneForV1(nextPalette);
@@ -463,7 +454,6 @@ export function StageCanvas({
         showGuides: stageFrame.showGuides,
         palette: stageFrame.palette,
       });
-      environmentRef.current?.renderFrame(stageFrame);
       samplerRef.current.push(duration);
       frameCount += 1;
       if (frameCount % 60 === 0) {
@@ -529,8 +519,6 @@ export function StageCanvas({
   const artworkShape = artworkShapeForAspectV1(artworkAspect);
   const observedPlan = handoffRef.current.active;
   const observedTimeMs = frameTimeRef.current;
-  const observedPalette = paletteForPlanTime(observedPlan, observedTimeMs);
-  const paletteTone = paletteToneForV1(observedPalette);
   const observedSection = directorSectionAtV1(observedPlan, observedTimeMs);
   const observedScene = rollingCards.find((card) => observedSection.id === `rolling:${card.sceneID}`
     && observedTimeMs >= card.fromMs && observedTimeMs < card.toMs);
@@ -544,39 +532,20 @@ export function StageCanvas({
     directorMode === "legacy" && Boolean(remoteDirectorPlan),
   );
   const renderedPlaybackState = playbackState ?? (continuous ? "playing" : "paused");
-  const observedSceneCoverageMs = observedScene ? Math.max(0, observedScene.toMs - observedTimeMs) : 0;
-
   return (
     <div
       ref={hostRef}
       className="stage-canvas-host"
       style={{
-        background: `radial-gradient(circle at 12% 78%, ${observedPalette.signal}66, transparent 46%), radial-gradient(circle at 86% 18%, ${observedPalette.signalAlt}59, transparent 44%), radial-gradient(circle at 58% 92%, ${observedPalette.warm}38, transparent 42%), linear-gradient(128deg, ${observedPalette.groundLift}, ${observedPalette.ground} 48%, ${observedPalette.ground})`,
-        "--stage-signal": observedPalette.signal,
-        "--stage-signal-alt": observedPalette.signalAlt,
-        "--stage-ground": observedPalette.ground,
-        "--stage-ink": observedPalette.ink,
-        "--stage-ink-muted": observedPalette.inkMuted,
         "--stage-artwork-aspect": String(Math.min(2.4, Math.max(0.55, artworkAspect))),
-        "--stage-world-blur-silk": `${24 + observedPlan.world.depth * 42}px`,
-        "--stage-world-blur-ink": `${34 + observedPlan.world.depth * 54}px`,
-        "--stage-world-blur-mist": `${58 + observedPlan.world.depth * 72}px`,
-        "--stage-world-blur-glass": `${12 + observedPlan.world.depth * 26}px`,
-        "--stage-world-blur-paper": `${8 + observedPlan.world.depth * 16}px`,
-        "--stage-world-blur-light": `${18 + observedPlan.world.depth * 34}px`,
-        "--stage-world-glow-portal": `${72 + observedPlan.world.atmosphere * 90}px`,
-        "--stage-world-glow-directed": `${90 + observedPlan.world.atmosphere * 120}px`,
       } as CSSProperties}
-      data-director-source={observedPlan.source}
       data-director-mode={directorMode}
       data-bible-source={bibleSource ?? "local"}
       data-scene-count={rollingCards.length}
       data-scene-ranges={rollingCards.map((card) => `${card.fromLineIndex}-${card.toLineIndex}:${card.fromMs}-${card.toMs}`).join("|")}
       data-scene-id={observedScene?.sceneID}
-      data-scene-coverage-ms={Math.round(observedSceneCoverageMs)}
       data-director-state={directorLookupState.status}
       data-director-reason={directorLookupState.reason}
-      data-director-version={observedPlan.directorVersion}
       data-layout-change-count={observedPlan.blocking.transitions.length}
       data-gesture-count={observedPlan.gestures.length}
       data-effect-count={observedPlan.effects.length}
@@ -584,29 +553,8 @@ export function StageCanvas({
       data-dramatic-motif={observedPlan.dramaticScore.motifActor.family}
       data-playback-state={renderedPlaybackState}
       data-shell-layout="lower-leading-dock"
-      data-presentation={stagePresentationAtV1(observedPlan.effects, observedTimeMs, lyrics)}
-      data-reduce-motion={reduceMotion || undefined}
-      data-lightweight={lightweight || undefined}
-      data-palette-source={artworkPalette
-        ? observedPlan.source === "local" ? "artwork" : "artwork-directed"
-        : "fallback"}
-      data-palette-tone={paletteTone}
       data-artwork-shape={artworkShape}
-      data-world-spatial={observedPlan.world.spatialMode}
-      data-world-motion={observedPlan.world.motionLaw}
-      data-world-artwork={observedPlan.world.artworkRole}
-      data-world-texture={observedPlan.world.texture}
     >
-      {normalizedArtworkURL && (
-        <>
-          <img ref={washPrimaryRef} className="stage-artwork-wash stage-artwork-wash-primary" src={normalizedArtworkURL} alt="" aria-hidden="true" />
-          <img ref={washSecondaryRef} className="stage-artwork-wash stage-artwork-wash-secondary" src={normalizedArtworkURL} alt="" aria-hidden="true" />
-        </>
-      )}
-      <div ref={motifRef} className="stage-world-motif" aria-hidden="true" />
-      <PerformanceEnvironment
-        ref={environmentRef}
-      />
       {onExit ? (
         <button type="button" className="stage-exit-button" onClick={onExit} aria-label="退出全屏舞台">
           <span aria-hidden="true">×</span>
@@ -618,7 +566,6 @@ export function StageCanvas({
           <div className="stage-artwork-frame">
             {normalizedArtworkURL ? (
               <img
-                ref={artworkRef}
                 className="stage-artwork"
                 src={normalizedArtworkURL}
                 alt={title ? `${title} 的歌曲封面` : "当前歌曲封面"}

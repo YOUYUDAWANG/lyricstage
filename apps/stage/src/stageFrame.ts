@@ -370,20 +370,18 @@ export const applyStageFrameDOMV1 = (
 ): void => {
   const { host, motif, washPrimary, washSecondary, artwork } = targets;
   const { palette, plan, ambient } = frame;
-  host.style.background = `radial-gradient(circle at 12% 78%, ${palette.signal}66, transparent 46%), radial-gradient(circle at 86% 18%, ${palette.signalAlt}59, transparent 44%), radial-gradient(circle at 58% 92%, ${palette.warm}38, transparent 42%), linear-gradient(128deg, ${palette.groundLift}, ${palette.ground} 48%, ${palette.ground})`;
-  host.style.setProperty("--stage-signal", palette.signal);
-  host.style.setProperty("--stage-signal-alt", palette.signalAlt);
-  host.style.setProperty("--stage-ground", palette.ground);
-  host.style.setProperty("--stage-ink", palette.ink);
-  host.style.setProperty("--stage-ink-muted", palette.inkMuted);
-  host.style.setProperty("--stage-world-blur-silk", `${24 + plan.world.depth * 42}px`);
-  host.style.setProperty("--stage-world-blur-ink", `${34 + plan.world.depth * 54}px`);
-  host.style.setProperty("--stage-world-blur-mist", `${58 + plan.world.depth * 72}px`);
-  host.style.setProperty("--stage-world-blur-glass", `${12 + plan.world.depth * 26}px`);
-  host.style.setProperty("--stage-world-blur-paper", `${8 + plan.world.depth * 16}px`);
-  host.style.setProperty("--stage-world-blur-light", `${18 + plan.world.depth * 34}px`);
-  host.style.setProperty("--stage-world-glow-portal", `${72 + plan.world.atmosphere * 90}px`);
-  host.style.setProperty("--stage-world-glow-directed", `${90 + plan.world.atmosphere * 120}px`);
+  const visualIdentity = `${plan.planIdentity}:${palette.ground}:${palette.groundLift}:${palette.signal}:${palette.signalAlt}:${palette.warm}`;
+  if (host.dataset.frameVisualIdentity !== visualIdentity) {
+    host.dataset.frameVisualIdentity = visualIdentity;
+    host.style.background = `radial-gradient(circle at 12% 78%, ${palette.signal}26, transparent 52%), radial-gradient(circle at 86% 18%, ${palette.signalAlt}20, transparent 50%), linear-gradient(128deg, ${palette.groundLift}, ${palette.ground} 48%, ${palette.ground})`;
+    host.style.setProperty("--stage-signal", palette.signal);
+    host.style.setProperty("--stage-signal-alt", palette.signalAlt);
+    host.style.setProperty("--stage-ground", palette.ground);
+    host.style.setProperty("--stage-ink", palette.ink);
+    host.style.setProperty("--stage-ink-muted", palette.inkMuted);
+    host.style.setProperty("--stage-world-glow-portal", `${72 + plan.world.atmosphere * 90}px`);
+    host.style.setProperty("--stage-world-glow-directed", `${90 + plan.world.atmosphere * 120}px`);
+  }
   host.style.setProperty("--stage-scene-enter-x", `${ambient.sceneEnterTranslateXPct.toFixed(4)}%`);
   host.style.setProperty("--stage-scene-enter-scale", ambient.sceneEnterScale.toFixed(5));
   host.style.setProperty("--stage-scene-enter-opacity", ambient.sceneEnterOpacity.toFixed(5));
