@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 import type { LyricDocumentV0 } from "@lyricstage/contracts";
 import { lyricsProviderLabel, type LyricsCandidateV0 } from "@lyricstage/lyrics";
 import {
@@ -20,6 +20,7 @@ import {
 } from "../playback/lyricsTimeOffset";
 import { LyricScroller } from "../lyrics/LyricScroller";
 import { activeLyricLineIndices } from "../lyrics/lyricFollowModel";
+import { columnArtworkAccentFromPixels } from "./columnArtworkAccent";
 
 export interface ColumnStageViewProps {
   bridgeAvailable: boolean;
@@ -28,6 +29,7 @@ export interface ColumnStageViewProps {
   disconnected: boolean;
   title: string;
   artist: string;
+  artworkURL?: string;
   directorStatus: string;
   directorStatusReason?: string;
   automaticStatus: AutomaticLyricsStatus;
@@ -92,6 +94,7 @@ export function ColumnStageView({
   disconnected,
   title,
   artist,
+  artworkURL,
   directorStatus,
   directorStatusReason,
   automaticStatus,
@@ -130,6 +133,7 @@ export function ColumnStageView({
   const [showToolsMenu, setShowToolsMenu] = useState(false);
   const [manualTitle, setManualTitle] = useState(title);
   const [manualArtist, setManualArtist] = useState(artist);
+  const [artworkAccent, setArtworkAccent] = useState<ReturnType<typeof columnArtworkAccentFromPixels>>(null);
   const frozen = disconnected || playbackState === "paused" || playbackState === "ended";
   const lyricTimeMs = lyricsTimeForPlaybackMs(timeMs, lyricsOffsetMs, durationMs);
   const lyricsOffsetLabel = lyricsOffsetMs === 0 ? "" : ` · 歌词${formatLyricsOffset(lyricsOffsetMs)}`;
@@ -146,6 +150,34 @@ export function ColumnStageView({
     setManualArtist(artist);
     setShowToolsMenu(false);
   }, [title, artist]);
+
+  useEffect(() => {
+    let cancelled = false;
+    if (!artworkURL) {
+      setArtworkAccent(null);
+      return;
+    }
+    const image = new Image();
+    image.crossOrigin = "anonymous";
+    image.decoding = "async";
+    image.onload = () => {
+      if (cancelled) return;
+      try {
+        const canvas = document.createElement("canvas");
+        canvas.width = 24;
+        canvas.height = 24;
+        const context = canvas.getContext("2d", { willReadFrequently: true });
+        if (!context) return;
+        context.drawImage(image, 0, 0, 24, 24);
+        setArtworkAccent(columnArtworkAccentFromPixels(context.getImageData(0, 0, 24, 24).data));
+      } catch {
+        setArtworkAccent(null);
+      }
+    };
+    image.onerror = () => { if (!cancelled) setArtworkAccent(null); };
+    image.src = artworkURL;
+    return () => { cancelled = true; };
+  }, [artworkURL]);
 
   useEffect(() => {
     if (activeTool === "versions" && !showVersionPicker) setActiveTool(null);
@@ -270,6 +302,11 @@ export function ColumnStageView({
       data-state={surface}
       data-frozen={frozen || undefined}
       data-lightweight={lightweight || undefined}
+      style={artworkAccent ? {
+        "--column-lyrics-primary": artworkAccent.primary,
+        "--column-lyrics-secondary": artworkAccent.secondary,
+        "--column-artwork-ground": artworkAccent.ground,
+      } as CSSProperties : undefined}
     >
       <header className="column-header">
         <div className="column-header-info">

@@ -42,4 +42,33 @@ describe("LyricScroller", () => {
     expect(html).not.toContain("aria-current=\"true\"");
     expect(html).toContain("data-has-active=\"false\"");
   });
+
+  it("keeps YouLy character styling exclusive to the persistent column", () => {
+    const base = lyricFixtures.duetOverlap;
+    const first = base.lines[0]!;
+    const lyrics = {
+      ...base,
+      lines: [{
+        ...first,
+        text: "光へ",
+        words: [
+          { wordIndex: 0, fromMs: first.fromMs, toMs: first.fromMs + 1_200, text: "光へ" },
+        ],
+      }],
+    };
+    const props = {
+      lyrics,
+      lyricTimeMs: first.fromMs + 600,
+      lyricsOffsetMs: 0,
+      durationMs: lyrics.durationMs,
+      reduceMotion: false,
+      onSeek: () => undefined,
+    } as const;
+    const column = renderToStaticMarkup(createElement(LyricScroller, { ...props, density: "column" }));
+    const fullscreen = renderToStaticMarkup(createElement(LyricScroller, { ...props, density: "fullscreen" }));
+    expect(column).toContain("lyric-scroller-char");
+    expect(column).toContain("youly-phase-active");
+    expect(fullscreen).not.toContain("lyric-scroller-char");
+    expect(fullscreen).not.toContain("youly-phase-active");
+  });
 });

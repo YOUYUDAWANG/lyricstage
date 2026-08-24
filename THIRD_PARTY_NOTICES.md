@@ -18,3 +18,10 @@ Direct development/build dependencies:
 - React Vite plugin and TypeScript declaration packages — MIT
 
 This notice is informational and does not replace the license texts shipped by those projects.
+
+## YouLy+
+
+The persistent lyrics column adapts interaction and visual presentation concepts from
+[YouLy+](https://github.com/ibratabian17/YouLyPlus), including proximity-based lyric hierarchy,
+per-character progress styling, inactive-line blur, voice-aware alignment, and direct lyric seeking.
+YouLy+ is Copyright (c) 2025 Ibra Al Tabian and is distributed under the MIT License.

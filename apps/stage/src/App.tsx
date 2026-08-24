@@ -1373,6 +1373,7 @@ export default function App({ embedded = embeddedStageFromLocation, onEmbeddedRe
             disconnected={disconnected}
             title={columnTitle}
             artist={columnArtist}
+            artworkURL={stageArtworkURL}
             directorStatus={directorStatusLabel(directorLookupState, columnDirectorSource, columnHasQueuedDirectorPlan)}
             directorStatusReason={directorStatusDetail(directorLookupState)}
             automaticStatus={automaticLyrics.status}
