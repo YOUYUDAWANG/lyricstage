@@ -33,7 +33,10 @@ import { lyricsTimeForPlaybackMs } from "./playback/lyricsTimeOffset";
 import { canvasBackingStoreForV1 } from "./canvasBackingStore";
 import { rollingPreparedRendererIdentityV1 } from "./playback/rollingPerformanceDirector";
 import { artworkCandidates, artworkShapeForAspectV1, type ArtworkShapeV1 } from "./artworkCandidates";
-import { LyricScroller } from "./lyrics/LyricScroller";
+import {
+  YouLyColumnScroller,
+  type YouLyColumnScrollerHandle,
+} from "./lyrics/YouLyColumnScroller";
 import {
   applyStageFrameDOMV1,
   createStageFrameBuffersV1,
@@ -157,6 +160,7 @@ export function StageCanvas({
   const lyricViewportRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const environmentRef = useRef<PerformanceEnvironmentHandle>(null);
+  const fullscreenLyricsRef = useRef<YouLyColumnScrollerHandle>(null);
   const progressRef = useRef<HTMLInputElement>(null);
   const elapsedRef = useRef<HTMLSpanElement>(null);
   const remainingRef = useRef<HTMLSpanElement>(null);
@@ -366,6 +370,7 @@ export function StageCanvas({
         : sample.timeMs;
       const timeMs = lyricsTimeForPlaybackMs(playbackTimeMs, lyricsOffsetMs, durationMs);
       frameTimeRef.current = timeMs;
+      fullscreenLyricsRef.current?.sample(timeMs);
       const handoff = handoffRef.current;
       const activeSection = directorSectionAtV1(handoff.active, timeMs);
       const activeEffect = effectRecipeAtV1(handoff.active.effects, timeMs);
@@ -534,6 +539,8 @@ export function StageCanvas({
       className="stage-canvas-host"
       style={{
         "--stage-artwork-aspect": String(Math.min(2.4, Math.max(0.55, artworkAspect))),
+        "--stage-artwork-height-bound-width": `${Math.min(2.4, Math.max(0.55, artworkAspect)) * 52}vh`,
+        "--stage-artwork-mobile-width": `${Math.min(2.4, Math.max(0.55, artworkAspect)) * 132}px`,
       } as CSSProperties}
       data-director-mode={directorMode}
       data-bible-source={bibleSource ?? "local"}
@@ -704,14 +711,15 @@ export function StageCanvas({
             className="stage-canvas"
             aria-hidden="true"
           />
-          <LyricScroller
+          <YouLyColumnScroller
+            ref={fullscreenLyricsRef}
             lyrics={lyrics}
-            lyricTimeMs={lyricsTimeForPlaybackMs(displayTimeMs, lyricsOffsetMs, durationMs)}
             lyricsOffsetMs={lyricsOffsetMs}
             durationMs={durationMs}
             reduceMotion={reduceMotion || lightweight}
             followSuspended={scrubbing}
             onSeek={(timeMs) => onSeek?.(timeMs)}
+            onReady={(handle) => handle.sample(frameTimeRef.current, true)}
           />
         </div>
       </div>

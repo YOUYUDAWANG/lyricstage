@@ -1337,6 +1337,10 @@ h1 {
   z-index: 2;
 }
 
+.stage-lyric-viewport > .youly-column-shell {
+  z-index: 2;
+}
+
 .performance-environment {
   position: absolute;
   z-index: 1;
@@ -1704,8 +1708,8 @@ h1 {
 }
 
 .stage-canvas-host[data-shell-layout="apple-player"] .stage-artwork-frame {
-  width: min(100%, 520px);
-  max-height: min(52vh, 560px);
+  width: min(100%, 520px, var(--stage-artwork-height-bound-width, 52vh));
+  max-height: none;
   margin: 0;
   aspect-ratio: var(--stage-artwork-aspect, 1);
   border-radius: clamp(10px, 0.8vw, 16px);
@@ -1718,11 +1722,11 @@ h1 {
 }
 
 .stage-canvas-host[data-shell-layout="apple-player"][data-artwork-shape="landscape"] .stage-artwork-frame {
-  width: min(100%, 600px);
+  width: min(100%, 600px, var(--stage-artwork-height-bound-width, 52vh));
 }
 
 .stage-canvas-host[data-shell-layout="apple-player"][data-artwork-shape="portrait"] .stage-artwork-frame {
-  width: min(76%, 380px);
+  width: min(76%, 380px, var(--stage-artwork-height-bound-width, 28.6vh));
 }
 
 .stage-canvas-host[data-shell-layout="apple-player"] .stage-artwork {
@@ -1781,6 +1785,15 @@ h1 {
   animation: none;
 }
 
+.stage-canvas-host[data-shell-layout="apple-player"] .stage-canvas {
+  display: none;
+}
+
+.stage-canvas-host[data-shell-layout="apple-player"] .youly-column-container {
+  padding-top: calc(1em + 25%);
+  font-size: clamp(28px, 3.25vw, 58px);
+}
+
 .stage-canvas-host[data-shell-layout="apple-player"] .stage-queue-panel {
   top: clamp(70px, 9vh, 110px);
   right: clamp(38px, 5vw, 92px);
@@ -1826,8 +1839,8 @@ h1 {
 
   .stage-canvas-host[data-shell-layout="apple-player"] .stage-artwork-frame,
   .stage-canvas-host[data-shell-layout="apple-player"][data-artwork-shape] .stage-artwork-frame {
-    width: 100%;
-    max-height: 132px;
+    width: min(100%, var(--stage-artwork-mobile-width, 132px));
+    max-height: none;
   }
 
   .stage-canvas-host[data-shell-layout="apple-player"] .stage-track-meta { grid-area: meta; margin: 0; }

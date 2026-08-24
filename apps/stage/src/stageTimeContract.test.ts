@@ -29,6 +29,14 @@ describe("Stage authoritative-time contract", () => {
     expect(stageFrameSource).toContain("frameVisualIdentity");
   });
 
+  it("uses the shared YouLy renderer and keeps artwork frames at the media aspect ratio", () => {
+    expect(stageSource).toContain("<YouLyColumnScroller");
+    expect(stageSource).toContain("fullscreenLyricsRef.current?.sample(timeMs)");
+    expect(stageSource).not.toContain("<LyricScroller");
+    expect(stageCSS).toContain("--stage-artwork-height-bound-width");
+    expect(stageCSS).toContain("max-height: none");
+  });
+
   it("does not enqueue React state from the continuous frame body", () => {
     const frameBody = stageSource.match(/const render = \(\) => \{([\s\S]*?)\n      if \(continuous/um)?.[1] ?? "";
     expect(frameBody.length).toBeGreaterThan(100);
