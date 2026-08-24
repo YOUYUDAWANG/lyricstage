@@ -66,6 +66,28 @@ const assetRequest = (request, pathname) => {
   return new Request(url, request);
 };
 
+const audioAssetResponse = async (request, bundled) => {
+  const headers = new Headers(bundled.headers);
+  headers.set("Accept-Ranges", "bytes");
+  headers.set("Cache-Control", "public, max-age=3600");
+  headers.set("Content-Type", "audio/mp4");
+  const range = request.headers.get("Range")?.match(/^bytes=(\d+)-(\d*)$/u);
+  if (range && bundled.status === 200) {
+    const source = await bundled.arrayBuffer();
+    const start = Math.min(source.byteLength - 1, Number(range[1]));
+    const requestedEnd = range[2] ? Number(range[2]) : source.byteLength - 1;
+    const end = Math.min(source.byteLength - 1, Math.max(start, requestedEnd));
+    const body = source.slice(start, end + 1);
+    headers.set("Content-Length", String(body.byteLength));
+    headers.set("Content-Range", `bytes ${start}-${end}/${source.byteLength}`);
+    return new Response(request.method === "HEAD" ? null : body, { status: 206, headers });
+  }
+  return new Response(request.method === "HEAD" ? null : bundled.body, {
+    status: bundled.status,
+    headers,
+  });
+};
+
 export default {
   async fetch(request, env) {
     const url = new URL(request.url);
@@ -75,7 +97,7 @@ export default {
       }
       if (env?.ASSETS?.fetch) {
         const bundled = await env.ASSETS.fetch(assetRequest(request, "/showcase/you-and-aizu.m4a"));
-        if (bundled.ok || bundled.status === 206) return bundled;
+        if (bundled.ok || bundled.status === 206) return audioAssetResponse(request, bundled);
       }
       try {
         return await proxyShowcaseAudio(request);
