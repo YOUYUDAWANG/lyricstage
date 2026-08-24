@@ -110,7 +110,7 @@ describe("StageFrameV1", () => {
     const baseline = writeStageFrameV1(createStageFrameBuffersV1(input(0)), input(targetTimeMs));
     expect(replay.ambient).toEqual(direct.ambient);
     expect(replay.environment).toEqual(direct.environment);
-    expect(direct.ambient.artworkScale).toBeGreaterThan(baseline.ambient.artworkScale);
+    expect(direct.ambient).not.toHaveProperty("artworkScale");
     expect(direct.ambient.motifScale - baseline.ambient.motifScale).toBeGreaterThan(0.05);
     expect(direct.reactiveBus?.atMs).toBe(targetTimeMs);
   });

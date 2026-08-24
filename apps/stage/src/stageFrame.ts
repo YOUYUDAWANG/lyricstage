@@ -26,7 +26,6 @@ export interface StageAmbientFrameV1 {
   washSecondaryTranslateYPct: number;
   washSecondaryScale: number;
   washSecondaryRotationDeg: number;
-  artworkScale: number;
   artworkSaturation: number;
   artworkBrightness: number;
   sceneEnterTranslateXPct: number;
@@ -276,7 +275,6 @@ export const sampleStageAmbientIntoV1 = (
   const coverProgress = alternateProgress(timeMs, 11_000);
   target.artworkSaturation = threePoint(coverProgress, 0.5, 1.02, 1.065, 1.035);
   target.artworkBrightness = threePoint(coverProgress, 0.5, 0.98, 1.018, 1.004);
-  target.artworkScale = 1;
   const section = directorSectionAtV1(plan, timeMs);
   const sceneProgress = reduceMotion || !section.id.startsWith("rolling:")
     ? 1 : easeInOutSine((finiteTime(timeMs) - section.fromMs) / 900);
@@ -291,7 +289,6 @@ export const sampleStageAmbientIntoV1 = (
     const low = 0.15 + clamp01(world.atmosphere) * 0.22;
     const high = 0.22 + clamp01(world.atmosphere) * 0.34;
     target.motifOpacity = lerp(low, high, pulse) * (0.82 + clamp01(sectionIntensity) * 0.18);
-    target.artworkScale = lerp(1, 1.018, pulse);
     target.artworkSaturation = lerp(1.02, 1.1, pulse);
     target.artworkBrightness = lerp(0.99, 1.025, pulse);
   }
@@ -307,7 +304,6 @@ export const sampleStageAmbientIntoV1 = (
     target.motifTranslateYPct *= 0.38 + audible * 0.62;
     target.motifScale += weight * 0.07 + impact * 0.045 + beatPulse * 0.014;
     target.motifOpacity *= 0.62 + audible * (0.44 + reactiveBus.energy * 0.24);
-    target.artworkScale += weight * 0.028 + impact * 0.016;
     target.artworkSaturation *= 0.96 + reactiveBus.brightness * 0.1;
     target.artworkBrightness *= 0.96 + reactiveBus.energy * 0.055 + impact * 0.025;
   }
@@ -325,7 +321,6 @@ export const sampleStageAmbientIntoV1 = (
     target.washSecondaryTranslateYPct = 0;
     target.washSecondaryScale = 1.12;
     target.washSecondaryRotationDeg = 0;
-    target.artworkScale = 1;
     target.artworkSaturation = 1.02;
     target.artworkBrightness = 1;
   }
@@ -346,7 +341,6 @@ const createAmbientFrame = (): StageAmbientFrameV1 => ({
   washSecondaryTranslateYPct: 0,
   washSecondaryScale: 1,
   washSecondaryRotationDeg: 0,
-  artworkScale: 1,
   artworkSaturation: 1,
   artworkBrightness: 1,
   sceneEnterTranslateXPct: 0,
@@ -479,7 +473,6 @@ export const applyStageFrameDOMV1 = (
     );
   }
   if (artwork) {
-    artwork.style.transform = `scale(${ambient.artworkScale.toFixed(5)})`;
     artwork.style.filter = `saturate(${ambient.artworkSaturation.toFixed(5)}) brightness(${ambient.artworkBrightness.toFixed(5)})`;
   }
 };
