@@ -60,6 +60,8 @@ interface StageCanvasProps {
   bibleSource?: "cache" | "network" | "local";
   rollingCards?: readonly SceneCardV1[];
   reactiveBus?: ReactiveBusV1;
+  reactiveStatus?: "idle" | "analyzing" | "ready" | "error";
+  reactiveFailure?: string;
   clock: PlaybackClockV0;
   continuous: boolean;
   displayTimeMs: number;
@@ -119,6 +121,8 @@ export function StageCanvas({
   bibleSource,
   rollingCards = [],
   reactiveBus,
+  reactiveStatus,
+  reactiveFailure,
   clock,
   continuous,
   displayTimeMs,
@@ -408,6 +412,8 @@ export function StageCanvas({
         writeDatasetValue(host, "sceneId", activeScene?.sceneID);
         writeDatasetValue(host, "semanticPurpose", activeScene?.semanticScene?.purpose);
         writeDatasetValue(host, "signatureClip", activeEffect?.id.match(/^signature-clip-v2:([^:]+)/u)?.[1]);
+        writeDatasetValue(host, "reactiveStatus", reactiveStatus);
+        writeDatasetValue(host, "reactiveFailure", reactiveFailure);
         writeDatasetValue(host, "layoutChangeCount", String(handoff.active.blocking.transitions.length));
         writeDatasetValue(host, "gestureCount", String(handoff.active.gestures.length));
         writeDatasetValue(host, "effectCount", String(handoff.active.effects.length));
