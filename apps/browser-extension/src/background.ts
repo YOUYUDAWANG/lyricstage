@@ -412,9 +412,7 @@ const resolveAutomaticLyrics = async (track: LyricsLookupTrackV0): Promise<Lyric
   } catch {
     // Cache availability must never turn an otherwise valid network lookup into an error.
   }
-  const cachedNeedsEnrichment = cached?.status === "match" && cached.assistance === undefined &&
-    cached.resolvedIdentity?.isCover === true && cached.resolvedIdentity.originalArtists.length === 0;
-  if ((cached?.status === "match" && !cachedNeedsEnrichment) || cached?.assistance !== undefined) return cached;
+  if (cached?.status === "match" || cached?.assistance !== undefined) return cached;
   const fingerprint = lyricsFingerprint(track);
   const existing = lyricsLookupTasks.get(fingerprint);
   if (existing) return existing;

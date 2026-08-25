@@ -120,8 +120,9 @@ export class LyricsStorageRepository {
 
   async cached(trackID: string, fingerprint: string, now = Date.now()): Promise<LyricsLookupResponseV0 | undefined> {
     const entry = (await this.#readLyrics())[trackID];
-    if (!entry || entry.fingerprint !== fingerprint || entry.expiresAtUnixMs <= now
-      || !isLyricsLookupResponseV0(entry.response)) return undefined;
+    if (!entry || !isLyricsLookupResponseV0(entry.response)) return undefined;
+    const boundMatch = entry.response.status === "match" && entry.response.trackID === trackID;
+    if (!boundMatch && (entry.fingerprint !== fingerprint || entry.expiresAtUnixMs <= now)) return undefined;
     return { ...entry.response, source: "cache" };
   }
 
@@ -148,8 +149,11 @@ export class LyricsStorageRepository {
     const now = Date.now();
     let stored: StoredLyricsCache = {};
     try { stored = await this.#readLyrics(); } catch { /* Replace an unreadable cache. */ }
-    const entries = Object.entries(stored).filter(([key, entry]) => key !== cacheKey
-      && entry?.expiresAtUnixMs > now && isLyricsLookupResponseV0(entry.response));
+    const entries = Object.entries(stored).filter(([key, entry]) => {
+      if (key === cacheKey || !entry || !isLyricsLookupResponseV0(entry.response)) return false;
+      const boundMatch = entry.response.status === "match" && entry.response.trackID === key;
+      return boundMatch || entry.expiresAtUnixMs > now;
+    });
     entries.push([cacheKey, {
       fingerprint, expiresAtUnixMs: now + ttlMilliseconds, updatedAtUnixMs: now, response,
     }]);

@@ -54,4 +54,52 @@ describe("background storage byte budgets", () => {
     expect(Object.keys(stored).length).toBeLessThan(9);
     expect(new TextEncoder().encode(JSON.stringify(stored)).byteLength).toBeLessThanOrEqual(localLyricsByteLimit);
   });
+
+  it("treats an adopted match as a durable track binding across metadata drift and expiry", async () => {
+    const values = new Map<string, unknown>();
+    values.set(backgroundStorageKeys.lyricsCache, {
+      "video-track": {
+        fingerprint: "old-title-and-duration",
+        expiresAtUnixMs: 1,
+        updatedAtUnixMs: 1,
+        response: {
+          type: "lyrics-lookup-result",
+          version: "lyrics-lookup-v0",
+          trackID: "video-track",
+          status: "match",
+          source: "network",
+          match: {
+            provider: "lrclib",
+            id: "durable",
+            title: "Song",
+            artist: "Artist",
+            durationMs: 180_000,
+            syncedLyrics: "[00:01.00]cached forever",
+          },
+          candidates: [],
+        },
+      },
+    });
+    const repository = new LyricsStorageRepository({
+      get: async (key) => ({ [key]: values.get(key) }),
+      set: async (next) => { Object.entries(next).forEach(([key, value]) => values.set(key, value)); },
+    });
+
+    await expect(repository.cached("video-track", "new-title-and-duration", 10_000)).resolves.toMatchObject({
+      status: "match",
+      source: "cache",
+      match: { id: "durable" },
+    });
+
+    await repository.save("other-track", "other", {
+      type: "lyrics-lookup-result",
+      version: "lyrics-lookup-v0",
+      trackID: "other-track",
+      status: "miss",
+      source: "network",
+      candidates: [],
+    }, 60_000);
+    expect((values.get(backgroundStorageKeys.lyricsCache) as Record<string, unknown>)["video-track"])
+      .toBeDefined();
+  });
 });

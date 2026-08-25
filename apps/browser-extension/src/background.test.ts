@@ -534,6 +534,48 @@ describe("YouTube Music background routing", () => {
       .toMatchObject({ status: "match", source: "cache", match: { id: "3" } });
   });
 
+  it("reuses an adopted track match after its old fingerprint and TTL expire", async () => {
+    const track = {
+      provider: "youtubeMusic" as const,
+      trackID: "lyrics-bound-track",
+      title: "Retitled by YouTube Music",
+      artist: "Updated Artist Credit",
+      durationMs: 241_000,
+    };
+    storage.set("lyricstage-youtube-music-lyrics-v10", {
+      [track.trackID]: {
+        fingerprint: "legacy-metadata-fingerprint",
+        expiresAtUnixMs: 1,
+        updatedAtUnixMs: 1,
+        response: {
+          type: "lyrics-lookup-result",
+          version: "lyrics-lookup-v0",
+          trackID: track.trackID,
+          status: "match",
+          source: "network",
+          match: {
+            provider: "lrclib",
+            id: "bound-version",
+            title: "Original title",
+            artist: "Original artist credit",
+            durationMs: 240_000,
+            syncedLyrics: "[00:01.00]bound lyrics",
+          },
+          candidates: [],
+        },
+      },
+    });
+    const fetcher = vi.fn(() => Promise.reject(new Error("network must not be used for a bound track")));
+    vi.stubGlobal("fetch", fetcher);
+
+    await expect(sendResolved({ type: "youtube-music-resolve-lyrics", track }, sender(10))).resolves.toMatchObject({
+      status: "match",
+      source: "cache",
+      match: { id: "bound-version" },
+    });
+    expect(fetcher).not.toHaveBeenCalled();
+  });
+
   it("keeps manual candidates separate until the user selects one", async () => {
     const track = {
       provider: "youtubeMusic" as const,
