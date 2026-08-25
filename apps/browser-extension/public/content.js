@@ -11,9 +11,10 @@
   const APPLE_SHELL_TAB_PROXY_ATTR = "data-lyricstage-tab-proxy";
   const APPLE_SHELL_TAB_SIGNATURE_ATTR = "data-lyricstage-tab-signature";
   const APPLE_SHELL_PLAYER_ACTIONS_ATTR = "data-lyricstage-player-actions";
+  const APPLE_SHELL_MEDIA_PROXY_ATTR = "data-lyricstage-media-proxy";
+  const APPLE_SHELL_PLAYER_BAR_ATTR = "data-lyricstage-player-bar-shell";
   const APPLE_SHELL_POPOVER_ATTR = "data-lyricstage-player-popover";
   const APPLE_SHELL_PLAYER_OPEN_ATTR = "data-lyricstage-player-open";
-  const APPLE_SHELL_MEDIA_TOGGLE_ATTR = "data-lyricstage-native-media-switch";
   const CONTENT_SCRIPT_STOP_EVENT = "lyricstage-content-script-stop-v2";
   const CONTENT_SCRIPT_MARKER_ATTR = "data-lyricstage-content-script";
   const CONTENT_SCRIPT_MARKER = "isolated-v3";
@@ -104,8 +105,8 @@
   let appleShellPlayerActions = null;
   let appleShellPopoverKind = "";
   let appleShellMediaToggle = null;
-  let appleShellMediaToggleParent = null;
-  let appleShellMediaToggleNextSibling = null;
+  let appleShellPlayerBar = null;
+  let lastAppleShellTrackTuple = null;
 
   const clean = (value) => (typeof value === "string" ? value.trim() : "");
 
@@ -819,6 +820,190 @@
     };
   };
 
+  const visibleNativePlayerBar = () => Array.from(
+    document.querySelectorAll?.("ytmusic-player-bar") ?? [],
+  ).find((candidate) => candidate.getBoundingClientRect?.().width > 0)
+    ?? document.querySelector?.("ytmusic-player-bar");
+
+  const playerClockText = (valueMs) => {
+    const totalSeconds = Math.max(0, Math.floor((Number.isFinite(valueMs) ? valueMs : 0) / 1000));
+    const minutes = Math.floor(totalSeconds / 60);
+    return `${minutes}:${String(totalSeconds % 60).padStart(2, "0")}`;
+  };
+
+  const stableAppleShellTuple = (observation) => {
+    const candidate = observation?.tuple;
+    const candidateTitle = clean(candidate?.title);
+    if (candidate && candidateTitle && !/^(スポンサー|sponsor)$/i.test(candidateTitle)) {
+      lastAppleShellTrackTuple = candidate;
+    }
+    return lastAppleShellTrackTuple ?? acceptedTrackTuple ?? candidate ?? null;
+  };
+
+  const playerShellButton = (action, label, glyph) => {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.setAttribute("data-action", action);
+    button.setAttribute("aria-label", label);
+    button.title = label;
+    button.textContent = glyph;
+    return button;
+  };
+
+  const nativeCaptionButton = (root) => Array.from(root?.querySelectorAll?.("button") ?? []).find((button) => {
+    const label = `${clean(button.getAttribute?.("aria-label"))} ${clean(button.title)}`;
+    return /字幕|captions|subtitles|CC/i.test(label);
+  }) ?? null;
+
+  const syncAppleShellPlayerBar = () => {
+    const nativeBar = visibleNativePlayerBar();
+    const observation = readTrackObservation(nativeBar);
+    const media = observation?.media ?? selectPlaybackMedia(nativeBar);
+    if (!(media instanceof HTMLMediaElement)) {
+      appleShellPlayerBar?.toggleAttribute?.("hidden", true);
+      return;
+    }
+    ensureAppleShellPlayerBar();
+    const tuple = stableAppleShellTuple(observation);
+    const barClock = observation?.barClock ?? playerBarClock(nativeBar);
+    const durationMs = observation?.tuple?.durationMs
+      || barClock?.durationMs
+      || (Number.isFinite(media.duration) ? media.duration * 1000 : 0);
+    const currentTimeMs = synchronizedCurrentTimeMs(media, barClock);
+    appleShellPlayerBar.hidden = false;
+    const artwork = appleShellPlayerBar.querySelector?.("[data-role='artwork']");
+    const title = appleShellPlayerBar.querySelector?.("[data-role='title']");
+    const artist = appleShellPlayerBar.querySelector?.("[data-role='artist']");
+    const time = appleShellPlayerBar.querySelector?.("[data-role='time']");
+    const progress = appleShellPlayerBar.querySelector?.("input[type='range']");
+    if (artwork) {
+      const nextArtwork = highResolutionArtworkURL(tuple?.artworkURL);
+      if (nextArtwork) {
+        if (artwork.src !== nextArtwork) artwork.src = nextArtwork;
+        artwork.hidden = false;
+      } else {
+        artwork.hidden = true;
+        artwork.removeAttribute?.("src");
+      }
+    }
+    if (title) title.textContent = clean(tuple?.title) || "正在播放";
+    if (artist) artist.textContent = clean(tuple?.artist) || clean(tuple?.album);
+    if (time) time.textContent = `${playerClockText(currentTimeMs)} / ${playerClockText(durationMs)}`;
+    if (progress && !progress.hasAttribute("data-seeking")) {
+      progress.max = String(Math.max(1, Math.round(durationMs)));
+      progress.value = String(Math.max(0, Math.min(durationMs, Math.round(currentTimeMs))));
+      progress.style.setProperty("--lyricstage-progress", `${durationMs > 0 ? (currentTimeMs / durationMs) * 100 : 0}%`);
+    }
+    const setButton = (action, { disabled = false, pressed = null, glyph = null } = {}) => {
+      const button = appleShellPlayerBar.querySelector?.(`button[data-action='${action}']`);
+      if (!button) return;
+      button.disabled = disabled;
+      if (pressed !== null) button.setAttribute("aria-pressed", pressed ? "true" : "false");
+      if (glyph !== null) button.textContent = glyph;
+    };
+    setButton("previous", { disabled: !enabledControl(transportButton(nativeBar, "previous")) });
+    setButton("playPause", {
+      disabled: !enabledControl(transportButton(nativeBar, "playPause")),
+      pressed: !media.paused,
+      glyph: media.paused ? "▶" : "Ⅱ",
+    });
+    setButton("next", { disabled: !enabledControl(transportButton(nativeBar, "next")) });
+    const liked = likeStatus(nativeBar ?? document) === "liked";
+    setButton("like", { disabled: !enabledControl(likeButtons(nativeBar ?? document).like), pressed: liked, glyph: liked ? "♥" : "♡" });
+    setButton("captions", { disabled: !enabledControl(nativeCaptionButton(nativeBar ?? document)) });
+    setButton("repeat", { disabled: !enabledControl(playbackModeButton(nativeBar ?? document, "repeat")), pressed: repeatMode(nativeBar ?? document) !== "off" });
+    setButton("shuffle", { disabled: !enabledControl(playbackModeButton(nativeBar ?? document, "shuffle")), pressed: shuffleEnabled(nativeBar ?? document) });
+  };
+
+  const ensureAppleShellPlayerBar = () => {
+    if (appleShellPlayerBar?.isConnected) return appleShellPlayerBar;
+    const shell = document.createElement("div");
+    shell.setAttribute(APPLE_SHELL_PLAYER_BAR_ATTR, "true");
+    shell.setAttribute("role", "toolbar");
+    shell.setAttribute("aria-label", "LyricStage 播放器");
+    const progress = document.createElement("input");
+    progress.type = "range";
+    progress.min = "0";
+    progress.max = "1";
+    progress.value = "0";
+    progress.step = "100";
+    progress.setAttribute("aria-label", "播放进度");
+    const left = document.createElement("div");
+    left.setAttribute("data-zone", "transport");
+    left.append(
+      playerShellButton("previous", "上一首", "|◀"),
+      playerShellButton("playPause", "播放或暂停", "▶"),
+      playerShellButton("next", "下一首", "|▶"),
+    );
+    const time = document.createElement("span");
+    time.setAttribute("data-role", "time");
+    left.append(time);
+    const identity = document.createElement("div");
+    identity.setAttribute("data-zone", "identity");
+    const artwork = document.createElement("img");
+    artwork.setAttribute("data-role", "artwork");
+    artwork.alt = "";
+    const copy = document.createElement("div");
+    const title = document.createElement("strong");
+    title.setAttribute("data-role", "title");
+    const artist = document.createElement("span");
+    artist.setAttribute("data-role", "artist");
+    copy.append(title, artist);
+    identity.append(artwork, copy);
+    const right = document.createElement("div");
+    right.setAttribute("data-zone", "actions");
+    right.append(
+      playerShellButton("like", "喜欢", "♡"),
+      playerShellButton("captions", "字幕", "CC"),
+      playerShellButton("repeat", "循环", "↻"),
+      playerShellButton("shuffle", "随机播放", "⇄"),
+    );
+    shell.append(progress, left, identity, right);
+    const runNativeAction = (action) => {
+      const nativeBar = visibleNativePlayerBar();
+      const target = action === "previous" || action === "playPause" || action === "next"
+        ? transportButton(nativeBar ?? document, action)
+        : action === "like"
+          ? likeButtons(nativeBar ?? document).like
+          : action === "captions"
+            ? nativeCaptionButton(nativeBar ?? document)
+            : playbackModeButton(nativeBar ?? document, action);
+      if (!enabledControl(target) || typeof target.click !== "function") return;
+      target.click();
+      queueSend();
+      window.setTimeout?.(syncAppleShellPlayerBar, 0);
+    };
+    shell.addEventListener("click", (event) => {
+      const button = event.target?.closest?.("button[data-action]");
+      if (!button) return;
+      runNativeAction(button.getAttribute("data-action"));
+    });
+    progress.addEventListener("pointerdown", () => progress.setAttribute("data-seeking", "true"));
+    progress.addEventListener("input", () => {
+      const current = Number(progress.value);
+      const maximum = Number(progress.max);
+      const timeNode = shell.querySelector?.("[data-role='time']");
+      if (timeNode) timeNode.textContent = `${playerClockText(current)} / ${playerClockText(maximum)}`;
+      progress.style.setProperty("--lyricstage-progress", `${maximum > 0 ? (current / maximum) * 100 : 0}%`);
+    });
+    const commitSeek = () => {
+      progress.removeAttribute("data-seeking");
+      const nativeBar = visibleNativePlayerBar();
+      const media = selectPlaybackMedia(nativeBar);
+      if (!(media instanceof HTMLMediaElement)) return;
+      const requestedTimeMs = Number(progress.value);
+      const target = mediaSeekTarget(media, playerBarClock(nativeBar), requestedTimeMs);
+      if (!target) return;
+      media.currentTime = target.mediaTimeSeconds;
+      playbackClockAnchor = { media, mediaTimeMs: target.mediaTimeSeconds * 1000, barTimeMs: target.logicalTimeMs };
+      queueSend();
+    };
+    progress.addEventListener("change", commitSeek);
+    (document.querySelector?.("ytmusic-app") ?? document.body)?.append?.(shell);
+    appleShellPlayerBar = shell;
+    return shell;
+  };
+
   const snapshotStateSignature = (snapshot) => JSON.stringify([
     snapshot.track.provider,
     snapshot.track.trackID,
@@ -1115,13 +1300,7 @@
       "ytmusic-player-page#player-page #side-panel",
     )?.getAttribute?.(APPLE_SHELL_POPOVER_ATTR) || "";
     appleShellPopoverKind = activePanel;
-    const mediaButtons = Array.from(
-      appleShellMediaToggle?.querySelectorAll?.("button") ?? [],
-    );
-    const mediaMode = mediaButtons[1]?.getAttribute?.("aria-pressed") === "true"
-      ? "video"
-      : "song";
-    document.documentElement?.setAttribute?.("data-lyricstage-media-mode", mediaMode);
+    syncAppleShellMediaProxy();
     for (const button of Array.from(
       appleShellPlayerActions?.querySelectorAll?.("button[data-panel]") ?? [],
     )) {
@@ -1133,20 +1312,49 @@
 
   const restoreAppleShellMediaToggle = () => {
     if (!appleShellMediaToggle) return;
-    appleShellMediaToggle.removeAttribute?.(APPLE_SHELL_MEDIA_TOGGLE_ATTR);
-    if (appleShellMediaToggleParent?.isConnected) {
-      if (appleShellMediaToggleNextSibling?.parentElement === appleShellMediaToggleParent) {
-        appleShellMediaToggleParent.insertBefore?.(
-          appleShellMediaToggle,
-          appleShellMediaToggleNextSibling,
-        );
-      } else {
-        appleShellMediaToggleParent.append?.(appleShellMediaToggle);
-      }
-    }
     appleShellMediaToggle = null;
-    appleShellMediaToggleParent = null;
-    appleShellMediaToggleNextSibling = null;
+  };
+
+  const syncAppleShellMediaProxy = () => {
+    const nativeButtons = Array.from(
+      appleShellMediaToggle?.querySelectorAll?.("button") ?? [],
+    ).slice(0, 2);
+    const proxyButtons = Array.from(
+      appleShellPlayerActions?.querySelectorAll?.(`[${APPLE_SHELL_MEDIA_PROXY_ATTR}] button`) ?? [],
+    );
+    const player = document.querySelector?.("ytmusic-player-page#player-page #player");
+    const inferredVideo = player?.hasAttribute?.("video-mode") === true;
+    const nativeVideo = nativeButtons[1]?.getAttribute?.("aria-pressed") === "true";
+    const nativeSong = nativeButtons[0]?.getAttribute?.("aria-pressed") === "true";
+    const videoSelected = nativeVideo || (!nativeSong && inferredVideo);
+    proxyButtons.forEach((button, index) => {
+      const target = nativeButtons[index];
+      const selected = index === 1 ? videoSelected : !videoSelected;
+      button.setAttribute?.("aria-pressed", selected ? "true" : "false");
+      button.toggleAttribute?.("data-selected", selected);
+      button.disabled = !target || target.disabled === true || target.getAttribute?.("aria-disabled") === "true";
+    });
+    document.documentElement?.setAttribute?.(
+      "data-lyricstage-media-mode",
+      videoSelected ? "video" : "song",
+    );
+    const video = player?.querySelector?.("video") ?? document.querySelector?.("video");
+    if (video?.videoWidth > 0 && video?.videoHeight > 0) {
+      document.documentElement?.style?.setProperty?.(
+        "--lyricstage-video-aspect",
+        `${video.videoWidth} / ${video.videoHeight}`,
+      );
+    }
+  };
+
+  const invokeAppleShellMediaMode = (index) => {
+    const target = appleShellMediaToggle?.querySelectorAll?.("button")?.[index];
+    if (!target || target.disabled === true || target.getAttribute?.("aria-disabled") === "true") return;
+    appleShellMediaToggle.removeAttribute?.("toggle-disabled");
+    target.click?.();
+    syncAppleShellMediaProxy();
+    window.setTimeout?.(syncAppleShellMediaProxy, 250);
+    window.setTimeout?.(syncAppleShellMediaProxy, 900);
   };
 
   const closeAppleShellPopover = (sidePanel, tabList) => {
@@ -1215,16 +1423,24 @@
 
     if (mediaToggle && mediaButtons.length === 2) {
       appleShellMediaToggle = mediaToggle;
-      appleShellMediaToggleParent = mediaToggle.parentElement;
-      appleShellMediaToggleNextSibling = mediaToggle.nextSibling;
-      mediaToggle.setAttribute?.(APPLE_SHELL_MEDIA_TOGGLE_ATTR, "true");
       if (!observedAppleShellMediaToggles.has(mediaToggle)) {
         observedAppleShellMediaToggles.add(mediaToggle);
         mediaToggle.addEventListener?.("click", () => {
-          window.setTimeout?.(syncAppleShellPlayerActions, 0);
+          window.setTimeout?.(syncAppleShellMediaProxy, 0);
         });
       }
-      actions.append(mediaToggle);
+      const mediaProxy = document.createElement("div");
+      mediaProxy.setAttribute(APPLE_SHELL_MEDIA_PROXY_ATTR, "true");
+      mediaProxy.setAttribute("role", "group");
+      mediaProxy.setAttribute("aria-label", "播放媒体模式");
+      mediaButtons.forEach((nativeButton, index) => {
+        const button = document.createElement("button");
+        button.type = "button";
+        button.textContent = clean(nativeButton.textContent) || (index === 0 ? "曲" : "動画");
+        button.addEventListener("click", () => invokeAppleShellMediaMode(index));
+        mediaProxy.append(button);
+      });
+      actions.append(mediaProxy);
     }
 
     for (const [kind, label, target] of [
@@ -1259,6 +1475,7 @@
     }
     rightContent.prepend?.(actions);
     appleShellPlayerActions = actions;
+    syncAppleShellMediaProxy();
     syncAppleShellPlayerActions();
   };
 
@@ -1590,10 +1807,14 @@
     restoreAppleShellMediaToggle();
     appleShellPlayerActions?.remove?.();
     appleShellPlayerActions = null;
+    appleShellPlayerBar?.remove?.();
+    appleShellPlayerBar = null;
+    lastAppleShellTrackTuple = null;
     appleShellPopoverKind = "";
     document.documentElement.removeAttribute(APPLE_SHELL_POPOVER_ATTR);
     document.documentElement.removeAttribute(APPLE_SHELL_PLAYER_OPEN_ATTR);
     document.documentElement.removeAttribute("data-lyricstage-media-mode");
+    document.documentElement.style?.removeProperty?.("--lyricstage-video-aspect");
     for (const tab of Array.from(document.querySelectorAll?.('[data-lyricstage-native-lyrics-hidden]') ?? [])) {
       tab.removeAttribute?.("data-lyricstage-native-lyrics-hidden");
     }
@@ -2078,6 +2299,7 @@
       stop();
       return;
     }
+    syncAppleShellPlayerBar();
     const snapshot = buildSnapshot();
     if (!snapshot) {
       if (pendingTrackTuple) {
@@ -2261,6 +2483,7 @@
     updateStageMount();
     observeMedia();
     updateSponsorBlockCompatibility();
+    syncAppleShellPlayerBar();
     send();
   }, SOURCE_HEARTBEAT_MS);
   window.addEventListener("pagehide", stop, { once: true });
