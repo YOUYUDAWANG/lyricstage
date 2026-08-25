@@ -13,6 +13,7 @@
   const APPLE_SHELL_PLAYER_ACTIONS_ATTR = "data-lyricstage-player-actions";
   const APPLE_SHELL_MEDIA_PROXY_ATTR = "data-lyricstage-media-proxy";
   const APPLE_SHELL_PLAYER_BAR_ATTR = "data-lyricstage-player-bar-shell";
+  const APPLE_SHELL_COMPLETE_ARTWORK_ATTR = "data-lyricstage-complete-artwork";
   const APPLE_SHELL_POPOVER_ATTR = "data-lyricstage-player-popover";
   const APPLE_SHELL_PLAYER_OPEN_ATTR = "data-lyricstage-player-open";
   const CONTENT_SCRIPT_STOP_EVENT = "lyricstage-content-script-stop-v2";
@@ -101,6 +102,7 @@
   let observedAppleShellDrawer = null;
   const observedAppleShellGuideButtons = new WeakSet();
   const observedAppleShellMediaToggles = new WeakSet();
+  const observedAppleShellArtworkImages = new WeakSet();
   let appleShellGuidePreferenceRequested = false;
   let appleShellPlayerActions = null;
   let appleShellPopoverKind = "";
@@ -862,6 +864,34 @@
     return /player page|プレーヤー\s*ページ|播放器页面|播放器頁面/i.test(label);
   }) ?? null;
 
+  const syncAppleShellCompleteArtwork = (trackID) => {
+    const image = document.querySelector?.("ytmusic-player-page#player-page #song-image img");
+    if (!image || !trackID) return;
+    const current = clean(image.currentSrc || image.src);
+    if (artworkVideoID(current) !== trackID) return;
+    const canonical = highResolutionArtworkURL(current);
+    if (!canonical) return;
+    const key = `${trackID}|${canonical}`;
+    if (current === canonical || image.getAttribute?.(APPLE_SHELL_COMPLETE_ARTWORK_ATTR) === `fallback:${key}`) {
+      return;
+    }
+    if (!observedAppleShellArtworkImages.has(image)) {
+      observedAppleShellArtworkImages.add(image);
+      image.addEventListener?.("error", () => {
+        const fallback = clean(image.getAttribute?.("data-lyricstage-artwork-fallback"));
+        const activeKey = clean(image.getAttribute?.(APPLE_SHELL_COMPLETE_ARTWORK_ATTR));
+        if (!fallback || !activeKey || activeKey.startsWith("fallback:")) return;
+        image.setAttribute?.(APPLE_SHELL_COMPLETE_ARTWORK_ATTR, `fallback:${activeKey}`);
+        image.removeAttribute?.("srcset");
+        image.src = fallback;
+      });
+    }
+    image.setAttribute?.(APPLE_SHELL_COMPLETE_ARTWORK_ATTR, key);
+    image.setAttribute?.("data-lyricstage-artwork-fallback", current);
+    image.removeAttribute?.("srcset");
+    image.src = canonical;
+  };
+
   const syncAppleShellPlayerBar = () => {
     const nativeBar = visibleNativePlayerBar();
     const observation = readTrackObservation(nativeBar);
@@ -877,6 +907,7 @@
       || barClock?.durationMs
       || (Number.isFinite(media.duration) ? media.duration * 1000 : 0);
     const currentTimeMs = synchronizedCurrentTimeMs(media, barClock);
+    syncAppleShellCompleteArtwork(tuple?.trackID);
     const playerOpen = document.querySelector?.("ytmusic-player-page#player-page")
       ?.hasAttribute?.("player-page-open") === true;
     document.documentElement?.toggleAttribute?.(APPLE_SHELL_PLAYER_OPEN_ATTR, playerOpen);
