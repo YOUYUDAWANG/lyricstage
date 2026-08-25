@@ -52,6 +52,10 @@ describe("Apple-style YouTube Music shell contract", () => {
     expect(shellStyles).toContain('[data-lyricstage-player-bar-shell="true"]');
     expect(contentScript).toContain("lastAppleShellTrackTuple ?? acceptedTrackTuple ?? candidate ?? null");
     expect(shellStyles).toContain('aspect-ratio: var(--lyricstage-video-aspect, 16 / 9)');
+    expect(shellStyles).toContain('#song-image yt-img-shadow');
+    expect(shellStyles).toContain('padding: 0 !important');
+    expect(shellStyles).toContain('object-position: center !important');
+    expect(shellStyles).toContain('clip-path: none !important');
     expect(shellStyles).toContain('ytmusic-player-bar[slot="player-bar"]');
     expect(shellStyles).toContain('bottom: 0;');
     expect(shellStyles).toContain('left: var(--ls-shell-sidebar-width) !important');

@@ -556,19 +556,36 @@
 
 :root[data-lyricstage-shell="apple"] ytmusic-player-page#player-page #main-panel #player,
 :root[data-lyricstage-shell="apple"] ytmusic-player-page#player-page #main-panel #song-image {
+  position: relative !important;
   width: 100% !important;
   height: 100% !important;
   max-width: 100% !important;
   max-height: 100% !important;
   margin: auto !important;
+  padding: 0 !important;
+  box-sizing: border-box !important;
   background: transparent !important;
+}
+
+:root[data-lyricstage-shell="apple"] ytmusic-player-page#player-page #song-image yt-img-shadow,
+:root[data-lyricstage-shell="apple"] ytmusic-player-page#player-page #song-image #thumbnail {
+  position: absolute !important;
+  inset: 0 !important;
+  width: 100% !important;
+  height: 100% !important;
+  padding: 0 !important;
+  transform: none !important;
 }
 
 :root[data-lyricstage-shell="apple"] ytmusic-player-page#player-page #song-image img,
 :root[data-lyricstage-shell="apple"] ytmusic-player-page#player-page video {
+  display: block !important;
   width: 100% !important;
   height: 100% !important;
   object-fit: contain !important;
+  object-position: center !important;
+  transform: none !important;
+  clip-path: none !important;
 }
 
 :root[data-lyricstage-shell="apple"] ytmusic-player-page#player-page > .content::before {
