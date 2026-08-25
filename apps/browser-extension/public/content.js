@@ -855,6 +855,13 @@
     return /字幕|captions|subtitles|CC/i.test(label);
   }) ?? null;
 
+  const nativePlayerPageButton = (root) => root?.querySelector?.(
+    ".toggle-player-page-button button, .toggle-player-page-button",
+  ) ?? Array.from(root?.querySelectorAll?.("button") ?? []).find((button) => {
+    const label = `${clean(button.getAttribute?.("aria-label"))} ${clean(button.title)}`;
+    return /player page|プレーヤー\s*ページ|播放器页面|播放器頁面/i.test(label);
+  }) ?? null;
+
   const syncAppleShellPlayerBar = () => {
     const nativeBar = visibleNativePlayerBar();
     const observation = readTrackObservation(nativeBar);
@@ -870,6 +877,9 @@
       || barClock?.durationMs
       || (Number.isFinite(media.duration) ? media.duration * 1000 : 0);
     const currentTimeMs = synchronizedCurrentTimeMs(media, barClock);
+    const playerOpen = document.querySelector?.("ytmusic-player-page#player-page")
+      ?.hasAttribute?.("player-page-open") === true;
+    document.documentElement?.toggleAttribute?.(APPLE_SHELL_PLAYER_OPEN_ATTR, playerOpen);
     appleShellPlayerBar.hidden = false;
     const artwork = appleShellPlayerBar.querySelector?.("[data-role='artwork']");
     const title = appleShellPlayerBar.querySelector?.("[data-role='title']");
@@ -913,6 +923,16 @@
     setButton("captions", { disabled: !enabledControl(nativeCaptionButton(nativeBar ?? document)) });
     setButton("repeat", { disabled: !enabledControl(playbackModeButton(nativeBar ?? document, "repeat")), pressed: repeatMode(nativeBar ?? document) !== "off" });
     setButton("shuffle", { disabled: !enabledControl(playbackModeButton(nativeBar ?? document, "shuffle")), pressed: shuffleEnabled(nativeBar ?? document) });
+    const identity = appleShellPlayerBar.querySelector?.("[data-action='togglePlayer']");
+    const expansionIndicator = appleShellPlayerBar.querySelector?.("[data-role='expansion-indicator']");
+    if (identity) {
+      identity.disabled = !enabledControl(nativePlayerPageButton(nativeBar ?? document));
+      identity.setAttribute("aria-expanded", playerOpen ? "true" : "false");
+      identity.setAttribute("aria-label", playerOpen ? "收起完整播放器" : "展开完整播放器");
+      identity.title = playerOpen ? "收起完整播放器" : "展开完整播放器";
+    }
+    if (expansionIndicator) expansionIndicator.textContent = playerOpen ? "⌄" : "⌃";
+    appleShellPlayerBar.toggleAttribute?.("data-player-open", playerOpen);
   };
 
   const ensureAppleShellPlayerBar = () => {
@@ -938,8 +958,12 @@
     const time = document.createElement("span");
     time.setAttribute("data-role", "time");
     left.append(time);
-    const identity = document.createElement("div");
+    const identity = document.createElement("button");
+    identity.type = "button";
     identity.setAttribute("data-zone", "identity");
+    identity.setAttribute("data-action", "togglePlayer");
+    identity.setAttribute("aria-expanded", "false");
+    identity.setAttribute("aria-label", "展开完整播放器");
     const artwork = document.createElement("img");
     artwork.setAttribute("data-role", "artwork");
     artwork.alt = "";
@@ -949,7 +973,11 @@
     const artist = document.createElement("span");
     artist.setAttribute("data-role", "artist");
     copy.append(title, artist);
-    identity.append(artwork, copy);
+    const expansionIndicator = document.createElement("span");
+    expansionIndicator.setAttribute("data-role", "expansion-indicator");
+    expansionIndicator.setAttribute("aria-hidden", "true");
+    expansionIndicator.textContent = "⌃";
+    identity.append(artwork, copy, expansionIndicator);
     const right = document.createElement("div");
     right.setAttribute("data-zone", "actions");
     right.append(
@@ -958,7 +986,7 @@
       playerShellButton("repeat", "循环", "↻"),
       playerShellButton("shuffle", "随机播放", "⇄"),
     );
-    shell.append(progress, left, identity, right);
+    shell.append(progress, identity, left, right);
     const runNativeAction = (action) => {
       const nativeBar = visibleNativePlayerBar();
       const target = action === "previous" || action === "playPause" || action === "next"
@@ -967,16 +995,26 @@
           ? likeButtons(nativeBar ?? document).like
           : action === "captions"
             ? nativeCaptionButton(nativeBar ?? document)
-            : playbackModeButton(nativeBar ?? document, action);
+            : action === "togglePlayer"
+              ? nativePlayerPageButton(nativeBar ?? document)
+              : playbackModeButton(nativeBar ?? document, action);
       if (!enabledControl(target) || typeof target.click !== "function") return;
       target.click();
       queueSend();
       window.setTimeout?.(syncAppleShellPlayerBar, 0);
+      if (action === "togglePlayer") {
+        window.setTimeout?.(syncAppleShellPlayerBar, 250);
+        window.setTimeout?.(syncAppleShellPlayerBar, 700);
+      }
     };
     shell.addEventListener("click", (event) => {
       const button = event.target?.closest?.("button[data-action]");
-      if (!button) return;
-      runNativeAction(button.getAttribute("data-action"));
+      if (button) {
+        runNativeAction(button.getAttribute("data-action"));
+        return;
+      }
+      if (event.target?.closest?.("input, a, [role='slider']")) return;
+      runNativeAction("togglePlayer");
     });
     progress.addEventListener("pointerdown", () => progress.setAttribute("data-seeking", "true"));
     progress.addEventListener("input", () => {

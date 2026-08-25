@@ -35,6 +35,11 @@ describe("Apple-style YouTube Music shell contract", () => {
     expect(contentScript).toContain('["related", "相关推荐", relatedTab]');
     expect(contentScript).toContain('const APPLE_SHELL_MEDIA_PROXY_ATTR = "data-lyricstage-media-proxy"');
     expect(contentScript).toContain('const APPLE_SHELL_PLAYER_BAR_ATTR = "data-lyricstage-player-bar-shell"');
+    expect(contentScript).toContain('const nativePlayerPageButton = (root) => root?.querySelector?.(');
+    expect(contentScript).toContain('identity.setAttribute("data-action", "togglePlayer")');
+    expect(contentScript).toContain('runNativeAction("togglePlayer")');
+    expect(contentScript).toContain('identity.setAttribute("aria-expanded", playerOpen ? "true" : "false")');
+    expect(contentScript).toContain('shell.append(progress, identity, left, right)');
     expect(contentScript).toContain('button.addEventListener("click", () => invokeAppleShellMediaMode(index))');
     expect(contentScript).toContain('appleShellMediaToggle.removeAttribute?.("toggle-disabled")');
     expect(contentScript).not.toContain('actions.append(mediaToggle)');
@@ -48,6 +53,10 @@ describe("Apple-style YouTube Music shell contract", () => {
     expect(contentScript).toContain("lastAppleShellTrackTuple ?? acceptedTrackTuple ?? candidate ?? null");
     expect(shellStyles).toContain('aspect-ratio: var(--lyricstage-video-aspect, 16 / 9)');
     expect(shellStyles).toContain('ytmusic-player-bar[slot="player-bar"]');
+    expect(shellStyles).toContain('bottom: 0;');
+    expect(shellStyles).toContain('left: var(--ls-shell-sidebar-width) !important');
+    expect(shellStyles).toContain('[data-role="expansion-indicator"]');
+    expect(shellStyles).toContain('grid-template-areas: "identity transport actions"');
     expect(shellStyles).toContain("#side-panel[data-lyricstage-player-popover]");
     expect(shellStyles).toContain('grid-template-columns: minmax(0, 1.15fr) minmax(360px, 0.85fr)');
     expect(shellStyles).toContain('inset: 0');
