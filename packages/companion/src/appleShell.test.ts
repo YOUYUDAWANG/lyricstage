@@ -78,5 +78,8 @@ describe("Apple-style YouTube Music shell contract", () => {
     expect(contentScript).toContain('data-lyricstage-shell-theme", "light"');
     expect(columnStyles).toContain(':host([data-lyricstage-shell-theme="light"]) .column-stage');
     expect(youLyStyles).toContain(':host([data-lyricstage-shell-theme="light"]) .youly-column-shell');
+    expect(youLyStyles).toContain('.stage-canvas-host[data-shell-layout="apple-player"] .youly-column-shell');
+    expect(youLyStyles).toContain('--lyplus-text-primary: rgba(255, 252, 248, 0.98)');
+    expect(youLyStyles).toContain('--lyplus-text-secondary: rgba(255, 255, 255, 0.40)');
   });
 });

@@ -20,6 +20,14 @@
   color: #1d1d1f;
 }
 
+/* Fullscreen is a dark artwork material even when the embedded player shell is light. */
+:host([data-lyricstage-shell-theme="light"])
+  .stage-canvas-host[data-shell-layout="apple-player"] .youly-column-shell {
+  --lyplus-text-primary: rgba(255, 252, 248, 0.98);
+  --lyplus-text-secondary: rgba(255, 255, 255, 0.40);
+  color: rgba(255, 252, 248, 0.98);
+}
+
 .youly-column-viewport {
   width: 100%;
   height: 100%;
@@ -218,6 +226,10 @@
   .youly-line:hover { background: rgba(255, 255, 255, 0.13); }
   :host([data-lyricstage-shell-theme="light"]) .youly-line:hover {
     background: rgba(60, 60, 67, 0.07);
+  }
+  :host([data-lyricstage-shell-theme="light"])
+    .stage-canvas-host[data-shell-layout="apple-player"] .youly-line:hover {
+    background: rgba(255, 255, 255, 0.11);
   }
 }
 
